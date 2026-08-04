@@ -1,0 +1,45 @@
+# ==================== 开发环境配置 ====================
+spring:
+  # 数据源配置（开发环境）
+  datasource:
+    url: jdbc:postgresql://localhost:5432/mirror_dev?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: postgres
+    password: postgres
+
+    # Druid 监控页面（开发环境开启）
+    druid:
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        login-username: admin
+        login-password: admin
+
+  # Redis 配置（开发环境）
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      timeout: 10000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1
+
+# JWT 配置（开发环境 - 请修改为你自己的密钥）
+jwt:
+  secret: dev-jwt-secret-key-for-development-only-change-in-production
+  expiration: 86400000  # 24小时
+
+# 日志配置（开发环境 - 输出详细日志）
+logging:
+  level:
+    root: INFO
+    org.xianshen.mumirrorb: DEBUG
+    org.springframework.security: DEBUG
+    com.baomidou.mybatisplus: DEBUG
+  pattern:
+    dateformat: yyyy-MM-dd HH:mm:ss.SSS

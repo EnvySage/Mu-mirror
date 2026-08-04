@@ -1,0 +1,84 @@
+# ==================== 公共配置 ====================
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: Mu-mirror-B
+
+  # 激活的配置文件（默认开发环境）
+  profiles:
+    active: dev
+
+  # 数据源配置（公共部分）
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driver-class-name: org.postgresql.Driver
+
+    # Druid 连接池配置（公共）
+    druid:
+      initial-size: 5
+      max-active: 20
+      min-idle: 5
+      max-wait: 60000
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 20
+      # 监控统计
+      filters: stat,wall
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: "*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*"
+
+  # Security 配置（禁用自动配置，使用自定义 JWT拦截器）
+  security:
+    basic:
+      enabled: false
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: assign_uuid
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  type-aliases-package: org.xianshen.mumirrorb.pojo.DO
+  mapper-locations: classpath:mapper/**/*.xml
+
+# PageHelper 分页配置
+pagehelper:
+  helper-dialect: postgresql
+  reasonable: true
+  support-methods-arguments: true
+  params: count=countSql
+
+# JWT 配置（公共部分）
+jwt:
+  header: Authorization
+  prefix: "Bearer "
+
+# SpringDoc 配置
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /doc.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+# Knife4j 配置
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
