@@ -15,7 +15,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.xianshen.mumirrorb.common.utils.JwtUtils;
 
 import java.io.IOException;
-import java.util.UUID;
 
 /**
  * JWT 认证过滤器
@@ -38,7 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 验证 Token
         if (StringUtils.hasText(token) && jwtUtils.validateToken(token)) {
             // 从 Token 中获取用户信息
-            UUID userId = jwtUtils.getUserIdFromToken(token);
+            String userId = jwtUtils.getUserIdFromToken(token);
             String username = jwtUtils.getUsernameFromToken(token);
 
             // 创建认证对象（不需要密码和权限）

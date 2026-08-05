@@ -11,13 +11,11 @@ import org.xianshen.mumirrorb.pojo.VO.LoginVO;
 import org.xianshen.mumirrorb.pojo.VO.UserVO;
 import org.xianshen.mumirrorb.service.AuthService;
 
-import java.util.UUID;
-
 /**
  * 认证控制器
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -54,7 +52,7 @@ public class AuthController {
      */
     @GetMapping("/me")
     public R<UserVO> me(HttpServletRequest request) {
-        UUID userId = (UUID) request.getAttribute("userId");
+        String userId = (String) request.getAttribute("userId");
         UserVO user = authService.getCurrentUser(userId);
         return R.ok(user);
     }

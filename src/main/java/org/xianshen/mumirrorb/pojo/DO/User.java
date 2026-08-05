@@ -8,8 +8,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
+import java.time.OffsetDateTime;
 
 /**
  * 用户实体类（对应设计文档 users 表）
@@ -24,8 +23,8 @@ public class User {
     /**
      * 用户ID（UUID）
      */
-    @TableId(type = IdType.ASSIGN_UUID)
-    private UUID id;
+    @TableId(type = IdType.AUTO)
+    private String id;
 
     /**
      * 用户名
@@ -40,5 +39,5 @@ public class User {
     /**
      * 创建时间
      */
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 }

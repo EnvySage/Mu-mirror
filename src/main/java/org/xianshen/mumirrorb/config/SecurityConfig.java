@@ -54,8 +54,8 @@ public class SecurityConfig {
 
             // 请求授权规则
             .authorizeHttpRequests(auth -> auth
-                // 公开接口
-                .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/status").permitAll()
+                // 公开接口（不含 context-path）
+                .requestMatchers("/auth/login", "/auth/register", "/auth/status").permitAll()
                 // Druid 监控页面
                 .requestMatchers("/druid/**").permitAll()
                 // Swagger/Knife4j 文档

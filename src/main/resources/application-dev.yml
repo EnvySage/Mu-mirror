@@ -2,17 +2,9 @@
 spring:
   # 数据源配置（开发环境）
   datasource:
-    url: jdbc:postgresql://localhost:5432/mirror_dev?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    url: jdbc:postgresql://localhost:5432/mumirror?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
     username: postgres
-    password: postgres
-
-    # Druid 监控页面（开发环境开启）
-    druid:
-      stat-view-servlet:
-        enabled: true
-        url-pattern: /druid/*
-        login-username: admin
-        login-password: admin
+    password: 123456
 
   # Redis 配置（开发环境）
   data:
@@ -43,3 +35,6 @@ logging:
     com.baomidou.mybatisplus: DEBUG
   pattern:
     dateformat: yyyy-MM-dd HH:mm:ss.SSS
+springdoc:
+  cache:
+    disabled: on

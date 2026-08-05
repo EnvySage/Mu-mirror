@@ -5,8 +5,6 @@ import org.xianshen.mumirrorb.pojo.DTO.UserRegisterDTO;
 import org.xianshen.mumirrorb.pojo.VO.LoginVO;
 import org.xianshen.mumirrorb.pojo.VO.UserVO;
 
-import java.util.UUID;
-
 /**
  * 认证服务接口
  */
@@ -25,5 +23,5 @@ public interface AuthService {
     /**
      * 获取当前用户信息
      */
-    UserVO getCurrentUser(UUID userId);
+    UserVO getCurrentUser(String userId);
 }

@@ -10,7 +10,6 @@ import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * JWT 工具类
@@ -27,9 +26,9 @@ public class JwtUtils {
     /**
      * 生成 JWT Token
      */
-    public String generateToken(UUID userId, String username) {
+    public String generateToken(String userId, String username) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", userId.toString());
+        claims.put("userId", userId);
         claims.put("username", username);
 
         return Jwts.builder()
@@ -55,9 +54,9 @@ public class JwtUtils {
     /**
      * 从 Token 中获取用户ID
      */
-    public UUID getUserIdFromToken(String token) {
+    public String getUserIdFromToken(String token) {
         Claims claims = parseToken(token);
-        return UUID.fromString(claims.get("userId", String.class));
+        return claims.get("userId", String.class);
     }
 
     /**

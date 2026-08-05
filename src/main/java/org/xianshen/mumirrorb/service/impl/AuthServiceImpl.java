@@ -3,6 +3,10 @@ package org.xianshen.mumirrorb.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
@@ -16,8 +20,7 @@ import org.xianshen.mumirrorb.pojo.VO.LoginVO;
 import org.xianshen.mumirrorb.pojo.VO.UserVO;
 import org.xianshen.mumirrorb.service.AuthService;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
+import java.time.OffsetDateTime;
 
 /**
  * 认证服务实现
@@ -30,6 +33,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final JwtUtils jwtUtils;
     private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
 
     @Override
     public UserVO register(UserRegisterDTO dto) {
@@ -40,12 +44,11 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "用户名已存在");
         }
 
-        // 创建用户（使用 BCrypt 加密密码）
+        // 创建用户（使用 BCrypt 加密密码，ID 由数据库自动生成）
         User user = User.builder()
-                .id(UUID.randomUUID())
                 .username(dto.getUsername())
                 .passwordHash(passwordEncoder.encode(dto.getPassword()))
-                .createdAt(LocalDateTime.now())
+                .createdAt(OffsetDateTime.now())
                 .build();
 
         userMapper.insert(user);
@@ -60,19 +63,19 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginVO login(UserLoginDTO dto) {
-        // 查询用户
+        // 使用 Spring Security 认证（会自动调用 UserDetailsServiceImpl.loadUserByUsername()）
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(dto.getUsername(), dto.getPassword())
+        );
+
+        // 认证成功，获取用户信息
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        String username = userDetails.getUsername();
+
+        // 从数据库获取完整用户信息（包括 ID）
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(User::getUsername, dto.getUsername());
+        wrapper.eq(User::getUsername, username);
         User user = userMapper.selectOne(wrapper);
-
-        if (user == null) {
-            throw new BusinessException(ResultCode.PASSWORD_ERROR.getCode(), "用户名或密码错误");
-        }
-
-        // 验证密码（使用 BCrypt）
-        if (!passwordEncoder.matches(dto.getPassword(), user.getPasswordHash())) {
-            throw new BusinessException(ResultCode.PASSWORD_ERROR.getCode(), "用户名或密码错误");
-        }
 
         // 生成 Token
         String token = jwtUtils.generateToken(user.getId(), user.getUsername());
@@ -93,7 +96,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public UserVO getCurrentUser(UUID userId) {
+    public UserVO getCurrentUser(String userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "用户不存在");

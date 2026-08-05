@@ -47,16 +47,6 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 处理资源不存在异常
-     */
-    @ExceptionHandler(ResourceNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public R<Void> handleResourceNotFoundException(ResourceNotFoundException e, HttpServletRequest request) {
-        log.error("资源不存在 - URL: {}, 错误: {}", request.getRequestURI(), e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
-    }
-
-    /**
      * 处理认证异常（自定义）
      */
     @ExceptionHandler(org.xianshen.mumirrorb.common.exception.AuthenticationException.class)
@@ -65,35 +55,6 @@ public class GlobalExceptionHandler {
             org.xianshen.mumirrorb.common.exception.AuthenticationException e,
             HttpServletRequest request) {
         log.error("认证失败 - URL: {}, 错误: {}", request.getRequestURI(), e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
-    }
-
-    /**
-     * 处理 AI 服务异常
-     */
-    @ExceptionHandler(AiServiceException.class)
-    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
-    public R<Void> handleAiServiceException(AiServiceException e, HttpServletRequest request) {
-        log.error("AI 服务异常 - URL: {}, 错误: {}", request.getRequestURI(), e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
-    }
-
-    /**
-     * 处理重复提交异常
-     */
-    @ExceptionHandler(DuplicateSubmitException.class)
-    @ResponseStatus(HttpStatus.CONFLICT)
-    public R<Void> handleDuplicateSubmitException(DuplicateSubmitException e, HttpServletRequest request) {
-        log.warn("重复提交 - URL: {}, 错误: {}", request.getRequestURI(), e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
-    }
-
-    /**
-     * 处理内容异常
-     */
-    @ExceptionHandler(ContentException.class)
-    public R<Void> handleContentException(ContentException e, HttpServletRequest request) {
-        log.error("内容异常 - URL: {}, 错误: {}", request.getRequestURI(), e.getMessage());
         return R.fail(e.getCode(), e.getMessage());
     }
 
