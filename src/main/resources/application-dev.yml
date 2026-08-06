@@ -38,3 +38,10 @@ logging:
 springdoc:
   cache:
     disabled: on
+
+# gRPC 配置（AI 服务地址）
+grpc:
+  client:
+    ai-service:
+      address: localhost:50051       # Python AI 服务地址
+      deadline-seconds: 30           # 默认超时（秒）

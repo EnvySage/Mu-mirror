@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package mirror;
+
+option java_package = "org.xianshen.mumirrorb.grpc.gen";
+option java_outer_classname = "EmbeddingProto";
+
+// Embedding 服务
+service EmbeddingService {
+  // 文本转向量
+  rpc Embed (EmbedRequest) returns (EmbedResponse);
+
+  // 查询当前 embedding 模型信息
+  rpc GetModelInfo (ModelInfoRequest) returns (ModelInfoResponse);
+}
+
+// 向量化请求（只传文本）
+message EmbedRequest {
+  string text = 1;
+}
+
+// 向量化响应
+message EmbedResponse {
+  repeated float vector = 1;    // 向量
+  int32 dimension = 2;          // 维度
+  string model_name = 3;        // 使用的模型名
+}
+
+// 模型信息请求（无参数）
+message ModelInfoRequest {}
+
+// 模型信息响应
+message ModelInfoResponse {
+  string model_name = 1;        // 如 "bge-m3"
+  string source = 2;            // "local" 或 "api"
+  int32 dimension = 3;          // 向量维度
+  bool available = 4;           // 当前是否可用
+}

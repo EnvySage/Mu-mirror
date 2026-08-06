@@ -58,8 +58,15 @@ public class SecurityConfig {
                 .requestMatchers("/auth/login", "/auth/register", "/auth/status").permitAll()
                 // Druid 监控页面
                 .requestMatchers("/druid/**").permitAll()
-                // Swagger/Knife4j 文档
-                .requestMatchers("/doc.html", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+                // Swagger/Knife4j 文档（SpringDoc 需要这些路径）
+                .requestMatchers(
+                        "/doc.html",
+                        "/v3/api-docs",
+                        "/v3/api-docs/**",
+                        "/swagger-ui/**",
+                        "/swagger-resources/**",
+                        "/webjars/**"
+                ).permitAll()
                 // 其他接口需要认证
                 .anyRequest().authenticated()
             )

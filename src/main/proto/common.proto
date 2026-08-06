@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package mirror;
+
+option java_package = "org.xianshen.mumirrorb.grpc.gen";
+option java_outer_classname = "CommonProto";
+
+// 情绪标签（13 种，固定枚举）
+enum MoodType {
+  MOOD_UNKNOWN = 0;
+  HAPPY = 1;
+  EXCITED = 2;
+  SATISFIED = 3;
+  GRATEFUL = 4;
+  EXPECTING = 5;
+  CALM = 6;
+  BORED = 7;
+  CONFUSED = 8;
+  ANXIOUS = 9;
+  SAD = 10;
+  ANGRY = 11;
+  EXHAUSTED = 12;
+  STRESSED = 13;
+}
+
+// 内容类型（8 种，固定枚举）
+enum ContentType {
+  CONTENT_UNKNOWN = 0;
+  TODO = 1;
+  THOUGHT = 2;
+  LEARNING = 3;
+  PLAN = 4;
+  NOTE = 5;
+  WORK = 6;
+  SOCIAL = 7;
+  HEALTH = 8;
+}
+
+// 任务状态（仅待办/计划类有效）
+enum TaskStatus {
+  STATUS_UNKNOWN = 0;
+  NOT_STARTED = 1;
+  IN_PROGRESS = 2;
+  COMPLETED = 3;
+}
