@@ -9,14 +9,14 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.apache.ibatis.type.JdbcType;
 import org.xianshen.mumirrorb.common.enums.ContentType;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.common.handler.JsonbTypeHandler;
-import org.xianshen.mumirrorb.common.handler.StringToUuidTypeHandler;
+import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 记录实体类（对应 records 表）
@@ -63,11 +63,11 @@ public class Record {
     private Long id;
 
     /**
-     * 关联用户ID（数据库是 UUID，Java 用 String，通过 TypeHandler 自动转换）
+     * 关联用户ID（数据库和 Java 都使用 UUID 类型）
      */
-    @TableField(typeHandler = StringToUuidTypeHandler.class, jdbcType = JdbcType.OTHER)
+    @TableField(typeHandler = UuidTypeHandler.class)
     @Schema(description = "关联用户ID", example = "550e8400-e29b-41d4-a716-446655440000")
-    private String userId;
+    private UUID userId;
 
     /**
      * 用户原始输入内容

@@ -23,6 +23,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 记录服务实现
@@ -38,7 +39,7 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional
-    public RecordVO create(RecordDTO dto, String userId) {
+    public RecordVO create(RecordDTO dto, UUID userId) {
         // 1. 校验内容非空
         if (dto.getContent() == null || dto.getContent().isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
@@ -65,7 +66,7 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<RecordVO> list(RecordQueryDTO queryDTO, String userId) {
+    public List<RecordVO> list(RecordQueryDTO queryDTO, UUID userId) {
         // 1. 处理日期范围（默认查询今天的记录）
         LocalDate startDate = queryDTO.getStartDate();
         LocalDate endDate = queryDTO.getEndDate();
@@ -106,7 +107,7 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional(readOnly = true)
-    public RecordVO getById(Long recordId, String userId) {
+    public RecordVO getById(Long recordId, UUID userId) {
         // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
@@ -124,7 +125,7 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional
-    public RecordVO update(Long recordId, RecordDTO dto, String userId) {
+    public RecordVO update(Long recordId, RecordDTO dto, UUID userId) {
         // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
@@ -177,7 +178,7 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional
-    public void softDelete(Long recordId, String userId) {
+    public void softDelete(Long recordId, UUID userId) {
         // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
@@ -203,7 +204,7 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional
-    public RecordVO confirmReview(Long recordId, String userId) {
+    public RecordVO confirmReview(Long recordId, UUID userId) {
         // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()

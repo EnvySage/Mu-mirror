@@ -5,6 +5,7 @@ import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 记录服务接口
@@ -44,7 +45,7 @@ public interface RecordService {
      * @param userId 当前用户ID
      * @return 创建成功的记录（状态为 PROCESSING）
      */
-    RecordVO create(RecordDTO dto, String userId);
+    RecordVO create(RecordDTO dto, UUID userId);
 
     /**
      * 查询记录列表（按日期范围筛选）
@@ -63,7 +64,7 @@ public interface RecordService {
      * @param userId   当前用户ID
      * @return 记录列表
      */
-    List<RecordVO> list(RecordQueryDTO queryDTO, String userId);
+    List<RecordVO> list(RecordQueryDTO queryDTO, UUID userId);
 
     /**
      * 根据ID获取记录详情
@@ -74,7 +75,7 @@ public interface RecordService {
      * @param userId   当前用户ID（验证所有权）
      * @return 记录视图
      */
-    RecordVO getById(Long recordId, String userId);
+    RecordVO getById(Long recordId, UUID userId);
 
     /**
      * 更新记录（仅在人工审查状态下允许）
@@ -92,7 +93,7 @@ public interface RecordService {
      * @param userId   当前用户ID（验证所有权）
      * @return 更新后的记录视图
      */
-    RecordVO update(Long recordId, RecordDTO dto, String userId);
+    RecordVO update(Long recordId, RecordDTO dto, UUID userId);
 
     /**
      * 确认审查完成（将状态从 REVIEWING 改为 DONE）
@@ -104,7 +105,7 @@ public interface RecordService {
      * @param userId   当前用户ID（验证所有权）
      * @return 更新后的记录视图
      */
-    RecordVO confirmReview(Long recordId, String userId);
+    RecordVO confirmReview(Long recordId, UUID userId);
 
     /**
      * 软删除记录（设置 deletedAt 时间戳）
@@ -119,5 +120,5 @@ public interface RecordService {
      * @param recordId 记录ID
      * @param userId   当前用户ID（验证所有权）
      */
-    void softDelete(Long recordId, String userId);
+    void softDelete(Long recordId, UUID userId);
 }

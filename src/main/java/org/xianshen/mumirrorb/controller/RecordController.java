@@ -18,6 +18,7 @@ import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.service.RecordService;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 记录管理控制器
@@ -39,6 +40,15 @@ import java.util.List;
 public class RecordController {
 
     private final RecordService recordService;
+
+    /**
+     * 获取当前登录用户的UUID
+     */
+    private UUID getCurrentUserId() {
+        String userIdStr = (String) SecurityContextHolder.getContext()
+                .getAuthentication().getPrincipal();
+        return UUID.fromString(userIdStr);
+    }
 
     /**
      * 创建记录
@@ -74,8 +84,7 @@ public class RecordController {
     })
     @PostMapping
     public R<RecordVO> create(@Valid @RequestBody RecordDTO dto) {
-        String userId = (String) SecurityContextHolder.getContext()
-                .getAuthentication().getPrincipal();
+        UUID userId = getCurrentUserId();
         RecordVO record = recordService.create(dto, userId);
         return R.ok("记录已提交", record);
     }
@@ -114,8 +123,7 @@ public class RecordController {
     })
     @GetMapping
     public R<List<RecordVO>> list(@Valid RecordQueryDTO queryDTO) {
-        String userId = (String) SecurityContextHolder.getContext()
-                .getAuthentication().getPrincipal();
+        UUID userId = getCurrentUserId();
         List<RecordVO> records = recordService.list(queryDTO, userId);
         return R.ok("查询成功", records);
     }
@@ -154,8 +162,7 @@ public class RecordController {
     public R<RecordVO> detail(
             @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id) {
-        String userId = (String) SecurityContextHolder.getContext()
-                .getAuthentication().getPrincipal();
+        UUID userId = getCurrentUserId();
         RecordVO record = recordService.getById(id, userId);
         return R.ok("查询成功", record);
     }
@@ -208,8 +215,7 @@ public class RecordController {
             @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id,
             @Valid @RequestBody RecordDTO dto) {
-        String userId = (String) SecurityContextHolder.getContext()
-                .getAuthentication().getPrincipal();
+        UUID userId = getCurrentUserId();
         RecordVO record = recordService.update(id, dto, userId);
         return R.ok("记录已更新", record);
     }
@@ -257,8 +263,7 @@ public class RecordController {
     public R<RecordVO> confirmReview(
             @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id) {
-        String userId = (String) SecurityContextHolder.getContext()
-                .getAuthentication().getPrincipal();
+        UUID userId = getCurrentUserId();
         RecordVO record = recordService.confirmReview(id, userId);
         return R.ok("审查已完成", record);
     }
@@ -305,8 +310,7 @@ public class RecordController {
     public R<String> softDelete(
             @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id) {
-        String userId = (String) SecurityContextHolder.getContext()
-                .getAuthentication().getPrincipal();
+        UUID userId = getCurrentUserId();
         recordService.softDelete(id, userId);
         return R.ok("记录已删除");
     }
