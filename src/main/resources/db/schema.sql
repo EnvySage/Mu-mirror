@@ -32,6 +32,21 @@ CREATE INDEX IF NOT EXISTS idx_records_content_type ON records(content_type);
 CREATE INDEX IF NOT EXISTS idx_records_status ON records(status);
 CREATE INDEX IF NOT EXISTS idx_records_created_at ON records(created_at DESC);
 
+
+
+
+-- 给 records 表添加 deleted_at 字段
+ALTER TABLE records
+    ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL;
+
+-- 添加索引（提高软删除查询性能）
+CREATE INDEX idx_records_deleted_at ON records(deleted_at);
+
+-- 可选：添加复合索引（用户 + 未删除 + 创建时间）
+CREATE INDEX idx_records_user_not_deleted ON records(user_id, created_at)
+    WHERE deleted_at IS NULL;
+
+
 -- mood JSONB 的 GIN 索引（支持 @> 操作符查询，如查找包含 "anxious" 的记录）
 CREATE INDEX IF NOT EXISTS idx_records_mood ON records USING GIN (mood);
 

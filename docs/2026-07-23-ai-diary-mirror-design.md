@@ -1,7 +1,7 @@
 # AI 日记"镜子"系统 — 设计文档
 
-> 版本：v1.1（审查修正）
-> 日期：2026-07-23（初版） / 2026-08-04（架构更新）
+> 版本：v1.2（审核机制重构）
+> 日期：2026-07-23（初版） / 2026-08-04（架构更新） / 2026-08-07（审核机制重构）
 > 状态：设计中，持续完善
 
 **关联文档：**
@@ -65,11 +65,15 @@
 2. 点击提交
 3. Java 后台异步处理：
    - **gRPC → Python AI 服务**：提取标题、生成摘要、打标签（类型/情绪/状态/关键词）
-   - **Java**：保存 records 表
+   - **Java**：保存 records 表（status = pending_review）
+4. 前端展示审核界面，等待用户操作
+5. 用户审核通过后：
    - **gRPC → Python AI 服务**：文本转向量（Embedding）
    - **Java**：保存 chunks 表（pgvector 向量存储）
-4. 处理完成后展示给用户审核（除非用户开启了自动审核）
+   - status = done
 
+> **关键设计**：Embedding 在用户审核通过之后才执行，确保 RAG 中存储的向量和元数据都是用户确认的最终版本。详见本章 2.2.5 审核机制。
+>
 > **分工原则**：Java 管数据，Python 管推理。详见 [AI 服务层设计文档](2026-08-04-ai-service-design.md) 第一章。
 
 **AI 处理示例：**
@@ -86,7 +90,7 @@ AI 处理结果：
 │   ├── 情绪：[satisfied, calm]
 │   ├── 状态：in_progress
 │   └── 关键词：Spring Security, 认证, 授权
-└── 整条记录作为一个 chunk，直接向量化
+└── 审核通过后，整条记录作为一个 chunk 向量化存储
 ```
 
 #### 2.2.2 镜子（用户画像）
@@ -287,6 +291,74 @@ public ResponseEntity<Void> deleteSession(@PathVariable UUID sessionId);
 - 要不要先写下今天完成了什么，再想想哪里卡住了？
 ```
 
+#### 2.2.6 审核机制
+
+**核心原则：** 审核通过后才执行 Embedding 并写入 RAG，确保向量数据库中的数据始终是用户确认的最终版本。
+
+**审核界面：**
+```
+┌─────────────────────────────────────┐
+│ 📝 待审核                           │
+│                                     │
+│ 原始内容：                          │
+│ "今天下午学了 Spring Security..."   │
+│                                     │
+│ AI 生成的结果：                      │
+│ 标题：[学习 Spring Security]  ✏️    │
+│ 摘要：[学习了认证流程...]    ✏️     │
+│                                     │
+│ 标签：                              │
+│ 类型：[learning ▼]  情绪：[calm ✏️] │
+│ 状态：[in_progress ▼]               │
+│ 关键词：[安全, 认证]         ✏️     │
+│                                     │
+│ [✅ 通过]              [❌ 拒绝]     │
+└─────────────────────────────────────┘
+```
+
+**两种操作：**
+
+| 操作 | 行为 |
+|------|------|
+| **通过** | 确认数据（可先修改）→ Embedding → 存 chunks → status=done |
+| **拒绝** | 软删除记录 → 不 Embedding、不入 chunks、不进画像统计 |
+
+**审核阶段也是修改阶段：**
+- 用户在点"通过"之前，可以修改标题、摘要、标签类型、情绪、状态、关键词
+- 修改后再点"通过"，存入的是用户确认后的最终版本
+- 一旦确认通过（status=done），记录锁定，不可再修改
+
+**状态流转：**
+```
+用户提交
+    ↓
+status = processing（AI 处理中）
+    ↓
+status = pending_review（等待审核）
+    ↓
+┌──────────────┬──────────────┐
+│   点"通过"    │   点"拒绝"    │
+│              │              │
+│ Embedding    │ 软删除       │
+│ 存 chunks    │ 不存 chunks  │
+│ status=done  │ 不进任何下游  │
+└──────────────┴──────────────┘
+```
+
+**全局开关（设置页面）：**
+```
+⚙️ AI 处理设置
+
+☑ 自动审核（跳过人工确认）
+  开启后 AI 处理完成后直接通过，无需手动确认
+```
+
+**设计要点：**
+- 审核、修改、入 RAG 三件事合为一步，逻辑干净
+- 拒绝 = 软删除，不污染任何下游数据（RAG、画像、总结）
+- 确认后锁定，避免改来改去导致的级联同步问题
+- chunks 里存储的一定是用户认可的数据，RAG 检索质量有保障
+
 ---
 
 ## 三、数据管道设计
@@ -356,18 +428,21 @@ Java：gRPC 调用 Python AI 服务
     ├── Split（如需要）：判断是否拆分 + 返回拆分结果
     └── 返回处理结果
     ↓
-Java：保存 records 表
+Java：保存 records 表（status = pending_review）
+    ↓
+前端展示审核界面，等待用户操作
+    ├── 通过（可先修改标签）→ 继续
+    └── 拒绝 → 软删除，流程结束
     ↓
 Java：gRPC 调用 Python AI 服务
     └── Embed：文本转向量
     ↓
 Java：保存 chunks 表（pgvector）
     ↓
-用户审核（半自动模式下）
-    ├── 确认 → 完成
-    ├── 修改 → 修改后重新保存
-    └── 全局开关：自动审核模式
+status = done，记录锁定
 ```
+
+**自动审核模式：** 跳过人工审核步骤，AI 处理完成后直接 Embedding → 存 chunks → done。
 
 **AI 处理示例：**
 ```
@@ -382,7 +457,7 @@ AI 处理结果：
 │   ├── 情绪：[satisfied, calm]
 │   ├── 状态：in_progress
 │   └── 关键词：Spring Security, 认证, 授权
-└── 整条记录作为一个 chunk，直接向量化
+└── 审核通过后，整条记录作为一个 chunk 向量化存储
 ```
 
 #### 3.0.3 AI 自动生成内容
@@ -457,6 +532,16 @@ AI 处理结果：
 │ 特殊处理：                               │
 │ - 纯情绪/无意义内容 → 跳过分类            │
 │ - 多事件内容 → 拆分后每条单独分类          │
+│ 保存 records 表，status=pending_review    │
+└─────────────────┬───────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│ 第 3.5 层：审核层（Review）               │
+│ 【用户交互】                              │
+│ - 展示 AI 生成结果，用户可修改标签         │
+│ - 通过 → 继续进入向量化层                 │
+│ - 拒绝 → 软删除，流程结束                 │
+│ - 自动审核模式 → 跳过此层，直接通过        │
 └─────────────────┬───────────────────────┘
                   ↓
 ┌─────────────────────────────────────────┐
@@ -472,8 +557,9 @@ AI 处理结果：
 ┌─────────────────────────────────────────┐
 │ 第 5 层：存储层（Store）                  │
 │ 【Java 端完成】                          │
-│ - 原始文本 + 标签 → records 表           │
 │ - 向量 + 元数据 → chunks 表（pgvector）  │
+│ - 更新 records 表 status=done            │
+│ - 记录锁定，不可再修改                    │
 │ - 一条记录 = 一个 chunk                  │
 └─────────────────────────────────────────┘
 ```
@@ -531,42 +617,56 @@ AI 处理结果：
 
 **注意：** 句子边界检测不在清洗层（没标点的文本检测不准），由切片层的 AI 处理。
 
-### 3.3 标签审核机制
+### 3.3 审核机制
 
-**三种审核模式：**
+**核心原则：** 审核通过后才执行 Embedding 并写入 RAG，确保向量数据库中的数据始终是用户确认的最终版本。
+
+**两种审核模式：**
 
 | 模式 | 适合谁 | 行为 |
 |------|--------|------|
-| **全手动** | 强迫症用户 | 每条都审核，每个标签都确认 |
-| **半自动**（默认） | 大多数人 | AI 处理完展示结果，用户确认或修改 |
-| **全自动** | 懒人 | AI 直接保存，不问 |
+| **手动审核**（默认） | 大多数人 | AI 处理完展示结果，用户确认或修改后才入库 |
+| **自动审核** | 懒人 | AI 处理完直接通过，无需确认 |
 
 **审核界面：**
 ```
 ┌─────────────────────────────────────┐
-│ 📝 今天学了 Spring Security        │
+│ 📝 待审核                           │
+│                                     │
+│ 原始内容：                          │
+│ "今天下午学了 Spring Security..."   │
 │                                     │
 │ AI 生成的结果：                      │
 │ 标题：[学习 Spring Security]  ✏️    │
-│ 摘要：[学习了认证流程，感觉有难度]   │
+│ 摘要：[学习了认证流程...]    ✏️     │
 │                                     │
 │ 标签：                              │
-│ 类型：[learning ✓]  情绪：[calm ✓]  │
-│ 状态：[in_progress ✓] 关键词：[安全,认证]│
+│ 类型：[learning ▼]  情绪：[calm ✏️] │
+│ 状态：[in_progress ▼]               │
+│ 关键词：[安全, 认证]         ✏️     │
 │                                     │
-│ [确认并保存]  [修改后保存]           │
+│ [✅ 通过]              [❌ 拒绝]     │
 └─────────────────────────────────────┘
 ```
 
+**两种操作：**
+
+| 操作 | 行为 |
+|------|------|
+| **通过** | 确认数据（可先修改）→ Embedding → 存 chunks → status=done，记录锁定 |
+| **拒绝** | 软删除记录 → 不 Embedding、不入 chunks、不进画像/总结/RAG |
+
+**审核阶段也是修改阶段：**
+- 用户在点"通过"之前，可以修改标题、摘要、标签类型、情绪、状态、关键词
+- 修改后再点"通过"，存入的是用户确认后的最终版本
+- 一旦确认通过（status=done），记录锁定，不可再修改
+
 **全局开关（设置页面）：**
 ```
-⚙️ AI 处理设置
+⚙️ AI 处核设置
 
 ☑ 自动审核（跳过人工确认）
-  开启后 AI 直接保存，无需确认
-
-☑ 自动标签（AI 自动打标签）
-  关闭后需要手动选择标签
+  开启后 AI 处理完成后直接通过，无需手动确认
 ```
 
 ---
@@ -707,8 +807,9 @@ CREATE TABLE records (
     summary TEXT,                    -- AI 生成的摘要
     content_type VARCHAR(20),        -- 类型：todo/thought/learning/plan/note/work/social/health
     mood JSONB,                      -- 情绪：支持多选 ["happy", "exhausted"]
-    status VARCHAR(20),              -- 状态：not_started/in_progress/completed
-    user_reviewed BOOLEAN DEFAULT FALSE, -- 是否经过用户审核
+    task_status VARCHAR(20),         -- 任务状态：not_started/in_progress/completed（仅待办/计划类）
+    record_status VARCHAR(20) DEFAULT 'processing', -- 记录状态：processing/pending_review/done/failed
+    deleted_at TIMESTAMP,            -- 软删除时间，NULL 表示未删除
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -787,7 +888,7 @@ CREATE TABLE user_settings (
     embedding_model VARCHAR(100),    -- Embedding 模型名
     -- 其他
     db_url TEXT,                     -- 数据库地址
-    review_mode VARCHAR(20) DEFAULT 'semi_auto', -- 审核模式
+    review_mode VARCHAR(20) DEFAULT 'manual', -- 审核模式：manual（手动审核）/ auto（自动审核）
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -800,13 +901,18 @@ CREATE TABLE user_settings (
 ### 6.1 记录相关
 
 ```
-POST   /api/records           # 创建记录
-GET    /api/records           # 获取记录列表
-GET    /api/records/{id}      # 获取单条记录
-PUT    /api/records/{id}      # 更新记录
-DELETE /api/records/{id}      # 删除记录
-POST   /api/records/{id}/review  # 审核标签
+POST   /api/records                  # 创建记录（AI 处理后进入 pending_review）
+GET    /api/records                  # 获取记录列表（默认不含已删除和待审核）
+GET    /api/records/{id}             # 获取单条记录
+DELETE /api/records/{id}             # 删除记录（软删除，仅 done 状态可删）
+POST   /api/records/{id}/approve     # 审核通过（可附带修改后的标签，触发 Embedding + 存 chunks）
+POST   /api/records/{id}/reject      # 审核拒绝（软删除，不入 RAG）
 ```
+
+> **设计说明：**
+> - 取消了通用的 `PUT /api/records/{id}` 更新接口。记录一旦审核通过（status=done）即锁定，不可修改。
+> - 审核阶段是唯一的修改窗口，通过 `/approve` 接口提交修改后的标签。
+> - `/reject` 等同于软删除，该记录不进入 RAG、画像、总结等任何下游流程。
 
 ### 6.2 画像相关
 
@@ -964,10 +1070,13 @@ POST   /api/inspiration       # 获取写作灵感
 
 ### 8.1 核心原则
 
-- **原子性**：AI 分类 + Embedding 必须全部成功或全部失败，不存在部分成功
+- **审核后入库**：Embedding 仅在用户审核通过后执行，RAG 中的数据始终是用户确认的最终版本
+- **原子性**：审核通过后的 Embedding + 存 chunks 必须全部成功或全部失败，不存在部分成功
 - **降级优先**：AI 不可用时用默认值，不阻塞用户
 - **用户可控**：失败时提供"重新尝试"按钮，用户可手动恢复
 - **数据不丢**：即使失败，原始文本数据已保存
+- **拒绝即删除**：审核拒绝等同于软删除，不进入任何下游流程
+- **确认后锁定**：审核通过后的记录不可再修改，避免级联同步问题
 - **配置统一**：LLM/Embedding 配置以 Java 数据库（user_settings）为准，Python 通过 gRPC 热更新
 
 ### 8.1.1 异步处理说明
@@ -983,29 +1092,41 @@ POST   /api/inspiration       # 获取写作灵感
 ```
 用户提交日记
     ↓
-status = processing（处理中）
+status = processing（AI 处理中）
     ↓
 ┌─────────────────────────────────────┐
-│ 1. AI分类处理                        │
+│ AI 分类处理                          │
 │    ├─ 失败 → status=failed，结束     │
-│    └─ 成功 → 继续                    │
+│    └─ 成功 → status=pending_review   │
+└─────────────────────────────────────┘
+    ↓
+前端展示审核界面，等待用户操作
+    ↓
+┌─────────────────────────────────────┐
+│ 用户操作                             │
 │                                     │
-│ 2. Embedding处理                     │
-│    ├─ 失败 → status=failed，结束     │
-│    └─ 成功 → 继续                    │
+│ 1. 通过（可先修改标签）               │
+│    ├─ Embedding 处理                 │
+│    │   ├─ 失败 → status=failed       │
+│    │   └─ 成功 → 存 chunks           │
+│    └─ status=done，记录锁定          │
 │                                     │
-│ 3. 保存所有结果（标签+向量）          │
-│    └─ status=done                    │
+│ 2. 拒绝                              │
+│    └─ 软删除，不入 RAG               │
+│                                     │
+│ 3. 自动审核模式                      │
+│    └─ AI 处理完自动走"通过"流程      │
 └─────────────────────────────────────┘
 ```
 
 **状态定义：**
 
-| 状态 | 含义 | 前端展示 |
-|------|------|----------|
-| processing | AI正在处理 | 转圈动画 + "AI整理中" |
-| done | 全部完成 | 正常显示标签 |
-| failed | 处理失败 | 显示错误 + "重新尝试"按钮 |
+| 状态 | 含义 | 前端展示 | 可执行操作 |
+|------|------|----------|------------|
+| processing | AI正在处理 | 转圈动画 + "AI整理中" | 无 |
+| pending_review | 等待用户审核 | 显示审核界面 | 通过 / 拒绝 / 修改标签 |
+| done | 审核通过，全部完成 | 正常显示标签 | 仅查看，不可修改 |
+| failed | 处理失败 | 显示错误 + "重新尝试"按钮 | 重新尝试 / 删除 |
 
 ### 8.3 失败处理流程
 
@@ -1026,10 +1147,12 @@ status = failed
     ↓
 用户点击"重新尝试"
     ↓
-重新执行整个流程
-    ├─ 成功 → status=done
+重新执行 AI 分类流程
+    ├─ 成功 → status=pending_review，等待用户审核
     └─ 失败 → status=failed，提示"仍然失败"
 ```
+
+> **注意**：重新尝试只重新执行 AI 分类，不会自动进入 Embedding。用户需要审核通过后才执行 Embedding。
 
 ### 8.4 gRPC 通信异常处理
 
@@ -1091,10 +1214,10 @@ public class RecordService {
     @Autowired
     private AiGrpcClient aiGrpcClient;  // gRPC 客户端
 
-    // 重新处理记录（原子操作）
+    // 重新处理记录（仅重新 AI 分类，不自动 Embedding）
     public boolean retryProcessing(Long recordId) {
         Record record = recordMapper.selectById(recordId);
-        if (!record.getStatus().equals("failed")) {
+        if (!record.getRecordStatus().equals("failed")) {
             return false; // 只有 failed 状态才能重试
         }
 
@@ -1102,17 +1225,46 @@ public class RecordService {
             // 1. gRPC → Python：AI 分类
             ClassifyResponse classifyResult = aiGrpcClient.classify(record.getContent());
 
+            // 2. 分类成功，保存标签，进入待审核
+            record.setRecordStatus("pending_review");
+            record.setContentType(classifyResult.getContentType());
+            record.setMood(classifyResult.getMoodsList());
+            record.setTitle(classifyResult.getTitle());
+            record.setSummary(classifyResult.getSummary());
+            recordMapper.updateById(record);
+
+            // 3. 不在这里做 Embedding，等用户审核通过后再做
+            return true;
+
+        } catch (StatusRuntimeException e) {
+            log.error("Record retry failed (gRPC): " + recordId, e);
+            return false;
+        } catch (Exception e) {
+            log.error("Record retry failed: " + recordId, e);
+            return false;
+        }
+    }
+
+    // 审核通过（用户确认后调用）
+    public boolean approveRecord(Long recordId, ClassifyResponse userModifications) {
+        Record record = recordMapper.selectById(recordId);
+        if (!record.getRecordStatus().equals("pending_review")) {
+            return false;
+        }
+
+        try {
+            // 1. 应用用户修改（如果有）
+            if (userModifications != null) {
+                record.setTitle(userModifications.getTitle());
+                record.setSummary(userModifications.getSummary());
+                record.setContentType(userModifications.getContentType());
+                record.setMood(userModifications.getMoodsList());
+            }
+
             // 2. gRPC → Python：Embedding
             EmbedResponse embedResult = aiGrpcClient.embed(record.getContent());
 
-            // 3. 全部成功，一起保存（Java 端写数据库）
-            record.setStatus("done");
-            record.setContentType(classifyResult.getContentType());
-            record.setMood(classifyResult.getMoodsList());
-            record.setKeywords(classifyResult.getKeywordsList());
-            recordMapper.updateById(record);
-
-            // 4. 保存到向量库（pgvector）
+            // 3. 保存向量到 chunks 表
             Chunk chunk = Chunk.builder()
                 .recordId(record.getId())
                 .content(record.getContent())
@@ -1120,16 +1272,29 @@ public class RecordService {
                 .build();
             chunkMapper.insert(chunk);
 
+            // 4. 更新状态为 done，记录锁定
+            record.setRecordStatus("done");
+            recordMapper.updateById(record);
+
             return true;
 
-        } catch (StatusRuntimeException e) {
-            // gRPC 调用失败，保持 failed 状态
-            log.error("Record retry failed (gRPC): " + recordId, e);
-            return false;
         } catch (Exception e) {
-            log.error("Record retry failed: " + recordId, e);
+            log.error("Record approve failed: " + recordId, e);
             return false;
         }
+    }
+
+    // 审核拒绝（软删除）
+    public boolean rejectRecord(Long recordId) {
+        Record record = recordMapper.selectById(recordId);
+        if (!record.getRecordStatus().equals("pending_review")) {
+            return false;
+        }
+
+        record.setRecordStatus("rejected");
+        record.setDeletedAt(LocalDateTime.now());
+        recordMapper.updateById(record);
+        return true;
     }
 }
 ```
@@ -1138,10 +1303,13 @@ public class RecordService {
 
 | 原则 | 实现 |
 |------|------|
-| 原子性 | AI 分类 + Embedding 作为整体，一起成功或失败 |
+| 审核后入库 | Embedding 仅在用户审核通过后执行，RAG 数据始终是用户确认的最终版本 |
+| 原子性 | 审核通过后的 Embedding + 存 chunks 作为整体，一起成功或失败 |
 | 降级优先 | 失败时用默认值，不阻塞用户 |
 | 用户可控 | 提供"重新尝试"按钮，用户可手动恢复 |
 | 数据不丢 | 原始文本始终保存，失败只影响标签和向量 |
+| 拒绝即删除 | 审核拒绝等同于软删除，不进入 RAG/画像/总结 |
+| 确认后锁定 | 审核通过后记录不可修改，避免级联同步问题 |
 | 可追溯 | 所有异常记录日志，方便排查 |
 | 职责分离 | gRPC 通信异常由 Java 端捕获，AI 推理异常由 Python 端转为 gRPC 错误码 |
 | 配置统一 | Java 数据库为配置源，Python 通过 gRPC 热更新 |
@@ -1390,3 +1558,4 @@ function clearToken() {
 | 2026-07-23 | v0.9 | 认证设计：简单密码保护（可选）、Token管理、预留多用户扩展 |
 | 2026-08-04 | v1.0 | 架构调整：AI 推理拆分为独立 Python gRPC 服务，Java 负责业务+数据库，职责分离。同步更新架构图、模块划分、数据管道、异常机制。详见 [AI 服务层设计文档](2026-08-04-ai-service-design.md) |
 | 2026-08-04 | v1.1 | 文档审查修正：标签统一英文存储、合并 user_settings 表、画像改用 SQL 统计、每日/写作灵感复用 Chat 服务、配置以 Java 数据库为准、Embedding 切换需重建向量、明确异步处理方式 |
+| 2026-08-07 | v1.2 | 审核机制重构：审核通过后才执行 Embedding 入 RAG；审核分通过/拒绝两种操作；审核阶段是唯一修改窗口；确认后记录锁定不可修改；拒绝等同于软删除；取消通用 PUT 更新接口；数据库新增 deleted_at、record_status 字段；更新数据管道、状态流转、API 设计、异常机制 |

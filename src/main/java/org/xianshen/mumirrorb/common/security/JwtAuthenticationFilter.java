@@ -34,26 +34,37 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 从请求头中获取 Token
         String token = getTokenFromRequest(request);
 
-        // 验证 Token
-        if (StringUtils.hasText(token) && jwtUtils.validateToken(token)) {
-            // 从 Token 中获取用户信息
-            String userId = jwtUtils.getUserIdFromToken(token);
-            String username = jwtUtils.getUsernameFromToken(token);
+        log.debug("JWT 过滤器 - URI: {}, Token: {}", request.getRequestURI(),
+                token != null ? token.substring(0, Math.min(token.length(), 20)) + "..." : "null");
 
-            // 创建认证对象（不需要密码和权限）
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(userId, null, null);
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        // 判断 Token 状态
+        if (StringUtils.hasText(token)) {
+            // 带了 Token，验证是否有效
+            if (jwtUtils.validateToken(token)) {
+                // Token 有效，设置认证信息
+                String userId = jwtUtils.getUserIdFromToken(token);
+                String username = jwtUtils.getUsernameFromToken(token);
 
-            // 设置到 SecurityContext
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(userId, null, null);
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-            // 将 userId 存入请求属性，方便 Controller 获取
-            request.setAttribute("userId", userId);
-            request.setAttribute("username", username);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                request.setAttribute("userId", userId);
+                request.setAttribute("username", username);
+
+                filterChain.doFilter(request, response);
+            } else {
+                // Token 过期或无效，直接返回 401（不走到匿名用户）
+                log.warn("Token 无效或已过期: {}", request.getRequestURI());
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":401,\"message\":\"登录已过期，请重新登录\",\"data\":null}");
+            }
+        } else {
+            // 没带 Token，继续走后续过滤器（公开接口会放行，受保护接口会被拦截）
+            filterChain.doFilter(request, response);
         }
-
-        filterChain.doFilter(request, response);
     }
 
     /**
