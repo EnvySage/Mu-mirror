@@ -20,7 +20,11 @@ import org.xianshen.mumirrorb.pojo.VO.LoginVO;
 import org.xianshen.mumirrorb.pojo.VO.UserVO;
 import org.xianshen.mumirrorb.service.AuthService;
 
+import org.xianshen.mumirrorb.pojo.DO.UserSettings;
+import org.xianshen.mumirrorb.mapper.SettingsMapper;
+
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 /**
  * 认证服务实现
@@ -31,6 +35,7 @@ import java.time.OffsetDateTime;
 public class AuthServiceImpl implements AuthService {
 
     private final UserMapper userMapper;
+    private final SettingsMapper settingsMapper;
     private final JwtUtils jwtUtils;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
@@ -53,6 +58,17 @@ public class AuthServiceImpl implements AuthService {
 
         userMapper.insert(user);
         log.info("用户注册成功：{}", user.getUsername());
+
+        // 注册时自动创建空的用户配置（id 由数据库自动生成）
+        UserSettings settings = UserSettings.builder()
+                .userId(UUID.fromString(user.getId()))
+                .embeddingSource("local")
+                .reviewMode("manual")
+                .createdAt(OffsetDateTime.now())
+                .updatedAt(OffsetDateTime.now())
+                .build();
+        settingsMapper.insert(settings);
+        log.info("已为新用户创建默认配置：{}", user.getUsername());
 
         return UserVO.builder()
                 .id(user.getId())

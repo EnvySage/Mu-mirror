@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-07（记录模块 CRUD 完成 + UUID 类型改造）
+> 最后更新：2026-08-10（Settings 模块 CRUD + UUID TypeHandler 全局注册）
 
 ---
 
@@ -24,7 +24,7 @@
 | P0 | 记录管理 (Records) | ✅ 完成 | CRUD + 软删除 + 人工审查 + API文档注解 |
 | P0 | 镜子/画像 (Mirror) | ⬜ 未开始 | 依赖 Records + AI 服务 |
 | P0 | 对话 (Chat) | ⬜ 未开始 | 依赖 Records + AI 服务 |
-| P0 | 用户设置 (Settings) | ⬜ 未开始 | AI 模型配置等 |
+| P0 | 用户设置 (Settings) | ✅ 完成 | AI 模型配置 CRUD + AES 加密 + 注册自动创建 |
 | P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
 | P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
 | P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
@@ -54,39 +54,48 @@ src/main/java/org/xianshen/mumirrorb/
 │   ├── security/
 │   │   ├── JwtAuthenticationFilter.java # JWT 过滤器
 │   │   └── UserDetailsServiceImpl.java
-│   └── utils/JwtUtils.java
+│   └── utils/
+│       ├── JwtUtils.java
+│       └── CryptoUtils.java             # AES-GCM 加密工具
 ├── config/
 │   ├── SecurityConfig.java              # 路由权限配置
 │   ├── Knife4jConfig.java               # API 文档
 │   └── WebMvcConfig.java                # CORS
 ├── controller/
 │   ├── AuthController.java              # 认证端点（4个）
-│   └── RecordController.java            # 记录端点（6个）
+│   ├── RecordController.java            # 记录端点（6个）
+│   └── SettingsController.java          # 配置端点（4个）
 ├── mapper/
 │   ├── UserMapper.java
 │   ├── RecordMapper.java
-│   └── TagMapper.java
+│   ├── TagMapper.java
+│   └── SettingsMapper.java
 ├── pojo/
 │   ├── R.java                           # 统一响应 {code, message, data, timestamp}
 │   ├── DO/
 │   │   ├── User.java                    # UUID id, username, passwordHash, createdAt
 │   │   ├── Record.java                  # 记录实体（UUID userId）
-│   │   └── Tag.java                     # 标签实体
+│   │   ├── Tag.java                     # 标签实体
+│   │   └── UserSettings.java            # 用户配置实体（LLM/Embedding 配置）
 │   ├── DTO/
 │   │   ├── UserLoginDTO.java
 │   │   ├── UserRegisterDTO.java
 │   │   ├── RecordDTO.java               # 记录创建/更新 DTO
-│   │   └── RecordQueryDTO.java          # 记录查询 DTO（日期范围）
+│   │   ├── RecordQueryDTO.java          # 记录查询 DTO（日期范围）
+│   │   └── SettingsDTO.java             # 配置更新 DTO
 │   └── VO/
 │       ├── LoginVO.java
 │       ├── UserVO.java
-│       └── RecordVO.java                # 记录视图对象
+│       ├── RecordVO.java                # 记录视图对象
+│       └── SettingsVO.java              # 配置视图对象（API Key 脱敏）
 ├── service/
 │   ├── AuthService.java
 │   ├── RecordService.java               # 记录服务接口
+│   ├── SettingsService.java             # 配置服务接口
 │   └── impl/
 │       ├── AuthServiceImpl.java
-│       └── RecordServiceImpl.java       # 记录服务实现
+│       ├── RecordServiceImpl.java       # 记录服务实现
+│       └── SettingsServiceImpl.java     # 配置服务实现
 └── pipeline/                            # 数据管道框架
     ├── RecordProcessor.java
     ├── RecordPipeline.java
@@ -140,6 +149,27 @@ CREATE TABLE tags (
 CREATE INDEX idx_tags_record_id ON tags(record_id);
 ```
 
+### 已创建的表（新增）
+
+```sql
+-- user_settings 表（用户配置）
+CREATE TABLE IF NOT EXISTS user_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users(id),
+    ai_provider VARCHAR(50),         -- AI 提供商：openai/zhipu/qwen
+    ai_api_key TEXT,                 -- API Key（加密存储）
+    ai_base_url TEXT,                -- API 地址
+    ai_model VARCHAR(100),           -- 模型名称
+    embedding_source VARCHAR(20) DEFAULT 'local', -- local / api
+    embedding_api_key TEXT,          -- Embedding API Key（加密）
+    embedding_model VARCHAR(100),    -- Embedding 模型名
+    review_mode VARCHAR(20) DEFAULT 'manual', -- manual / auto
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
+```
+
 ### 待创建的表（设计文档中已定义）
 
 - `chunks` — pgvector 向量存储（embedding + metadata）
@@ -147,7 +177,6 @@ CREATE INDEX idx_tags_record_id ON tags(record_id);
 - `mirror_profiles` — AI 生成的用户画像（JSONB）
 - `conversation_history` — 对话历史
 - `chat_sessions` — 对话会话
-- `user_settings` — 用户设置（认证 + AI 模型配置）
 
 ---
 
@@ -172,6 +201,15 @@ CREATE INDEX idx_tags_record_id ON tags(record_id);
 | PUT | `/api/records/{id}` | JWT | 更新记录（仅REVIEWING状态允许） |
 | PUT | `/api/records/{id}/confirm` | JWT | 确认审查完成（REVIEWING → DONE） |
 | DELETE | `/api/records/{id}` | JWT | 软删除记录（仅REVIEWING状态允许） |
+
+### 配置模块
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| GET | `/api/settings` | JWT | 获取当前用户配置（API Key 脱敏） |
+| PUT | `/api/settings` | JWT | 更新配置（部分更新，API Key 加密存储） |
+| POST | `/api/settings/test-ai` | JWT | 测试 AI 连接 |
+| POST | `/api/settings/test-db` | JWT | 测试数据库连接 |
 
 ### 记录状态流转
 
@@ -211,8 +249,7 @@ PROCESSING → REVIEWING → DONE
 
 5. 对话模块（基于 RAG 的 AI 对话）
 6. 每日摘要生成
-7. 用户设置模块
-8. 前端开发（Vue 3）
+7. 前端开发（Vue 3）
 
 ---
 
@@ -223,7 +260,7 @@ PROCESSING → REVIEWING → DONE
 - **主键**：
   - users 表：UUID，由数据库 `gen_random_uuid()` 生成
   - records/tags 表：BIGSERIAL 自增
-- **外键关联**：records.user_id 使用 UUID 类型，通过 UuidTypeHandler 映射
+- **UUID 映射**：全局注册 `type-handlers-package`，所有 UUID 字段自动使用 UuidTypeHandler
 - **时间**：使用 `TIMESTAMPTZ`，应用层用 `OffsetDateTime`
 - **密码**：BCrypt 哈希存储
 - **JWT**：24 小时过期，Bearer Token 放 Authorization 头
@@ -232,7 +269,100 @@ PROCESSING → REVIEWING → DONE
 
 ---
 
-## 九、今日更新记录（2026-08-07）
+## 九、今日更新记录（2026-08-10）
+
+### 完成功能
+
+1. **用户配置模块（Settings）CRUD**
+   - 完整 CRUD：获取配置、更新配置（部分更新）
+   - 测试连接：AI 连接测试、数据库连接测试
+   - API Key 加密存储：使用 AES-256-GCM 加密，返回时脱敏
+   - 注册自动创建：用户注册时自动创建空配置
+
+2. **新增文件**
+   - `UserSettings.java` — 配置实体
+   - `SettingsDTO.java` — 配置更新 DTO
+   - `SettingsVO.java` — 配置视图对象（API Key 脱敏）
+   - `SettingsMapper.java` — MyBatis-Plus Mapper
+   - `SettingsService.java` — 配置服务接口
+   - `SettingsServiceImpl.java` — 配置服务实现
+   - `SettingsController.java` — 配置控制器（4 个端点）
+   - `CryptoUtils.java` — AES-256-GCM 加密工具类
+
+3. **修改文件**
+   - `AuthServiceImpl.java` — 注册时自动创建空配置
+   - `schema.sql` — 新增 user_settings 表定义
+   - `application.yml` — 新增 `type-handlers-package` 全局注册 TypeHandler
+
+### 技术决策
+
+- **加密方案**：AES-256-GCM，每次加密生成随机 IV，安全性较高
+- **脱敏策略**：API Key 只显示前 3 位 + `***`（如 `sk-***`）
+- **部分更新**：PUT 接口只更新非 null 的字段，避免覆盖已有配置
+- **UUID TypeHandler**：全局注册 `type-handlers-package`，所有 UUID 字段自动使用 UuidTypeHandler，无需逐字段注解
+
+### UUID 映射踩坑记录
+
+PostgreSQL UUID 列与 Java UUID 字段的映射需要 TypeHandler，踩了以下坑：
+
+1. `@TableId` 字段不支持 `@TableField(typeHandler=...)` — 需要全局注册
+2. Java String 不能直接与 PostgreSQL UUID 列比较 — 必须用 UUID 类型
+3. 最终方案：`application.yml` 配置 `type-handlers-package`，所有 UUID 字段自动映射
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/settings` | 获取配置（API Key 脱敏） |
+| PUT | `/api/settings` | 更新配置（部分更新） |
+| POST | `/api/settings/test-ai` | 测试 AI 连接 |
+| POST | `/api/settings/test-db` | 测试数据库连接 |
+
+---
+
+## 十、历史更新记录（2026-08-07）
+
+### 完成功能
+
+1. **用户配置模块（Settings）**
+   - 完整 CRUD：获取配置、更新配置
+   - 测试连接：AI 连接测试、数据库连接测试
+   - API Key 加密存储：使用 AES-256-GCM 加密，返回时脱敏
+   - 注册自动创建：用户注册时自动创建空配置
+
+2. **新增文件**
+   - `UserSettings.java` — 配置实体
+   - `SettingsDTO.java` — 配置更新 DTO
+   - `SettingsVO.java` — 配置视图对象（API Key 脱敏）
+   - `SettingsMapper.java` — MyBatis-Plus Mapper
+   - `SettingsService.java` — 配置服务接口
+   - `SettingsServiceImpl.java` — 配置服务实现
+   - `SettingsController.java` — 配置控制器（4 个端点）
+   - `CryptoUtils.java` — AES-GCM 加密工具类
+
+3. **修改文件**
+   - `AuthServiceImpl.java` — 注册时自动创建空配置
+   - `schema.sql` — 新增 user_settings 表定义
+
+### 技术决策
+
+- **加密方案**：AES-256-GCM，每次加密生成随机 IV，安全性较高
+- **脱敏策略**：API Key 只显示前 3 位 + `***`（如 `sk-***`）
+- **部分更新**：PUT 接口只更新非 null 的字段，避免覆盖已有配置
+- **UUID TypeHandler**：user_settings 表的 UUID 字段需要显式指定 TypeHandler
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/settings` | 获取配置（API Key 脱敏） |
+| PUT | `/api/settings` | 更新配置（部分更新） |
+| POST | `/api/settings/test-ai` | 测试 AI 连接 |
+| POST | `/api/settings/test-db` | 测试数据库连接 |
+
+---
+
+## 十、历史更新记录（2026-08-07）
 
 ### 完成功能
 

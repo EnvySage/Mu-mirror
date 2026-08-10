@@ -1,7 +1,7 @@
 # AI 服务层设计文档 — Python gRPC 服务
 
-> 版本：v0.2
-> 日期：2026-08-04
+> 版本：v0.3
+> 日期：2026-08-04（初版） / 2026-08-07（配置机制重构）
 > 状态：设计中
 
 **关联文档：**
@@ -46,11 +46,13 @@ Python AI 服务（gRPC Server）
 **随手记处理流程：**
 ```
 用户输入 → Java 接收
-  → gRPC: Classify（Python 返回标题/摘要/标签）
-  → Java 保存 records 表
-  → gRPC: Embed（Python 返回向量）
+  → gRPC: Classify（携带用户 LLM 配置，Python 返回标题/摘要/标签）
+  → Java 保存 records 表（status=pending_review）
+  → 前端展示审核界面，等待用户操作
+  → 用户审核通过（可先修改标签）
+  → gRPC: Embed（携带用户 Embedding 配置，Python 返回向量）
   → Java 保存 chunks 表（pgvector）
-  → 返回前端
+  → status=done，记录锁定
 ```
 
 **向镜子提问流程：**
@@ -80,13 +82,14 @@ Python AI 服务（gRPC Server）
 
 ```
 proto/
-├── common.proto           # 公共消息定义
+├── common.proto           # 公共消息定义（含配置消息）
 ├── record_processor.proto # 记录处理服务
 ├── embedding.proto        # Embedding 服务
 ├── mirror_chat.proto      # 对话服务
-├── mirror_profile.proto   # 画像服务
-└── config_service.proto   # 配置更新服务
+└── mirror_profile.proto   # 画像服务
 ```
+
+> **设计说明**：配置通过每次请求传递（Java 从数据库读取后放入请求），Python 端完全无状态，不存储任何用户配置。
 
 ### 2.2 common.proto
 
@@ -135,6 +138,28 @@ enum TaskStatus {
   IN_PROGRESS = 2;
   COMPLETED = 3;
 }
+
+// LLM 配置（每次请求携带）
+message LlmConfig {
+  string provider = 1;    // openai / zhipu / qwen
+  string api_key = 2;
+  string base_url = 3;    // 可选，留空用默认
+  string model = 4;       // 模型名称
+}
+
+// Embedding 配置（每次请求携带）
+message EmbeddingConfig {
+  string source = 1;      // local / api
+  // 本地模式
+  string local_model = 2; // 如 "BAAI/bge-m3"
+  // API 模式
+  // 注意：api_provider 当前复用 LLM 的 provider（openai/zhipu/qwen），
+  // 即 Embedding API 和 LLM API 使用同一提供商。
+  // 如需支持不同提供商，需在 user_settings 表新增 embedding_api_provider 字段。
+  string api_provider = 3;
+  string api_key = 4;
+  string api_model = 5;
+}
 ```
 
 ### 2.3 record_processor.proto — 记录处理
@@ -156,7 +181,8 @@ service RecordProcessor {
 // --- 分类 ---
 
 message ClassifyRequest {
-  string content = 1;  // 用户输入的原始文本
+  string content = 1;       // 用户输入的原始文本
+  LlmConfig llm_config = 2; // LLM 配置（每次请求携带）
 }
 
 message ClassifyResponse {
@@ -174,6 +200,7 @@ message ClassifyResponse {
 
 message SplitRequest {
   string content = 1;
+  LlmConfig llm_config = 2; // LLM 配置（每次请求携带）
 }
 
 message SplitResponse {
@@ -206,6 +233,7 @@ service EmbeddingService {
 
 message EmbedRequest {
   string text = 1;
+  EmbeddingConfig embedding_config = 2; // Embedding 配置（每次请求携带）
 }
 
 message EmbedResponse {
@@ -216,6 +244,7 @@ message EmbedResponse {
 
 message EmbedBatchRequest {
   repeated string texts = 1;
+  EmbeddingConfig embedding_config = 2; // Embedding 配置（每次请求携带）
 }
 
 message EmbedBatchResponse {
@@ -249,7 +278,8 @@ service MirrorChat {
 // --- 意图提取 ---
 
 message ExtractIntentRequest {
-  string query = 1;  // 用户问题
+  string query = 1;           // 用户问题
+  LlmConfig llm_config = 2;  // LLM 配置（每次请求携带）
 }
 
 message ExtractIntentResponse {
@@ -265,6 +295,7 @@ message ChatRequest {
   string question = 1;                // 用户问题
   repeated ChatMessage history = 2;   // 对话历史
   repeated RetrievedChunk chunks = 3; // Java 端检索好的相关记录
+  LlmConfig llm_config = 4;          // LLM 配置（每次请求携带）
 }
 
 message ChatMessage {
@@ -316,6 +347,7 @@ message GenerateProfileRequest {
   ActiveTimeStats active_time = 5;      // 活跃时段
   int32 total_records = 6;              // 总记录数
   string time_range = 7;                // 数据时间范围
+  LlmConfig llm_config = 8;            // LLM 配置（每次请求携带）
 }
 
 message TodoItem {
@@ -362,59 +394,9 @@ message GenerateProfileResponse {
 }
 ```
 
-### 2.7 config_service.proto — 配置更新
+~~### 2.7 config_service.proto — 配置更新~~（已删除）
 
-```protobuf
-syntax = "proto3";
-package mirror;
-
-// 配置更新服务（Java 数据库为配置源，Python 通过此 RPC 热更新）
-service ConfigService {
-  // 更新 LLM 配置
-  rpc UpdateLlmConfig(UpdateLlmConfigRequest) returns (UpdateConfigResponse);
-
-  // 更新 Embedding 配置
-  rpc UpdateEmbeddingConfig(UpdateEmbeddingConfigRequest) returns (UpdateConfigResponse);
-
-  // 查询当前配置状态
-  rpc GetConfigStatus(GetConfigStatusRequest) returns (GetConfigStatusResponse);
-}
-
-message UpdateLlmConfigRequest {
-  string provider = 1;    // openai / zhipu / qwen
-  string api_key = 2;
-  string base_url = 3;    // 可选
-  string model = 4;
-}
-
-message UpdateEmbeddingConfigRequest {
-  string source = 1;      // local / api
-  // 本地模式
-  string local_model = 2; // 如 "BAAI/bge-m3"
-  // API 模式
-  string api_provider = 3;
-  string api_key = 4;
-  string api_model = 5;
-}
-
-message UpdateConfigResponse {
-  bool success = 1;
-  string message = 2;     // 成功/失败信息
-  bool need_restart = 3;  // 是否需要重启服务（如切换 embedding 模型）
-}
-
-message GetConfigStatusRequest {}
-
-message GetConfigStatusResponse {
-  string llm_provider = 1;
-  string llm_model = 2;
-  string embedding_source = 3;
-  string embedding_model = 4;
-  int32 embedding_dimension = 5;
-  bool llm_available = 6;
-  bool embedding_available = 7;
-}
-```
+> **设计变更**：配置不再通过独立的 ConfigService 推送。改为每次 gRPC 请求携带配置（LlmConfig / EmbeddingConfig），Python 端完全无状态，不存储任何用户配置。这样天然支持多用户使用不同模型。
 
 ---
 
@@ -425,13 +407,11 @@ message GetConfigStatusResponse {
 ```
 mirror-ai/
 ├── server.py                # gRPC 服务启动入口
-├── config.py                # 配置管理（embedding 来源、LLM 配置）
 ├── services/
 │   ├── record_processor.py  # 记录分类服务
 │   ├── embedding_service.py # Embedding 服务（本地/API 切换）
 │   ├── chat_service.py      # 对话服务
-│   ├── profile_service.py   # 画像服务
-│   └── config_service.py    # 配置热更新服务
+│   └── profile_service.py   # 画像服务
 ├── llm/
 │   ├── base.py              # LLM 统一接口
 │   ├── openai_llm.py        # OpenAI 实现
@@ -467,17 +447,27 @@ class BaseEmbedder(ABC):
     def get_model_info(self) -> dict: ...
 ```
 
-**本地实现（BGE-m3）：**
+**本地实现（BGE-m3，懒加载）：**
 ```python
 # embedding/local_embedder.py
 class LocalEmbedder(BaseEmbedder):
+    _instance = None
+    _model = None
+
+    def __new__(cls, model_name: str = "BAAI/bge-m3"):
+        # 单例模式，确保模型只加载一次
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, model_name: str = "BAAI/bge-m3"):
-        from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name)
-        self.model_name = model_name
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer(model_name)
+            self.model_name = model_name
 
     def embed(self, text: str) -> list[float]:
-        return self.model.encode(text).tolist()
+        return self._model.encode(text).tolist()
 ```
 
 **API 实现：**
@@ -489,30 +479,24 @@ class ApiEmbedder(BaseEmbedder):
         ...
 ```
 
-**配置切换（config.yml）：**
-```yaml
-embedding:
-  source: "local"          # "local" 或 "api"
-  local:
-    model: "BAAI/bge-m3"
-  api:
-    provider: "openai"     # openai / zhipu / qwen
-    api_key: "sk-xxx"
-    base_url: ""           # 可选，留空用默认
-    model: "text-embedding-3-small"
-```
-
-**工厂函数：**
+**工厂函数（根据请求中的配置动态创建）：**
 ```python
-def create_embedder(config: dict) -> BaseEmbedder:
-    source = config["embedding"]["source"]
+def create_embedder(embedding_config) -> BaseEmbedder:
+    source = embedding_config.source
     if source == "local":
-        return LocalEmbedder(**config["embedding"]["local"])
+        return LocalEmbedder(model_name=embedding_config.local_model)
     elif source == "api":
-        return ApiEmbedder(**config["embedding"]["api"])
+        return ApiEmbedder(
+            provider=embedding_config.api_provider,
+            api_key=embedding_config.api_key,
+            base_url="",
+            model=embedding_config.api_model
+        )
     else:
         raise ValueError(f"Unknown embedding source: {source}")
 ```
+
+> **懒加载说明**：本地模式下，模型在首次使用时下载并加载（懒加载），非本地模式不会加载模型，不占用内存。使用单例模式确保同一模型只加载一次。
 
 ### 3.3 LLM 统一接口
 
@@ -526,51 +510,43 @@ class BaseLlm(ABC):
     def chat_stream(self, messages: list[dict], temperature: float = 0.7) -> Generator[str]: ...
 ```
 
-**配置：**
-```yaml
-llm:
-  provider: "openai"       # openai / zhipu / qwen
-  api_key: "sk-xxx"
-  base_url: ""             # 可选
-  model: "gpt-4o-mini"
-  temperature: 0.7
+**工厂函数（根据请求中的配置动态创建）：**
+```python
+def create_llm(llm_config) -> BaseLlm:
+    provider = llm_config.provider
+    if provider == "openai":
+        return OpenAiLlm(api_key=llm_config.api_key, base_url=llm_config.base_url, model=llm_config.model)
+    elif provider == "qwen":
+        return QwenLlm(api_key=llm_config.api_key, model=llm_config.model)
+    elif provider == "zhipu":
+        return ZhipuLlm(api_key=llm_config.api_key, model=llm_config.model)
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider}")
 ```
 
 ### 3.4 配置管理
 
-**配置源优先级**：Java 数据库（user_settings）为生产环境唯一配置源。Python 的 `config.yml` 仅用于本地开发默认值。
+**设计原则**：Python AI 服务完全无状态，不存储任何用户配置。所有配置由 Java 端从数据库（user_settings）读取，通过每次 gRPC 请求传递给 Python。
 
-**配置更新流程**：
+**配置流转**：
 ```
 用户在前端改配置 → Java 存 user_settings 表
-  → Java gRPC 调用 ConfigService.UpdateLlmConfig / UpdateEmbeddingConfig
-  → Python 热更新内存配置
-  → 如果需要重启（如切换 embedding 模型），返回 need_restart=true
+  → 下次 gRPC 请求时，Java 从数据库读取配置放入请求
+  → Python 从请求中取出配置，用完即弃
 ```
 
+**多用户支持**：
+- 每个用户的配置独立存在 user_settings 表中
+- Java 根据当前用户读取对应的配置
+- Python 无需关心用户是谁，只管处理请求中的配置
+- 不同用户可以使用不同的 LLM 和 Embedding 模型，互不干扰
+
+**Python 服务配置（仅服务启动相关，与用户配置无关）：**
 ```yaml
-# config.yml（本地开发默认值，生产环境以数据库为准）
+# config.yml（仅服务级配置，不涉及用户数据）
 server:
   port: 50051              # gRPC 端口
   workers: 4               # 并发数
-
-embedding:
-  source: "local"          # local / api
-  local:
-    model: "BAAI/bge-m3"
-  api:
-    provider: "openai"
-    api_key: ""
-    base_url: ""
-    model: "text-embedding-3-small"
-
-llm:
-  provider: "openai"
-  api_key: ""
-  base_url: ""
-  model: "gpt-4o-mini"
-  temperature: 0.7
-  max_tokens: 2048
 
 prompts:
   classify: "prompts/classify.txt"
@@ -600,34 +576,72 @@ src/main/java/com/mirror/
 @Service
 public class AiGrpcClient {
 
-    // 记录分类
-    public ClassifyResponse classify(String content) {
-        // 调用 RecordProcessor/Classify
+    @Autowired
+    private UserSettingsMapper userSettingsMapper;
+
+    // 获取用户的 LLM 配置
+    private LlmConfig getLlmConfig(String userId) {
+        UserSettings settings = userSettingsMapper.selectByUserId(userId);
+        return LlmConfig.newBuilder()
+            .setProvider(settings.getAiProvider())
+            .setApiKey(settings.getAiApiKey())
+            .setBaseUrl(settings.getAiBaseUrl() != null ? settings.getAiBaseUrl() : "")
+            .setModel(settings.getAiModel())
+            .build();
     }
 
-    // 生成向量
-    public EmbedResponse embed(String text) {
-        // 调用 EmbeddingService/Embed
+    // 获取用户的 Embedding 配置
+    private EmbeddingConfig getEmbeddingConfig(String userId) {
+        UserSettings settings = userSettingsMapper.selectByUserId(userId);
+        return EmbeddingConfig.newBuilder()
+            .setSource(settings.getEmbeddingSource())
+            .setLocalModel(settings.getEmbeddingModel())
+            .setApiProvider(settings.getAiProvider())
+            .setApiKey(settings.getEmbeddingApiKey() != null ? settings.getEmbeddingApiKey() : "")
+            .setApiModel(settings.getEmbeddingModel())
+            .build();
     }
 
-    // 批量向量
-    public EmbedBatchResponse embedBatch(List<String> texts) {
-        // 调用 EmbeddingService/EmbedBatch
+    // 记录分类（携带用户 LLM 配置）
+    public ClassifyResponse classify(String userId, String content) {
+        return recordStub.classify(ClassifyRequest.newBuilder()
+            .setContent(content)
+            .setLlmConfig(getLlmConfig(userId))
+            .build());
     }
 
-    // 提取意图
-    public ExtractIntentResponse extractIntent(String query) {
-        // 调用 MirrorChat/ExtractIntent
+    // 生成向量（携带用户 Embedding 配置）
+    public EmbedResponse embed(String userId, String text) {
+        return embedStub.embed(EmbedRequest.newBuilder()
+            .setText(text)
+            .setEmbeddingConfig(getEmbeddingConfig(userId))
+            .build());
     }
 
-    // 对话（流式）
-    public Iterator<ChatChunk> chat(String question, List<ChatMessage> history, List<RetrievedChunk> chunks) {
-        // 调用 MirrorChat/Chat，返回流式迭代器
+    // 提取意图（携带用户 LLM 配置）
+    public ExtractIntentResponse extractIntent(String userId, String query) {
+        return chatStub.extractIntent(ExtractIntentRequest.newBuilder()
+            .setQuery(query)
+            .setLlmConfig(getLlmConfig(userId))
+            .build());
     }
 
-    // 生成画像
-    public GenerateProfileResponse generateProfile(GenerateProfileRequest request) {
-        // 调用 MirrorProfile/GenerateProfile
+    // 对话（流式，携带用户 LLM 配置）
+    public Iterator<ChatChunk> chat(String userId, String question,
+                                     List<ChatMessage> history, List<RetrievedChunk> chunks) {
+        return chatStub.chat(ChatRequest.newBuilder()
+            .setQuestion(question)
+            .addAllHistory(history)
+            .addAllChunks(chunks)
+            .setLlmConfig(getLlmConfig(userId))
+            .build());
+    }
+
+    // 生成画像（携带用户 LLM 配置）
+    public GenerateProfileResponse generateProfile(String userId, GenerateProfileRequest request) {
+        return profileStub.generateProfile(request.toBuilder()
+            .setLlmConfig(getLlmConfig(userId))
+            .build());
     }
 }
 ```
@@ -700,15 +714,17 @@ services:
       - postgres
       - mirror-ai
 
-  # Python AI 服务
+  # Python AI 服务（完全无状态，配置通过每次 gRPC 请求携带）
   mirror-ai:
     build: ./mirror-ai
     ports:
       - "50051:50051"
+    # 注意：以下环境变量仅用于本地开发默认值和健康检查，不参与请求处理
+    # 生产环境中，所有配置由 Java 端从数据库读取并通过 gRPC 请求传递
     environment:
-      EMBEDDING_SOURCE: ${EMBEDDING_SOURCE:-local}
-      LLM_API_KEY: ${LLM_API_KEY}
-      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      EMBEDDING_SOURCE: ${EMBEDDING_SOURCE:-local}  # 本地开发默认值
+      LLM_API_KEY: ${LLM_API_KEY}                   # 本地开发默认值
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}         # 本地开发默认值
     volumes:
       - ai-models:/app/models  # 持久化模型文件
     deploy:
@@ -726,10 +742,12 @@ volumes:
 ```bash
 # .env
 DB_PASSWORD=your_db_password
-EMBEDDING_SOURCE=local        # local 或 api
-LLM_PROVIDER=openai           # openai / zhipu / qwen
-LLM_API_KEY=sk-xxx
-LLM_MODEL=gpt-4o-mini
+
+# 以下为本地开发默认值，生产环境以 Java 数据库（user_settings）为准
+EMBEDDING_SOURCE=local        # local 或 api（本地开发默认值）
+LLM_PROVIDER=openai           # openai / zhipu / qwen（本地开发默认值）
+LLM_API_KEY=sk-xxx            # 本地开发默认值
+LLM_MODEL=gpt-4o-mini         # 本地开发默认值
 EMBEDDING_API_KEY=            # 仅 api 模式需要
 EMBEDDING_API_MODEL=          # 仅 api 模式需要
 ```
@@ -801,3 +819,5 @@ async def Classify(self, request, context):
 |---|---|---|
 | 2026-08-04 | v0.1 | 初始设计：架构、proto、Python 模块、部署方案 |
 | 2026-08-04 | v0.2 | 文档审查修正：新增 ConfigService Proto、明确 grpcio-aio、配置以 Java 数据库为准 |
+| 2026-08-07 | v0.3 | 配置机制重构：删除 ConfigService，改为每次请求携带 LlmConfig/EmbeddingConfig；Python 完全无状态，天然支持多用户不同模型；common.proto 新增配置消息定义；所有请求消息新增配置字段；更新工厂函数和懒加载设计；Java 客户端根据 userId 从数据库读取配置放入请求 |
+| 2026-08-07 | v0.3.1 | 文档对齐修正：数据流图补充审核步骤；SplitRequest 新增 LlmConfig；EmbeddingConfig.api_provider 添加映射说明；Docker 环境变量标注为本地开发默认值 |

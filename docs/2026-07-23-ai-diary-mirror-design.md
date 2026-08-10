@@ -392,11 +392,6 @@ status = pending_review（等待审核）
 - 示例："开心但是累" → mood: ["happy", "exhausted"]（前端显示：开心、疲惫）
 - AI 会判断内容是否有意义，无意义内容（如"???"）跳过分类
 
-**情绪标签特殊规则：**
-- 支持多选：一条记录可以打多个情绪标签
-- 示例："开心但是累" → mood: ["开心", "疲惫"]
-- AI 会判断内容是否有意义，无意义内容（如"???"）跳过分类
-
 **内容长度限制：**
 
 | 长度 | 处理方式 |
@@ -526,7 +521,7 @@ AI 处理结果：
 │ 【gRPC → Python AI 服务】                │
 │ AI 自动打标签：                           │
 │ - 内容类型：8个选项                       │
-│ - 情绪：12个选项，支持多选                │
+│ - 情绪：13个选项，支持多选                │
 │ - 状态：未开始/进行中/已完成（待办/计划类）│
 │ - 主题关键词：3-5 个                      │
 │ 特殊处理：                               │
@@ -799,28 +794,42 @@ mirror-ai/
 ### 5.1 核心表
 
 ```sql
+-- 用户表
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(50) DEFAULT 'user',
+    password_hash VARCHAR(255),      -- 加密存储，可为空
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 记录表
 CREATE TABLE records (
     id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
     content TEXT NOT NULL,           -- 原始内容
     title VARCHAR(200),             -- AI 生成的标题
     summary TEXT,                    -- AI 生成的摘要
     content_type VARCHAR(20),        -- 类型：todo/thought/learning/plan/note/work/social/health
     mood JSONB,                      -- 情绪：支持多选 ["happy", "exhausted"]
     task_status VARCHAR(20),         -- 任务状态：not_started/in_progress/completed（仅待办/计划类）
-    record_status VARCHAR(20) DEFAULT 'processing', -- 记录状态：processing/pending_review/done/failed
+                                     -- 注意：Proto 中对应字段名为 "status"（TaskStatus 枚举）
+    record_status VARCHAR(20) DEFAULT 'processing', -- 记录状态：processing/pending_review/done/failed/rejected
     deleted_at TIMESTAMP,            -- 软删除时间，NULL 表示未删除
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+CREATE INDEX idx_records_user_id ON records(user_id);
+CREATE INDEX idx_records_status ON records(user_id, record_status, deleted_at);
 
 -- 标签表
 CREATE TABLE tags (
     id BIGSERIAL PRIMARY KEY,
-    record_id BIGINT REFERENCES records(id),
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
+    record_id BIGINT NOT NULL REFERENCES records(id),
     keyword VARCHAR(50),             -- 关键词标签
     created_at TIMESTAMP DEFAULT NOW()
 );
+CREATE INDEX idx_tags_record_id ON tags(record_id);
 
 -- 向量块表（pgvector）
 -- 注意：向量维度取决于 embedding 模型
@@ -829,82 +838,111 @@ CREATE TABLE tags (
 --   建议初始化时按实际模型设置，或使用 vector(2048) 兼容大多数模型
 CREATE TABLE chunks (
     id BIGSERIAL PRIMARY KEY,
-    record_id BIGINT REFERENCES records(id),
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
+    record_id BIGINT NOT NULL REFERENCES records(id),
     content TEXT NOT NULL,           -- 切片内容
     metadata JSONB,                 -- 元数据（类型、情绪、时间等）
     embedding vector(1024),         -- BGE-m3 默认 1024 维，按实际模型调整
     created_at TIMESTAMP DEFAULT NOW()
 );
+CREATE INDEX idx_chunks_user_id ON chunks(user_id);
+CREATE INDEX idx_chunks_record_id ON chunks(record_id);
 
 -- 每日总结表
 CREATE TABLE daily_summaries (
     id BIGSERIAL PRIMARY KEY,
-    summary_date DATE UNIQUE,       -- 总结日期
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
+    summary_date DATE NOT NULL,      -- 总结日期
     content TEXT,                    -- 总结内容
     record_count INT,               -- 当日记录数
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id, summary_date)   -- 每个用户每天只有一条总结
 );
 
 -- 画像表
 CREATE TABLE mirror_profiles (
     id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
     profile_json JSONB,             -- 画像数据（JSON 格式）
     generated_at TIMESTAMP DEFAULT NOW()
-);
-
--- 对话历史表（支持多轮对话）
-CREATE TABLE conversation_history (
-    id BIGSERIAL PRIMARY KEY,
-    session_id UUID NOT NULL,       -- 会话ID（一组对话）
-    role VARCHAR(20) NOT NULL,      -- 角色：user / assistant
-    content TEXT NOT NULL,          -- 问题或回答
-    sources JSONB,                  -- 来源记录 [{record_id, quote, date}]
-    created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- 会话表
 CREATE TABLE chat_sessions (
     id UUID PRIMARY KEY,            -- 会话ID
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
     title VARCHAR(200),             -- 会话标题（AI生成）
     last_message_at TIMESTAMP,      -- 最后消息时间
     created_at TIMESTAMP DEFAULT NOW()
 );
+CREATE INDEX idx_chat_sessions_user_id ON chat_sessions(user_id);
+
+-- 对话历史表（支持多轮对话）
+CREATE TABLE conversation_history (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id), -- 所属用户
+    session_id UUID NOT NULL REFERENCES chat_sessions(id), -- 会话ID
+    role VARCHAR(20) NOT NULL,      -- 角色：user / assistant
+    content TEXT NOT NULL,          -- 问题或回答
+    sources JSONB,                  -- 来源记录 [{record_id, quote, date}]
+    created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX idx_conversation_session_id ON conversation_history(session_id);
 
 -- 用户配置表（合并认证和AI配置）
--- 注意：此表在第十章认证设计中不再重复定义
 CREATE TABLE user_settings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    -- 认证相关
-    access_password VARCHAR(255),    -- 访问密码（加密），可为空
+    user_id UUID UNIQUE NOT NULL REFERENCES users(id), -- 每个用户一条配置
     -- LLM 配置
     ai_provider VARCHAR(50),         -- AI 提供商：openai/zhipu/qwen
     ai_api_key TEXT,                 -- API Key（加密存储）
     ai_base_url TEXT,                -- API 地址
     ai_model VARCHAR(100),           -- 模型名称
     -- Embedding 配置
-    embedding_source VARCHAR(20) DEFAULT 'local', -- local / api
+    embedding_source VARCHAR(20) DEFAULT 'local', -- local / api（懒加载，非本地模式不加载模型）
     embedding_api_key TEXT,          -- Embedding API Key（加密）
     embedding_model VARCHAR(100),    -- Embedding 模型名
-    -- 其他
-    db_url TEXT,                     -- 数据库地址
+    -- 审核配置
     review_mode VARCHAR(20) DEFAULT 'manual', -- 审核模式：manual（手动审核）/ auto（自动审核）
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
+> **设计说明：**
+> - 所有核心表均通过 `user_id` 关联 `users` 表，确保数据按用户隔离
+> - 数据库设计已支持多用户，当前版本通过简单密码保护实现单用户访问
+> - 所有业务查询必须带 `WHERE user_id = ?` 过滤条件
+> - `daily_summaries` 使用 `UNIQUE(user_id, summary_date)` 确保每个用户每天只有一条总结
+> - `user_settings` 使用 `UNIQUE(user_id)` 确保每个用户只有一条配置
+
 ---
 
 ## 六、API 设计
+
+### 6.0 用户身份获取
+
+> **所有 API 的 userId 统一从认证 Token 中解析**，前端不需要传递 userId。
+>
+> ```
+> 前端请求（带 Token）
+>     ↓
+> Java 后端拦截器解析 Token → 获取 userId
+>     ↓
+> Service 层使用 userId 查询/写入数据
+>     ↓
+> gRPC 调用时携带 userId 对应的配置
+> ```
+>
+> 后续 API 列表中不再重复标注 userId，但所有查询和写入操作都自动带 `WHERE user_id = ?` 过滤。
 
 ### 6.1 记录相关
 
 ```
 POST   /api/records                  # 创建记录（AI 处理后进入 pending_review）
-GET    /api/records                  # 获取记录列表（默认不含已删除和待审核）
-GET    /api/records/{id}             # 获取单条记录
-DELETE /api/records/{id}             # 删除记录（软删除，仅 done 状态可删）
+GET    /api/records                  # 获取当前用户的记录列表（默认不含已删除和待审核）
+GET    /api/records/{id}             # 获取单条记录（校验归属）
+DELETE /api/records/{id}             # 删除记录（软删除，仅 done 状态可删，校验归属）
 POST   /api/records/{id}/approve     # 审核通过（可附带修改后的标签，触发 Embedding + 存 chunks）
 POST   /api/records/{id}/reject      # 审核拒绝（软删除，不入 RAG）
 ```
@@ -913,45 +951,46 @@ POST   /api/records/{id}/reject      # 审核拒绝（软删除，不入 RAG）
 > - 取消了通用的 `PUT /api/records/{id}` 更新接口。记录一旦审核通过（status=done）即锁定，不可修改。
 > - 审核阶段是唯一的修改窗口，通过 `/approve` 接口提交修改后的标签。
 > - `/reject` 等同于软删除，该记录不进入 RAG、画像、总结等任何下游流程。
+> - 所有操作校验记录归属，用户只能操作自己的记录。
 
 ### 6.2 画像相关
 
 ```
-GET    /api/mirror            # 获取当前画像
-POST   /api/mirror/generate   # 重新生成画像
-GET    /api/mirror/dimension/{dim}  # 获取单维度画像
+GET    /api/mirror                   # 获取当前用户的画像
+POST   /api/mirror/generate          # 重新生成当前用户的画像
+GET    /api/mirror/dimension/{dim}   # 获取当前用户单维度画像
 ```
 
 ### 6.3 对话相关
 
 ```
-POST   /api/mirror/chat       # 发送消息（支持多轮）
-GET    /api/mirror/sessions   # 获取历史会话列表
-GET    /api/mirror/sessions/{sessionId}  # 获取某个会话历史
-DELETE /api/mirror/sessions/{sessionId}  # 删除会话
+POST   /api/mirror/chat              # 发送消息（支持多轮）
+GET    /api/mirror/sessions          # 获取当前用户的会话列表
+GET    /api/mirror/sessions/{sessionId}  # 获取某个会话历史（校验归属）
+DELETE /api/mirror/sessions/{sessionId}  # 删除会话（校验归属）
 ```
 
 ### 6.4 总结相关
 
 ```
-GET    /api/summaries         # 获取总结列表
-GET    /api/summaries/{date}  # 获取指定日期总结
-POST   /api/summaries/generate/{date}  # 手动生成总结
+GET    /api/summaries                # 获取当前用户的总结列表
+GET    /api/summaries/{date}         # 获取指定日期总结
+POST   /api/summaries/generate/{date}  # 手动生成当前用户的总结
 ```
 
 ### 6.5 配置相关
 
 ```
-GET    /api/settings          # 获取配置
-PUT    /api/settings          # 更新配置
-POST   /api/settings/test-ai  # 测试 AI 连接
-POST   /api/settings/test-db  # 测试数据库连接
+GET    /api/settings                 # 获取当前用户的配置
+PUT    /api/settings                 # 更新当前用户的配置
+POST   /api/settings/test-ai         # 测试当前用户的 AI 连接
+POST   /api/settings/test-db         # 测试数据库连接
 ```
 
 ### 6.6 灵感相关
 
 ```
-POST   /api/inspiration       # 获取写作灵感
+POST   /api/inspiration              # 获取写作灵感（基于当前用户的记录）
 ```
 
 ---
@@ -1077,7 +1116,7 @@ POST   /api/inspiration       # 获取写作灵感
 - **数据不丢**：即使失败，原始文本数据已保存
 - **拒绝即删除**：审核拒绝等同于软删除，不进入任何下游流程
 - **确认后锁定**：审核通过后的记录不可再修改，避免级联同步问题
-- **配置统一**：LLM/Embedding 配置以 Java 数据库（user_settings）为准，Python 通过 gRPC 热更新
+- **配置统一**：LLM/Embedding 配置以 Java 数据库（user_settings）为准，每次 gRPC 请求携带配置，Python 完全无状态
 
 ### 8.1.1 异步处理说明
 
@@ -1127,6 +1166,7 @@ status = processing（AI 处理中）
 | pending_review | 等待用户审核 | 显示审核界面 | 通过 / 拒绝 / 修改标签 |
 | done | 审核通过，全部完成 | 正常显示标签 | 仅查看，不可修改 |
 | failed | 处理失败 | 显示错误 + "重新尝试"按钮 | 重新尝试 / 删除 |
+| rejected | 审核拒绝 | 不在列表中显示（已软删除） | 无 |
 
 ### 8.3 失败处理流程
 
@@ -1215,15 +1255,19 @@ public class RecordService {
     private AiGrpcClient aiGrpcClient;  // gRPC 客户端
 
     // 重新处理记录（仅重新 AI 分类，不自动 Embedding）
-    public boolean retryProcessing(Long recordId) {
+    public boolean retryProcessing(String userId, Long recordId) {
         Record record = recordMapper.selectById(recordId);
+        // 校验记录归属
+        if (!record.getUserId().equals(userId)) {
+            throw new AccessDeniedException("无权操作此记录");
+        }
         if (!record.getRecordStatus().equals("failed")) {
             return false; // 只有 failed 状态才能重试
         }
 
         try {
-            // 1. gRPC → Python：AI 分类
-            ClassifyResponse classifyResult = aiGrpcClient.classify(record.getContent());
+            // 1. gRPC → Python：AI 分类（携带用户 LLM 配置）
+            ClassifyResponse classifyResult = aiGrpcClient.classify(userId, record.getContent());
 
             // 2. 分类成功，保存标签，进入待审核
             record.setRecordStatus("pending_review");
@@ -1246,8 +1290,12 @@ public class RecordService {
     }
 
     // 审核通过（用户确认后调用）
-    public boolean approveRecord(Long recordId, ClassifyResponse userModifications) {
+    public boolean approveRecord(String userId, Long recordId, ClassifyResponse userModifications) {
         Record record = recordMapper.selectById(recordId);
+        // 校验记录归属
+        if (!record.getUserId().equals(userId)) {
+            throw new AccessDeniedException("无权操作此记录");
+        }
         if (!record.getRecordStatus().equals("pending_review")) {
             return false;
         }
@@ -1261,11 +1309,12 @@ public class RecordService {
                 record.setMood(userModifications.getMoodsList());
             }
 
-            // 2. gRPC → Python：Embedding
-            EmbedResponse embedResult = aiGrpcClient.embed(record.getContent());
+            // 2. gRPC → Python：Embedding（携带用户 Embedding 配置）
+            EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
 
-            // 3. 保存向量到 chunks 表
+            // 3. 保存向量到 chunks 表（关联 userId）
             Chunk chunk = Chunk.builder()
+                .userId(userId)
                 .recordId(record.getId())
                 .content(record.getContent())
                 .embedding(embedResult.getVectorList())
@@ -1285,8 +1334,12 @@ public class RecordService {
     }
 
     // 审核拒绝（软删除）
-    public boolean rejectRecord(Long recordId) {
+    public boolean rejectRecord(String userId, Long recordId) {
         Record record = recordMapper.selectById(recordId);
+        // 校验记录归属
+        if (!record.getUserId().equals(userId)) {
+            throw new AccessDeniedException("无权操作此记录");
+        }
         if (!record.getRecordStatus().equals("pending_review")) {
             return false;
         }
@@ -1312,7 +1365,7 @@ public class RecordService {
 | 确认后锁定 | 审核通过后记录不可修改，避免级联同步问题 |
 | 可追溯 | 所有异常记录日志，方便排查 |
 | 职责分离 | gRPC 通信异常由 Java 端捕获，AI 推理异常由 Python 端转为 gRPC 错误码 |
-| 配置统一 | Java 数据库为配置源，Python 通过 gRPC 热更新 |
+| 配置统一 | Java 数据库为配置源，每次 gRPC 请求携带配置，Python 完全无状态 |
 | 标签英文存储 | 数据库存英文小写，前端显示中文，Proto 枚举对应英文 |
 
 ---
@@ -1356,10 +1409,10 @@ public class RecordService {
 
 - **简单优先**：第一版只做简单密码保护，不设计复杂登录
 - **可选密码**：密码保护可选，不设置也能使用
-- **保留扩展**：数据库预留 user_id 字段，未来可扩展多用户
+- **多用户就绪**：所有核心表已通过 user_id 关联 users 表，数据按用户隔离
 - **隐私优先**：密码本地存储，不上传任何服务
 
-### 10.2 第一版：单用户密码保护
+### 10.2 访问密码保护
 
 **使用流程：**
 
@@ -1395,17 +1448,8 @@ public class RecordService {
 
 ### 10.3 数据库设计
 
-```sql
--- users 表（保留扩展性）
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username VARCHAR(50) DEFAULT 'user',
-    password_hash VARCHAR(255),  -- 加密存储，可为空
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- user_settings 表：见第五章核心表定义（已合并认证和AI配置字段）
-```
+> `users` 表和 `user_settings` 表定义见第五章核心表定义（5.1 节）。
+> 所有核心表均通过 `user_id` 字段关联 `users` 表，确保数据按用户隔离。
 
 ### 10.4 API 设计
 
@@ -1520,14 +1564,14 @@ function clearToken() {
 
 ### 10.8 设计总结
 
-| 功能 | 第一版 | 未来扩展 |
-|------|--------|----------|
-| 多用户 | ❌ 单用户 | ✅ 预留 user_id |
-| 注册 | ❌ 不需要 | ✅ 可加 |
-| 登录 | 简单密码保护 | ✅ 可升级 |
-| 密码保护 | 可选 | ✅ 必选 |
-| 记住密码 | 7天免密 | ✅ 可调整 |
-| 数据隔离 | 单用户 | ✅ user_id 字段 |
+| 功能 | 当前设计 | 说明 |
+|------|----------|------|
+| 多用户 | ✅ 数据库已支持 | 所有核心表通过 user_id 关联 users 表 |
+| 注册 | ❌ 第一版不实现 | 数据库已预留，未来可加 |
+| 登录 | 简单密码保护 | Token 有效期 7 天 |
+| 密码保护 | 可选 | 不设置密码也能使用 |
+| 记住密码 | 7天免密 | Token 自动过期 |
+| 数据隔离 | ✅ 已实现 | 所有查询自动带 user_id 过滤 |
 
 ---
 
@@ -1558,4 +1602,5 @@ function clearToken() {
 | 2026-07-23 | v0.9 | 认证设计：简单密码保护（可选）、Token管理、预留多用户扩展 |
 | 2026-08-04 | v1.0 | 架构调整：AI 推理拆分为独立 Python gRPC 服务，Java 负责业务+数据库，职责分离。同步更新架构图、模块划分、数据管道、异常机制。详见 [AI 服务层设计文档](2026-08-04-ai-service-design.md) |
 | 2026-08-04 | v1.1 | 文档审查修正：标签统一英文存储、合并 user_settings 表、画像改用 SQL 统计、每日/写作灵感复用 Chat 服务、配置以 Java 数据库为准、Embedding 切换需重建向量、明确异步处理方式 |
-| 2026-08-07 | v1.2 | 审核机制重构：审核通过后才执行 Embedding 入 RAG；审核分通过/拒绝两种操作；审核阶段是唯一修改窗口；确认后记录锁定不可修改；拒绝等同于软删除；取消通用 PUT 更新接口；数据库新增 deleted_at、record_status 字段；更新数据管道、状态流转、API 设计、异常机制 |
+| 2026-08-07 | v1.2 | 审核机制重构：审核通过后才执行 Embedding 入 RAG；审核分通过/拒绝两种操作；审核阶段是唯一修改窗口；确认后记录锁定不可修改；拒绝等同于软删除；取消通用 PUT 更新接口；数据库新增 deleted_at、record_status 字段；更新数据管道、状态流转、API 设计、异常机制。数据库补全：所有核心表新增 user_id 字段关联 users 表，确保数据按用户隔离；user_settings 移除 access_password 字段（认证统一由 users 表管理）；新增索引优化查询性能。配置机制重构：删除 ConfigService，每次 gRPC 请求携带 LLM/Embedding 配置，Python 完全无状态，天然支持多用户不同模型 |
+| 2026-08-07 | v1.2.1 | 三份文档对齐修正：record_status 新增 rejected 状态定义；删除重复的情绪标签规则（保留英文版本）；情绪数量从 12 修正为 13；8.8 节代码示例新增 userId 参数和归属校验；task_status 字段添加 Proto 映射说明 |

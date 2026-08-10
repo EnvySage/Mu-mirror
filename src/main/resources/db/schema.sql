@@ -63,3 +63,27 @@ CREATE TABLE IF NOT EXISTS tags (
 -- tags 索引
 CREATE INDEX IF NOT EXISTS idx_tags_record_id ON tags(record_id);
 CREATE INDEX IF NOT EXISTS idx_tags_keyword ON tags(keyword);
+
+-- ============================================================
+-- 用户配置表（AI 模型配置，每个用户一条）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL REFERENCES users(id),
+    -- LLM 配置
+    ai_provider VARCHAR(50),         -- AI 提供商：openai/zhipu/qwen
+    ai_api_key TEXT,                 -- API Key（加密存储）
+    ai_base_url TEXT,                -- API 地址
+    ai_model VARCHAR(100),           -- 模型名称
+    -- Embedding 配置
+    embedding_source VARCHAR(20) DEFAULT 'local', -- local / api
+    embedding_api_key TEXT,          -- Embedding API Key（加密）
+    embedding_model VARCHAR(100),    -- Embedding 模型名
+    -- 审核配置
+    review_mode VARCHAR(20) DEFAULT 'manual', -- manual / auto
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- user_settings 索引
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);

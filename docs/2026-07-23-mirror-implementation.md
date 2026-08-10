@@ -1,7 +1,7 @@
 # AI 日记"镜子"系统 — 落地与实现文档
 
-> 版本：v0.3
-> 日期：2026-07-23（初版） / 2026-08-04（更新）
+> 版本：v0.4
+> 日期：2026-07-23（初版） / 2026-08-04（更新） / 2026-08-07（用户隔离更新）
 > 状态：讨论中
 
 **关联文档：**
@@ -202,32 +202,66 @@ public class AiGrpcClient {
     private final MirrorChatGrpc.MirrorChatBlockingStub chatStub;
     private final MirrorProfileGrpc.MirrorProfileBlockingStub profileStub;
 
-    // 记录分类（标题/摘要/标签/情绪，一次调用完成）
-    public ClassifyResponse classify(String content) {
-        return recordStub
-            .withDeadlineAfter(30, TimeUnit.SECONDS)
-            .classify(ClassifyRequest.newBuilder().setContent(content).build());
+    @Autowired
+    private UserSettingsMapper userSettingsMapper;
+
+    // 获取用户的 LLM 配置
+    private LlmConfig getLlmConfig(String userId) {
+        UserSettings settings = userSettingsMapper.selectByUserId(userId);
+        return LlmConfig.newBuilder()
+            .setProvider(settings.getAiProvider())
+            .setApiKey(settings.getAiApiKey())
+            .setBaseUrl(settings.getAiBaseUrl() != null ? settings.getAiBaseUrl() : "")
+            .setModel(settings.getAiModel())
+            .build();
     }
 
-    // 文本转向量
-    public EmbedResponse embed(String text) {
+    // 获取用户的 Embedding 配置
+    private EmbeddingConfig getEmbeddingConfig(String userId) {
+        UserSettings settings = userSettingsMapper.selectByUserId(userId);
+        return EmbeddingConfig.newBuilder()
+            .setSource(settings.getEmbeddingSource())
+            .setLocalModel(settings.getEmbeddingModel())
+            .setApiProvider(settings.getAiProvider())
+            .setApiKey(settings.getEmbeddingApiKey() != null ? settings.getEmbeddingApiKey() : "")
+            .setApiModel(settings.getEmbeddingModel())
+            .build();
+    }
+
+    // 记录分类（携带用户 LLM 配置）
+    public ClassifyResponse classify(String userId, String content) {
+        return recordStub
+            .withDeadlineAfter(30, TimeUnit.SECONDS)
+            .classify(ClassifyRequest.newBuilder()
+                .setContent(content)
+                .setLlmConfig(getLlmConfig(userId))
+                .build());
+    }
+
+    // 文本转向量（携带用户 Embedding 配置）
+    public EmbedResponse embed(String userId, String text) {
         return embedStub
             .withDeadlineAfter(10, TimeUnit.SECONDS)
-            .embed(EmbedRequest.newBuilder().setText(text).build());
+            .embed(EmbedRequest.newBuilder()
+                .setText(text)
+                .setEmbeddingConfig(getEmbeddingConfig(userId))
+                .build());
     }
 
     // 批量转向量
-    public EmbedBatchResponse embedBatch(List<String> texts) { ... }
+    public EmbedBatchResponse embedBatch(String userId, List<String> texts) { ... }
 
-    // 提取对话意图（过滤条件 + 改写 query）
-    public ExtractIntentResponse extractIntent(String query) { ... }
+    // 提取对话意图（携带用户 LLM 配置）
+    public ExtractIntentResponse extractIntent(String userId, String query) { ... }
 
-    // 对话（流式返回）
-    public Iterator<ChatChunk> chat(String question, List<ChatMessage> history,
+    // 对话（流式返回，携带用户 LLM 配置）
+    public Iterator<ChatChunk> chat(String userId, String question,
+                                     List<ChatMessage> history,
                                      List<RetrievedChunk> chunks) { ... }
 
-    // 生成画像
-    public GenerateProfileResponse generateProfile(GenerateProfileRequest request) { ... }
+    // 生成画像（携带用户 LLM 配置）
+    public GenerateProfileResponse generateProfile(String userId,
+                                                    GenerateProfileRequest request) { ... }
 }
 ```
 
@@ -247,17 +281,17 @@ public class RagService {
     @Autowired
     private ChunkMapper chunkMapper;
 
-    public List<Chunk> search(String query, Map<String, Object> filters) {
+    public List<Chunk> search(String userId, String query, Map<String, Object> filters) {
         // 1. gRPC → Python：将 query 转为向量
         EmbedResponse embedResult = aiGrpcClient.embed(query);
         List<Float> queryVector = embedResult.getVectorList();
 
-        // 2. Java 端：构建 pgvector 查询（带元数据过滤）
+        // 2. Java 端：构建 pgvector 查询（带用户隔离 + 元数据过滤）
         // SQL: SELECT *, embedding <-> query_vector AS distance
         //      FROM chunks
-        //      WHERE metadata @> filters
+        //      WHERE user_id = ? AND metadata @> filters
         //      ORDER BY distance LIMIT 10
-        return chunkMapper.searchByVector(queryVector, filters, 10);
+        return chunkMapper.searchByVector(userId, queryVector, filters, 10);
     }
 }
 ```
@@ -275,26 +309,47 @@ public class RecordService {
     @Autowired
     private AiGrpcClient aiGrpcClient;
 
-    public ProcessResult process(String content) {
+    public ProcessResult process(String userId, String content) {
         // 1. 长度检测（Java 端）
         if (content.length() > 500) {
             return ProcessResult.tooLong();
         }
 
-        // 2. gRPC → Python：AI 分类
-        ClassifyResponse classifyResult = aiGrpcClient.classify(content);
+        // 2. gRPC → Python：AI 分类（携带用户 LLM 配置）
+        ClassifyResponse classifyResult = aiGrpcClient.classify(userId, content);
         if (classifyResult.getSkip()) {
             return ProcessResult.skipped(classifyResult.getSkipReason());
         }
 
-        // 3. Java 端：保存记录到 records 表
-        Record record = saveRecord(content, classifyResult);
+        // 3. Java 端：保存记录到 records 表（关联 userId）
+        Record record = saveRecord(userId, content, classifyResult);
 
-        // 4. gRPC → Python：生成向量
-        EmbedResponse embedResult = aiGrpcClient.embed(content);
+        // 4. 不在这里做 Embedding，等用户审核通过后再做
+        return ProcessResult.pendingReview(record);
+    }
 
-        // 5. Java 端：保存向量到 chunks 表（pgvector）
-        Chunk chunk = saveChunk(record.getId(), content, embedResult);
+    // 审核通过后调用
+    public ProcessResult approve(String userId, Long recordId, ClassifyResponse userModifications) {
+        Record record = recordMapper.selectById(recordId);
+        // 校验记录归属
+        if (!record.getUserId().equals(userId)) {
+            throw new AccessDeniedException("无权操作此记录");
+        }
+
+        // 1. 应用用户修改（如果有）
+        if (userModifications != null) {
+            applyModifications(record, userModifications);
+        }
+
+        // 2. gRPC → Python：生成向量（携带用户 Embedding 配置）
+        EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
+
+        // 3. Java 端：保存向量到 chunks 表（关联 userId）
+        Chunk chunk = saveChunk(userId, record.getId(), record.getContent(), embedResult);
+
+        // 4. 更新状态为 done
+        record.setRecordStatus("done");
+        recordMapper.updateById(record);
 
         return ProcessResult.success(record, chunk);
     }
@@ -316,19 +371,19 @@ public class ChatService {
     @Autowired
     private RagService ragService;
 
-    public void chat(String sessionId, String question, StreamObserver<ChatChunk> responseObserver) {
+    public void chat(String userId, String sessionId, String question, StreamObserver<ChatChunk> responseObserver) {
         // 1. gRPC → Python：提取意图
         ExtractIntentResponse intent = aiGrpcClient.extractIntent(question);
 
-        // 2. Java 端：pgvector 向量检索 + 元数据过滤
+        // 2. Java 端：pgvector 向量检索 + 用户隔离 + 元数据过滤
         Map<String, Object> filters = buildFilters(intent);
-        List<Chunk> chunks = ragService.search(intent.getRewrittenQuery(), filters);
+        List<Chunk> chunks = ragService.search(userId, intent.getRewrittenQuery(), filters);
 
         // 3. Java 端：加载对话历史
         List<ChatMessage> history = chatHistoryMapper.getBySessionId(sessionId);
 
-        // 4. gRPC → Python：流式生成回答
-        Iterator<ChatChunk> stream = aiGrpcClient.chat(question, history, toRetrievedChunks(chunks));
+        // 4. gRPC → Python：流式生成回答（携带用户 LLM 配置）
+        Iterator<ChatChunk> stream = aiGrpcClient.chat(userId, question, history, toRetrievedChunks(chunks));
 
         // 5. 透传给前端（SSE / WebSocket）
         while (stream.hasNext()) {
@@ -360,3 +415,4 @@ public class ChatService {
 | 2026-07-23 | v0.1 | 初始文档，技术栈和项目结构初稿 |
 | 2026-08-04 | v0.2 | 架构调整：AI 推理拆分为 Python gRPC 服务，更新技术栈、项目结构、核心代码实现思路 |
 | 2026-08-04 | v0.3 | 文档审查修正：统一开发计划、明确 grpcio-aio、补充配置管理说明 |
+| 2026-08-07 | v0.4 | 用户隔离：所有 gRPC 调用携带 userId 和用户配置（LlmConfig/EmbeddingConfig），RAG 检索、对话服务、记录处理服务新增 userId 参数；记录处理流程改为审核后才 Embedding；AiGrpcClient 从 user_settings 动态构建配置；三文档对齐修正 |
