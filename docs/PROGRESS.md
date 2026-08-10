@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-10（Settings 模块 CRUD + UUID TypeHandler 全局注册）
+> 最后更新：2026-08-10（gRPC 链路测试 — Java ↔ Python 联调通）
 
 ---
 
@@ -28,7 +28,7 @@
 | P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
 | P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
 | P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
-| - | AI 服务 (Python gRPC) | ⬜ 未开始 | 独立服务，处理/分类/embedding/对话 |
+| - | AI 服务 (Python gRPC) | 🔧 进行中 | gRPC 链路已通，Python 端返回测试数据 |
 | - | 前端 (Vue 3) | ⬜ 未开始 | |
 
 ---
@@ -60,11 +60,13 @@ src/main/java/org/xianshen/mumirrorb/
 ├── config/
 │   ├── SecurityConfig.java              # 路由权限配置
 │   ├── Knife4jConfig.java               # API 文档
-│   └── WebMvcConfig.java                # CORS
+│   ├── WebMvcConfig.java                # CORS
+│   └── GrpcClientConfig.java            # gRPC channel 管理
 ├── controller/
 │   ├── AuthController.java              # 认证端点（4个）
 │   ├── RecordController.java            # 记录端点（6个）
-│   └── SettingsController.java          # 配置端点（4个）
+│   ├── SettingsController.java          # 配置端点（4个）
+│   └── GrpcTestController.java          # gRPC 测试端点（3个，临时）
 ├── mapper/
 │   ├── UserMapper.java
 │   ├── RecordMapper.java
@@ -96,6 +98,8 @@ src/main/java/org/xianshen/mumirrorb/
 │       ├── AuthServiceImpl.java
 │       ├── RecordServiceImpl.java       # 记录服务实现
 │       └── SettingsServiceImpl.java     # 配置服务实现
+├── grpc/
+│   └── AiGrpcClient.java               # AI gRPC 客户端封装
 └── pipeline/                            # 数据管道框架
     ├── RecordProcessor.java
     ├── RecordPipeline.java
@@ -240,10 +244,11 @@ PROCESSING → REVIEWING → DONE
 
 **当前目标：对接 AI 服务**
 
-1. 实现 Python gRPC AI 服务（内容分类、标签提取、embedding）
-2. 完善 RecordPipeline 管道处理（ClassifyProcessor、EmbedProcessor）
-3. 实现向量存储（chunks 表 + pgvector）
-4. 实现镜子/画像模块（用户画像生成）
+1. ~~搭建 gRPC 基础设施~~ ✅ 已完成
+2. Python 端实现真实的 Classify（接 LLM，替换硬编码测试数据）
+3. 完善 RecordPipeline 管道处理（ClassifyProcessor、EmbedProcessor 接入 AiGrpcClient）
+4. 实现向量存储（chunks 表 + pgvector）
+5. 实现镜子/画像模块（用户画像生成）
 
 **后续目标：**
 
@@ -271,9 +276,43 @@ PROCESSING → REVIEWING → DONE
 
 ## 九、今日更新记录（2026-08-10）
 
-### 完成功能
+### gRPC 链路测试（晚间）
 
-1. **用户配置模块（Settings）CRUD**
+1. **完成 gRPC 基础设施搭建**
+   - pom.xml 添加 gRPC 依赖（grpc-netty-shaded、grpc-protobuf、grpc-stub、protobuf-java）+ javax.annotation-api
+   - 添加 protobuf-maven-plugin，从 `src/main/proto/*.proto` 自动生成 Java 代码
+   - 添加 os-maven-plugin 扩展（检测系统架构，下载对应 protoc 二进制）
+
+2. **新增文件**
+   - `config/GrpcClientConfig.java` — gRPC channel 管理（连接 `localhost:50051`）
+   - `grpc/AiGrpcClient.java` — AI 调用封装（classify / embed / getModelInfo）
+   - `controller/GrpcTestController.java` — 3 个测试端点（公开，无需 JWT）
+
+3. **修改文件**
+   - `SecurityConfig.java` — 测试端点 `/grpc-test/**` 加入公开访问列表
+
+4. **联调结果**
+   - Java ↔ Python gRPC 链路已通
+   - Python 端返回硬编码测试数据，Classify 和 Embed 均正常返回
+   - 已验证枚举类型（ContentType、MoodType、TaskStatus）跨 proto 文件引用正确
+
+5. **踩坑记录**
+   - **protobuf 消息类是外层类的内部类**：`ClassifyResponse` 不是独立类，要用 `RecordProcessorProto.ClassifyResponse`
+   - **Spring Boot 3.x + gRPC 的 javax 注解问题**：gRPC 生成代码用 `javax.annotation.Generated`，Spring Boot 3 用 `jakarta.*`，需手动加 `javax.annotation-api` 依赖
+   - **Windows curl 中文编码**：CMD/PowerShell 的 curl 发中文用 GBK 编码，不是 UTF-8，会导致 Jackson 解析报错。用英文测试或改用 Postman
+   - **proto 枚举跨文件引用**：`ContentType` 定义在 `common.proto`，Python 生成后在 `common_pb2` 模块中，不在 `record_processor_pb2` 里
+
+### 测试端点（临时，测试完删除）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/grpc-test/classify` | 测试 AI 分类，Body: `{"content": "..."}` |
+| POST | `/api/grpc-test/embed` | 测试向量化，Body: `{"text": "..."}` |
+| GET | `/api/grpc-test/model-info` | 测试模型信息查询 |
+
+---
+
+### Settings 模块（下午）
    - 完整 CRUD：获取配置、更新配置（部分更新）
    - 测试连接：AI 连接测试、数据库连接测试
    - API Key 加密存储：使用 AES-256-GCM 加密，返回时脱敏
