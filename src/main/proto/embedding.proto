@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package mirror;
 
+import "common.proto";
+
 option java_package = "org.xianshen.mumirrorb.grpc.gen";
 option java_outer_classname = "EmbeddingProto";
 
@@ -14,9 +16,10 @@ service EmbeddingService {
   rpc GetModelInfo (ModelInfoRequest) returns (ModelInfoResponse);
 }
 
-// 向量化请求（只传文本）
+// 向量化请求
 message EmbedRequest {
   string text = 1;
+  EmbeddingConfig embedding_config = 2;  // Embedding 配置（每次请求携带）
 }
 
 // 向量化响应

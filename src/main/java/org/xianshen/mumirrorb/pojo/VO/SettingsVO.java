@@ -31,6 +31,9 @@ public class SettingsVO {
     @Schema(description = "AI 提供商", example = "openai")
     private String aiProvider;
 
+    @Schema(description = "AI 模型协议", example = "anthropic")
+    private String aiProtocol;
+
     /**
      * 脱敏后的 AI API Key
      *

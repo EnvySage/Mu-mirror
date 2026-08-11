@@ -43,3 +43,28 @@ enum TaskStatus {
   IN_PROGRESS = 2;
   COMPLETED = 3;
 }
+
+// 模型协议
+enum AiProtocol {
+  PROTOCOL_UNKNOWN = 0;
+  OPENAI = 1;       // OpenAI 兼容协议（OpenAI、通义千问、智谱等）
+  ANTHROPIC = 2;    // Anthropic 协议（Claude 系列）
+}
+
+// LLM 配置（每次请求携带）
+message LlmConfig {
+  string provider = 1;      // openai / zhipu / qwen
+  AiProtocol protocol = 2;  // 模型协议：openai / anthropic
+  string api_key = 3;
+  string base_url = 4;      // 可选，留空用默认
+  string model = 5;         // 模型名称
+}
+
+// Embedding 配置（每次请求携带）
+message EmbeddingConfig {
+  string source = 1;        // local / api
+  string local_model = 2;   // 本地模型名，如 "BAAI/bge-m3"
+  string api_provider = 3;
+  string api_key = 4;
+  string api_model = 5;
+}

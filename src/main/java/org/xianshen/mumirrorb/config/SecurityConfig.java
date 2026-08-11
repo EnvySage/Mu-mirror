@@ -56,8 +56,6 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // 公开接口（不含 context-path）
                 .requestMatchers("/auth/login", "/auth/register", "/auth/status").permitAll()
-                // gRPC 测试端点（仅开发环境，测试完成后删除）
-                .requestMatchers("/grpc-test/**").permitAll()
                 // Druid 监控页面
                 .requestMatchers("/druid/**").permitAll()
                 // Swagger/Knife4j 文档（SpringDoc 需要这些路径）

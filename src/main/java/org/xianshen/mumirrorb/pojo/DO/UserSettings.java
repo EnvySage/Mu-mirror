@@ -62,6 +62,17 @@ public class UserSettings {
     private String aiProvider;
 
     /**
+     * AI 模型协议
+     *
+     <p>决定调用 LLM 时使用哪种 API 格式。
+     openai: OpenAI 兼容协议（适用于 OpenAI、通义千问、智谱等）
+     anthropic: Anthropic 协议（适用于 Claude 系列模型）</p>
+     <p>默认：anthropic</p>
+     */
+    @Schema(description = "AI 模型协议", example = "anthropic", allowableValues = {"openai", "anthropic"})
+    private String aiProtocol;
+
+    /**
      * AI API Key（加密存储）
      */
     @Schema(description = "AI API Key（加密存储）", example = "sk-xxx")

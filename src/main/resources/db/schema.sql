@@ -87,3 +87,4 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 -- user_settings 索引
 CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ai_protocol VARCHAR(20) DEFAULT 'anthropic';

@@ -3,6 +3,8 @@ package org.xianshen.mumirrorb.pipeline.event;
 import lombok.Getter;
 import org.springframework.context.ApplicationEvent;
 
+import java.util.UUID;
+
 /**
  * 记录创建事件
  *
@@ -19,9 +21,9 @@ public class RecordCreatedEvent extends ApplicationEvent {
     /**
      * 用户ID
      */
-    private final String userId;
+    private final UUID userId;
 
-    public RecordCreatedEvent(Object source, Long recordId, String userId) {
+    public RecordCreatedEvent(Object source, Long recordId, UUID userId) {
         super(source);
         this.recordId = recordId;
         this.userId = userId;

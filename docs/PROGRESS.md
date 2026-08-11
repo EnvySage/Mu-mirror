@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-10（gRPC 链路测试 — Java ↔ Python 联调通）
+> 最后更新：2026-08-11（分类层接入 gRPC + LlmConfig 配置传递 + 模型协议字段）
 
 ---
 
@@ -28,7 +28,7 @@
 | P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
 | P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
 | P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
-| - | AI 服务 (Python gRPC) | 🔧 进行中 | gRPC 链路已通，Python 端返回测试数据 |
+| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通 |
 | - | 前端 (Vue 3) | ⬜ 未开始 | |
 
 ---
@@ -65,8 +65,7 @@ src/main/java/org/xianshen/mumirrorb/
 ├── controller/
 │   ├── AuthController.java              # 认证端点（4个）
 │   ├── RecordController.java            # 记录端点（6个）
-│   ├── SettingsController.java          # 配置端点（4个）
-│   └── GrpcTestController.java          # gRPC 测试端点（3个，临时）
+│   └── SettingsController.java          # 配置端点（4个）
 ├── mapper/
 │   ├── UserMapper.java
 │   ├── RecordMapper.java
@@ -245,10 +244,11 @@ PROCESSING → REVIEWING → DONE
 **当前目标：对接 AI 服务**
 
 1. ~~搭建 gRPC 基础设施~~ ✅ 已完成
-2. Python 端实现真实的 Classify（接 LLM，替换硬编码测试数据）
-3. 完善 RecordPipeline 管道处理（ClassifyProcessor、EmbedProcessor 接入 AiGrpcClient）
-4. 实现向量存储（chunks 表 + pgvector）
-5. 实现镜子/画像模块（用户画像生成）
+2. ~~分类层接入 gRPC~~ ✅ 已完成
+3. Python 端实现真实的 Classify（接 LLM，返回真实标签）
+4. 实现 EmbedProcessor 向量化（用户审核后执行 Embedding → 存 chunks 表）
+5. 实现向量存储（chunks 表 + pgvector）
+6. 实现镜子/画像模块（用户画像生成）
 
 **后续目标：**
 
@@ -274,43 +274,58 @@ PROCESSING → REVIEWING → DONE
 
 ---
 
-## 九、今日更新记录（2026-08-10）
+## 九、更新记录（2026-08-11）
 
-### gRPC 链路测试（晚间）
+### 分类层接入 gRPC + 配置传递
 
-1. **完成 gRPC 基础设施搭建**
-   - pom.xml 添加 gRPC 依赖（grpc-netty-shaded、grpc-protobuf、grpc-stub、protobuf-java）+ javax.annotation-api
-   - 添加 protobuf-maven-plugin，从 `src/main/proto/*.proto` 自动生成 Java 代码
-   - 添加 os-maven-plugin 扩展（检测系统架构，下载对应 protoc 二进制）
+1. **删除测试代码**
+   - 删除 `GrpcTestController.java`（临时测试端点）
+   - 清理 `SecurityConfig.java` 中的测试端点公开访问
 
-2. **新增文件**
-   - `config/GrpcClientConfig.java` — gRPC channel 管理（连接 `localhost:50051`）
-   - `grpc/AiGrpcClient.java` — AI 调用封装（classify / embed / getModelInfo）
-   - `controller/GrpcTestController.java` — 3 个测试端点（公开，无需 JWT）
+2. **ClassifyProcessor 接入真实 gRPC**
+   - 从桩实现改为调用 `aiGrpcClient.classify(userId, content)`
+   - 将 AI 返回的 title/summary/contentType/mood/keywords 写入 record
+   - AI 判定无意义内容（skip=true）时抛异常，管道中断
 
-3. **修改文件**
-   - `SecurityConfig.java` — 测试端点 `/grpc-test/**` 加入公开访问列表
+3. **AiGrpcClient 改造**
+   - classify/embed 方法新增 userId 参数
+   - 从 `user_settings` 表读取用户配置，构建 `LlmConfig`/`EmbeddingConfig` 传给 Python
+   - 注入 `SettingsMapper` 读取配置
+   - API Key 解密后传给 Python
 
-4. **联调结果**
-   - Java ↔ Python gRPC 链路已通
-   - Python 端返回硬编码测试数据，Classify 和 Embed 均正常返回
-   - 已验证枚举类型（ContentType、MoodType、TaskStatus）跨 proto 文件引用正确
+4. **Proto 更新**
+   - `common.proto` 新增 `AiProtocol` 枚举（OPENAI/ANTHROPIC）+ `LlmConfig` + `EmbeddingConfig` 消息
+   - `record_processor.proto` 的 `ClassifyRequest` 新增 `llm_config` 字段
+   - `embedding.proto` 的 `EmbedRequest` 新增 `embedding_config` 字段
+   - `embedding.proto` 补充 `import "common.proto"`
 
-5. **踩坑记录**
-   - **protobuf 消息类是外层类的内部类**：`ClassifyResponse` 不是独立类，要用 `RecordProcessorProto.ClassifyResponse`
-   - **Spring Boot 3.x + gRPC 的 javax 注解问题**：gRPC 生成代码用 `javax.annotation.Generated`，Spring Boot 3 用 `jakarta.*`，需手动加 `javax.annotation-api` 依赖
-   - **Windows curl 中文编码**：CMD/PowerShell 的 curl 发中文用 GBK 编码，不是 UTF-8，会导致 Jackson 解析报错。用英文测试或改用 Postman
-   - **proto 枚举跨文件引用**：`ContentType` 定义在 `common.proto`，Python 生成后在 `common_pb2` 模块中，不在 `record_processor_pb2` 里
+5. **用户配置新增 aiProtocol 字段**
+   - `UserSettings.java`、`SettingsDTO.java`、`SettingsVO.java` 新增 `aiProtocol`
+   - `SettingsServiceImpl.java` 更新逻辑 + 默认值 `"anthropic"`
+   - 数据库：`ALTER TABLE user_settings ADD COLUMN ai_protocol VARCHAR(20) DEFAULT 'anthropic'`
 
-### 测试端点（临时，测试完删除）
+6. **事件机制修复**
+   - `RecordCreatedEvent` userId 从 String 改为 UUID
+   - `RecordServiceImpl` 启用事件发布（之前被注释）
+   - `RecordEventListener` 管道完成后状态改为 REVIEWING（等用户审核）
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/grpc-test/classify` | 测试 AI 分类，Body: `{"content": "..."}` |
-| POST | `/api/grpc-test/embed` | 测试向量化，Body: `{"text": "..."}` |
-| GET | `/api/grpc-test/model-info` | 测试模型信息查询 |
+7. **踩坑记录**
+   - **protobuf 消息类是内部类**：`ClassifyResponse` 要用 `RecordProcessorProto.ClassifyResponse`
+   - **枚举在 common.proto**：`ContentType`/`MoodType`/`TaskStatus` 在 `CommonProto` 里，不在 `RecordProcessorProto`
+   - **Spring Boot 3 + gRPC javax 注解**：需手动加 `javax.annotation-api` 依赖
+   - **proto import 缺失**：`embedding.proto` 使用 `EmbeddingConfig` 但没 import `common.proto`
+   - **Python proto 需同步重新编译**：Java 端加了新消息后 Python 必须重新生成 pb2 文件，否则字段读串
 
 ---
+
+## 十、历史更新记录（2026-08-10）
+
+### gRPC 链路测试
+
+1. **完成 gRPC 基础设施搭建**
+   - pom.xml 添加 gRPC 依赖 + protobuf-maven-plugin
+   - 新增 `GrpcClientConfig.java`、`AiGrpcClient.java`
+   - Java ↔ Python gRPC 链路已通
 
 ### Settings 模块（下午）
    - 完整 CRUD：获取配置、更新配置（部分更新）

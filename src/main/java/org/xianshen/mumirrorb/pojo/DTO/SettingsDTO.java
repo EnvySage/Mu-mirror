@@ -20,6 +20,14 @@ public class SettingsDTO {
     private String aiProvider;
 
     /**
+     * AI 模型协议
+     *
+     <p>openai: OpenAI 兼容协议，anthropic: Anthropic 协议</p>
+     */
+    @Schema(description = "AI 模型协议", example = "anthropic", allowableValues = {"openai", "anthropic"})
+    private String aiProtocol;
+
+    /**
      * AI API Key（传明文，后端加密存储）
      */
     @Schema(description = "AI API Key（传明文，后端加密存储）", example = "sk-xxx")

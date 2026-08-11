@@ -49,11 +49,11 @@ public class RecordEventListener {
             return;
         }
 
-        // 2. 跑管道（清洗 → 分类 → 向量化）
+        // 2. 跑管道（清洗 → 分类）
         try {
             record = pipeline.execute(record);
-            record.setStatus(RecordStatus.DONE);
-            log.info("异步管道完成，记录ID: {}", recordId);
+            record.setStatus(RecordStatus.REVIEWING);
+            log.info("异步管道完成，记录ID: {}, 等待用户审核", recordId);
         } catch (Exception e) {
             record.setStatus(RecordStatus.FAILED);
             log.error("异步管道失败，记录ID: {}，原因: {}", recordId, e.getMessage());

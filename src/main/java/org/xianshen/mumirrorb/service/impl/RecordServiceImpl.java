@@ -18,6 +18,8 @@ import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.service.RecordService;
 
+import org.xianshen.mumirrorb.pipeline.event.RecordCreatedEvent;
+
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -58,7 +60,7 @@ public class RecordServiceImpl implements RecordService {
         log.info("记录已入库，ID: {}", record.getId());
 
         // 3. 发布事件（事务提交后，监听器异步执行管道处理）
-//        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
+        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
 
         // 4. 立即返回（status=processing，前端显示转圈动画）
         return toVO(record);

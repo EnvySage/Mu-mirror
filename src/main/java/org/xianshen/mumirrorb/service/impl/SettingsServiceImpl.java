@@ -43,6 +43,9 @@ public class SettingsServiceImpl implements SettingsService {
         if (dto.getAiProvider() != null) {
             settings.setAiProvider(dto.getAiProvider());
         }
+        if (dto.getAiProtocol() != null) {
+            settings.setAiProtocol(dto.getAiProtocol());
+        }
         if (dto.getAiApiKey() != null) {
             settings.setAiApiKey(CryptoUtils.encrypt(dto.getAiApiKey()));
         }
@@ -138,6 +141,7 @@ public class SettingsServiceImpl implements SettingsService {
     private UserSettings createEmptySettings(UUID userId) {
         UserSettings settings = UserSettings.builder()
                 .userId(userId)
+                .aiProtocol("anthropic")
                 .embeddingSource("local")
                 .reviewMode("manual")
                 .createdAt(OffsetDateTime.now())
@@ -156,6 +160,7 @@ public class SettingsServiceImpl implements SettingsService {
                 .id(settings.getId())
                 .userId(settings.getUserId())
                 .aiProvider(settings.getAiProvider())
+                .aiProtocol(settings.getAiProtocol())
                 .aiApiKey(settings.getAiApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getAiApiKey())) : null)
                 .aiBaseUrl(settings.getAiBaseUrl())
                 .aiModel(settings.getAiModel())
