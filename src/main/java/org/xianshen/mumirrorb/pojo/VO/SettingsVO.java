@@ -51,6 +51,9 @@ public class SettingsVO {
     @Schema(description = "Embedding 来源", example = "local")
     private String embeddingSource;
 
+    @Schema(description = "Embedding API 地址")
+    private String embeddingBaseUrl;
+
     /**
      * 脱敏后的 Embedding API Key
      */

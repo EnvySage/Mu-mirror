@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-12（日历导航接口 + 文档与代码对齐 + Proto 同步）
+> 最后更新：2026-08-12（设计修正：拆分移至分类层 + Embedding 移出管道）
 
 ---
 
@@ -101,11 +101,13 @@ src/main/java/org/xianshen/mumirrorb/
 ├── grpc/
 │   └── AiGrpcClient.java               # AI gRPC 客户端封装
 └── pipeline/                            # 数据管道框架
-    ├── RecordProcessor.java
-    ├── RecordPipeline.java
+    ├── RecordProcessor.java             # 管道处理器接口
+    ├── RecordPipeline.java              # 管道编排器
+    ├── CleanProcessor.java              # 第1层：文本清洗
+    ├── ClassifyProcessor.java           # 第2层：AI 分类
     └── event/
         ├── RecordCreatedEvent.java
-        └── RecordEventListener.java
+        └── RecordEventListener.java     # 事件监听器（触发管道）
 ```
 
 ---
@@ -247,16 +249,16 @@ PROCESSING → REVIEWING → DONE
 
 1. ~~搭建 gRPC 基础设施~~ ✅ 已完成
 2. ~~分类层接入 gRPC~~ ✅ 已完成
-3. Python 端实现真实的 Classify（接 LLM，返回真实标签）
-4. 实现 EmbedProcessor 向量化（用户审核后执行 Embedding → 存 chunks 表）
-5. 实现向量存储（chunks 表 + pgvector）
+3. Python 端实现真实的 Classify（接 LLM，支持拆分+分类，返回 repeated ClassifyItem）
+4. 实现 Chunk 实体 + ChunkMapper + chunks 表（pgvector）
+5. confirmReview() 中 Embedding 存储向量（代码骨架已写好，待 Chunk 实体就绪后取消注释）
 6. 实现镜子/画像模块（用户画像生成）
 
 **后续目标：**
 
-5. 对话模块（基于 RAG 的 AI 对话）
-6. 每日摘要生成
-7. 前端开发（Vue 3）
+7. 对话模块（基于 RAG 的 AI 对话）
+8. 每日摘要生成
+9. 前端开发（Vue 3）
 
 ---
 
@@ -276,7 +278,52 @@ PROCESSING → REVIEWING → DONE
 
 ---
 
-## 九、更新记录（2026-08-12）
+## 九、更新记录（2026-08-12 — 设计修正）
+
+### 设计修正（文档 + 代码）
+
+1. **拆分从输入层移至分类层**
+   - 原设计：输入层做多事件拆分 → 分类层做标签
+   - 新设计：分类层一次 LLM 调用同时完成拆分 + 分类
+   - Proto：`ClassifyResponse` 改为 `repeated ClassifyItem items`（支持返回多条）
+   - 理由：拆分是 AI 任务，与分类在一次调用中完成效率最高（1 次 vs N+1 次），用户只需审核一次
+
+2. **Embedding 从管道移出**
+   - 原设计：EmbedProcessor 在管道中 @Order(3)，但实际是桩代码从未执行
+   - 新设计：Embedding 在 `confirmReview()` 中触发（用户确认后才执行）
+   - 删除 `EmbedProcessor.java`（死代码）
+   - `RecordServiceImpl.confirmReview()` 新增 Embedding 调用
+
+3. **时区策略**
+   - 确认使用 UTC + 8（东八区）统一标准（待后续代码对齐）
+
+4. **超时设置**
+   - Classify 超时从 30s 调整为 180s（LLM 含拆分+分类，耗时长）
+
+5. **Embedding 失败策略**
+   - Embedding 失败不影响确认流程，记录仍变为 DONE
+   - 向量未写入但记录已锁定，后续可补录
+
+6. **文档全面更新**
+   - 主设计文档 v1.4、AI 服务设计 v0.5、实现文档 v0.6
+   - 管道图、状态流转图、数据流图、代码示例全部同步修正
+
+7. **Embedding 配置补全：新增 `embedding_base_url` 字段**
+   - 原设计：Embedding 缺少 `base_url`，无法自定义 API 地址
+   - 新增字段：`user_settings.embedding_base_url`
+   - 涉及文件：`UserSettings.java`、`SettingsDTO.java`、`SettingsVO.java`、`AiGrpcClient.java`、`SettingsServiceImpl.java`、`common.proto`、`schema.sql`
+   - Proto：`EmbeddingConfig` 新增 `base_url` 字段
+   - Python 端需同步：重新编译 proto + 更新 `ApiEmbedder` 使用 `base_url`
+
+8. **日历接口 Druid SQL 兼容修复**
+   - 问题：Druid SQL 防火墙不认 `AT TIME ZONE` 语法，报 `ParserException`
+   - 修复：去掉 SQL 中的 `AT TIME ZONE 'Asia/Shanghai'`，改用 `TO_CHAR(created_at, 'YYYY-MM-DD')`
+   - 时区保障：`application-dev.yml` 数据库连接加 `options=-c timezone=Asia/Shanghai`，确保会话时区为北京时间
+   - 涉及文件：`RecordMapper.java`、`application-dev.yml`
+
+---
+
+## 九、更新记录（2026-08-12 — 日历导航）
 
 ### 日历导航接口
 

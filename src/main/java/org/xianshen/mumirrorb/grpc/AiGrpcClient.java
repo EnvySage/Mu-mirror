@@ -162,6 +162,9 @@ public class AiGrpcClient {
             if (settings.getEmbeddingApiKey() != null) {
                 builder.setApiKey(CryptoUtils.decrypt(settings.getEmbeddingApiKey()));
             }
+            if (settings.getEmbeddingBaseUrl() != null) {
+                builder.setBaseUrl(settings.getEmbeddingBaseUrl());
+            }
         }
 
         return builder.build();

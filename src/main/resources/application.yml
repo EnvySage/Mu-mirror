@@ -1,6 +1,6 @@
 # ==================== 公共配置 ====================
 server:
-  port: 9005
+  port: 9050
   servlet:
     context-path: /api
 

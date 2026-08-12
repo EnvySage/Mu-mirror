@@ -99,6 +99,12 @@ public class UserSettings {
     private String embeddingSource;
 
     /**
+     * Embedding API 地址（仅 api 模式使用，留空使用默认）
+     */
+    @Schema(description = "Embedding API 地址（可选，留空使用默认）")
+    private String embeddingBaseUrl;
+
+    /**
      * Embedding API Key（加密存储，仅 api 模式使用）
      */
     @Schema(description = "Embedding API Key（加密存储）")

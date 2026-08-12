@@ -26,7 +26,7 @@ public interface RecordMapper extends BaseMapper<Record> {
      * @return 每行包含 date（字符串如 "2026-08-12"）和 cnt（记录数）
      */
     @Select("""
-            SELECT TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date,
+            SELECT TO_CHAR(created_at, 'YYYY-MM-DD') AS date,
                    COUNT(*) AS cnt
             FROM records
             WHERE user_id = #{userId}::uuid
@@ -34,7 +34,7 @@ public interface RecordMapper extends BaseMapper<Record> {
               AND status != 'failed'
               AND created_at >= #{monthStart}
               AND created_at < #{monthEnd}
-            GROUP BY TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')
+            GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
             """)
     List<Map<String, Object>> countByDay(@Param("userId") UUID userId,
                                          @Param("monthStart") OffsetDateTime monthStart,

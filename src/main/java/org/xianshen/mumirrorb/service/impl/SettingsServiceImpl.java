@@ -58,6 +58,9 @@ public class SettingsServiceImpl implements SettingsService {
         if (dto.getEmbeddingSource() != null) {
             settings.setEmbeddingSource(dto.getEmbeddingSource());
         }
+        if (dto.getEmbeddingBaseUrl() != null) {
+            settings.setEmbeddingBaseUrl(dto.getEmbeddingBaseUrl());
+        }
         if (dto.getEmbeddingApiKey() != null) {
             settings.setEmbeddingApiKey(CryptoUtils.encrypt(dto.getEmbeddingApiKey()));
         }
@@ -165,6 +168,7 @@ public class SettingsServiceImpl implements SettingsService {
                 .aiBaseUrl(settings.getAiBaseUrl())
                 .aiModel(settings.getAiModel())
                 .embeddingSource(settings.getEmbeddingSource())
+                .embeddingBaseUrl(settings.getEmbeddingBaseUrl())
                 .embeddingApiKey(settings.getEmbeddingApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getEmbeddingApiKey())) : null)
                 .embeddingModel(settings.getEmbeddingModel())
                 .reviewMode(settings.getReviewMode())

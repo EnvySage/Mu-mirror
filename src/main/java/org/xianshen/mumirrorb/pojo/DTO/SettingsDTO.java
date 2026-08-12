@@ -52,6 +52,12 @@ public class SettingsDTO {
     private String embeddingSource;
 
     /**
+     * Embedding API 地址（可选，留空使用默认）
+     */
+    @Schema(description = "Embedding API 地址（可选，留空使用默认）")
+    private String embeddingBaseUrl;
+
+    /**
      * Embedding API Key（传明文，后端加密存储）
      */
     @Schema(description = "Embedding API Key（传明文，后端加密存储）")

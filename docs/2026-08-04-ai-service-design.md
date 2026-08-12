@@ -1,7 +1,7 @@
 # AI 服务层设计文档 — Python gRPC 服务
 
-> 版本：v0.4
-> 日期：2026-08-04（初版） / 2026-08-07（配置机制重构） / 2026-08-12（文档与代码对齐）
+> 版本：v0.5
+> 日期：2026-08-04（初版） / 2026-08-07（配置机制重构） / 2026-08-12（文档与代码对齐） / 2026-08-12（设计修正）
 > 状态：设计中
 
 **关联文档：**
@@ -45,14 +45,16 @@ Python AI 服务（gRPC Server）
 
 **随手记处理流程：**
 ```
-用户输入 → Java 接收
-  → gRPC: Classify（携带用户 LLM 配置，Python 返回标题/摘要/标签）
-  → Java 保存 records 表（status=reviewing）
+用户输入 → Java 接收（长度检测，>500 字提示用户）
+  → gRPC: Classify（携带用户 LLM 配置）
+    → Python 内部：判断是否需要拆分 → 逐条分类
+    → 返回多条 ClassifyItem（1条或多条）
+  → Java 每条结果保存为一条 record（status=reviewing）
   → 前端展示审核界面，等待用户操作
-  → 用户审核通过（可先修改标签）
-  → gRPC: Embed（携带用户 Embedding 配置，Python 返回向量）
-  → Java 保存 chunks 表（pgvector）
-  → status=done，记录锁定
+  → 用户审核通过（confirmReview，可先修改标签）
+    → gRPC: Embed（携带用户 Embedding 配置，Python 返回向量）
+    → Java 保存 chunks 表（pgvector）
+    → status=done，记录锁定
 ```
 
 **向镜子提问流程：**
@@ -179,7 +181,7 @@ package mirror;
 import "common.proto";
 
 service RecordProcessor {
-  // 分类：输入文本，返回标题/摘要/标签
+  // 分类：输入文本，返回分类结果（支持多条，即拆分+分类一次完成）
   rpc Classify(ClassifyRequest) returns (ClassifyResponse);
 }
 
@@ -191,14 +193,18 @@ message ClassifyRequest {
 }
 
 message ClassifyResponse {
-  bool skip = 1;                // 是否跳过（无意义内容）
-  string skip_reason = 2;       // 跳过原因
-  string title = 3;             // 标题（10字以内）
-  string summary = 4;           // 摘要（30字以内）
-  ContentType content_type = 5; // 内容类型
-  repeated MoodType moods = 6;  // 情绪（多选）
-  TaskStatus status = 7;        // 状态（仅待办/计划类）
-  repeated string keywords = 8; // 关键词 3-5 个
+  bool skip = 1;                    // 是否跳过（无意义内容）
+  string skip_reason = 2;           // 跳过原因
+  repeated ClassifyItem items = 3;  // 分类结果（1条或多条，多条=拆分后逐条分类）
+}
+
+message ClassifyItem {
+  string title = 1;             // 标题（10字以内）
+  string summary = 2;           // 摘要（30字以内）
+  ContentType content_type = 3; // 内容类型
+  repeated MoodType moods = 4;  // 情绪（多选）
+  TaskStatus status = 5;        // 状态（仅待办/计划类）
+  repeated string keywords = 6; // 关键词 3-5 个
 }
 ```
 
@@ -606,11 +612,11 @@ public class AiGrpcClient {
         return builder.build();
     }
 
-    // 记录分类（携带用户 LLM 配置）
+    // 记录分类（携带用户 LLM 配置，支持拆分+分类一次返回多条）
     public RecordProcessorProto.ClassifyResponse classify(UUID userId, String content) {
         CommonProto.LlmConfig llmConfig = buildLlmConfig(userId);
         return recordStub
-            .withDeadlineAfter(30, TimeUnit.SECONDS)
+            .withDeadlineAfter(180, TimeUnit.SECONDS)  // LLM 含拆分+分类，耗时较长
             .classify(RecordProcessorProto.ClassifyRequest.newBuilder()
                 .setContent(content)
                 .setLlmConfig(llmConfig)
@@ -644,11 +650,13 @@ grpc:
 
 ```java
 // 关键调用设置超时
-public ClassifyResponse classify(String content) {
+public ClassifyResponse classify(UUID userId, String content) {
+    CommonProto.LlmConfig llmConfig = buildLlmConfig(userId);
     return recordProcessorStub
-        .withDeadlineAfter(30, TimeUnit.SECONDS)  // 30秒超时
+        .withDeadlineAfter(180, TimeUnit.SECONDS)  // LLM 含拆分+分类，180秒超时
         .classify(ClassifyRequest.newBuilder()
             .setContent(content)
+            .setLlmConfig(llmConfig)
             .build());
 }
 
@@ -806,3 +814,4 @@ async def Classify(self, request, context):
 | 2026-08-07 | v0.3 | 配置机制重构：删除 ConfigService，改为每次请求携带 LlmConfig/EmbeddingConfig；Python 完全无状态，天然支持多用户不同模型；common.proto 新增配置消息定义；所有请求消息新增配置字段；更新工厂函数和懒加载设计；Java 客户端根据 userId 从数据库读取配置放入请求 |
 | 2026-08-07 | v0.3.1 | 文档对齐修正：数据流图补充审核步骤；SplitRequest 新增 LlmConfig；EmbeddingConfig.api_provider 添加映射说明；Docker 环境变量标注为本地开发默认值 |
 | 2026-08-12 | v0.4 | 文档与代码对齐：common.proto 新增 AiProtocol 枚举 + LlmConfig 新增 protocol 字段；record_processor.proto 移除 Split RPC；embedding.proto 移除 EmbedBatch RPC；LLM 工厂函数改为按 protocol 路由（openai/anthropic），新增 anthropic_llm.py；Python 模块结构更新（llm/factory.py, embedding/factory.py）；Java 端 AiGrpcClient 更新（UUID userId, SettingsMapper, CryptoUtils 解密, buildLlmConfig 含 protocol 映射）；状态值 pending_review → reviewing |
+| 2026-08-12 | v0.5 | 设计修正：① ClassifyResponse 改为 repeated ClassifyItem（支持拆分+分类一次返回多条）；② Classify 超时 30s→180s；③ 数据流更新：Classify 返回多条结果，每条生成一条 record，Embedding 在 confirmReview 中触发 |

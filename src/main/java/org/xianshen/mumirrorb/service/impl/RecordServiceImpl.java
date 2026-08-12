@@ -9,6 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
+import org.xianshen.mumirrorb.grpc.AiGrpcClient;
+import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.mapper.TagMapper;
 import org.xianshen.mumirrorb.pojo.DO.Record;
@@ -41,6 +43,7 @@ public class RecordServiceImpl implements RecordService {
     private final RecordMapper recordMapper;
     private final TagMapper tagMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final AiGrpcClient aiGrpcClient;
 
     @Override
     @Transactional
@@ -227,9 +230,29 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能确认完成");
         }
 
-        // 3. 更新状态为 DONE
-        record.setStatus(RecordStatus.DONE);
+        // 3. 标记已审核
         record.setUserReviewed(true);
+
+        // 4. Embedding：将用户确认后的最终版本转向量
+        //    TODO: 向量存入 chunks 表（Chunk 实体 + ChunkMapper 待实现）
+        try {
+            EmbeddingProto.EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
+            log.info("Embedding 完成，记录ID: {}, 维度: {}", recordId, embedResult.getDimension());
+            // TODO: 将 embedResult.getVectorList() 存入 chunks 表
+            // Chunk chunk = Chunk.builder()
+            //         .userId(userId)
+            //         .recordId(recordId)
+            //         .content(record.getContent())
+            //         .embedding(embedResult.getVectorList())
+            //         .build();
+            // chunkMapper.insert(chunk);
+        } catch (Exception e) {
+            // Embedding 失败不影响确认，记录保持 DONE 状态，后续可重试
+            log.error("Embedding 失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);
+        }
+
+        // 5. 更新状态为 DONE，记录锁定
+        record.setStatus(RecordStatus.DONE);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
         log.info("记录审查已确认完成，ID: {}, 用户: {}", recordId, userId);
@@ -293,8 +316,8 @@ public class RecordServiceImpl implements RecordService {
         LocalDate startDate = yearMonth.atDay(1);
         LocalDate endDate = yearMonth.plusMonths(1).atDay(1);
 
-        OffsetDateTime monthStart = startDate.atStartOfDay(ZoneOffset.ofHours(8));
-        OffsetDateTime monthEnd = endDate.atStartOfDay(ZoneOffset.ofHours(8));
+        OffsetDateTime monthStart = startDate.atStartOfDay(ZoneOffset.ofHours(8)).toOffsetDateTime();
+        OffsetDateTime monthEnd = endDate.atStartOfDay(ZoneOffset.ofHours(8)).toOffsetDateTime();
 
         List<Map<String, Object>> rows = recordMapper.countByDay(userId, monthStart, monthEnd);
 

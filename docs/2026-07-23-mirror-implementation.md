@@ -1,7 +1,7 @@
 # AI 日记"镜子"系统 — 落地与实现文档
 
-> 版本：v0.5
-> 日期：2026-07-23（初版） / 2026-08-04（更新） / 2026-08-07（用户隔离更新） / 2026-08-12（文档与代码对齐）
+> 版本：v0.6
+> 日期：2026-07-23（初版） / 2026-08-04（更新） / 2026-08-07（用户隔离更新） / 2026-08-12（文档与代码对齐） / 2026-08-12（设计修正）
 > 状态：讨论中
 
 **关联文档：**
@@ -276,8 +276,8 @@ public class RagService {
     private ChunkMapper chunkMapper;
 
     public List<Chunk> search(UUID userId, String query, Map<String, Object> filters) {
-        // 1. gRPC → Python：将 query 转为向量
-        EmbedResponse embedResult = aiGrpcClient.embed(query);
+        // 1. gRPC → Python：将 query 转为向量（携带用户 Embedding 配置）
+        EmbedResponse embedResult = aiGrpcClient.embed(userId, query);
         List<Float> queryVector = embedResult.getVectorList();
 
         // 2. Java 端：构建 pgvector 查询（带用户隔离 + 元数据过滤）
@@ -303,49 +303,60 @@ public class RecordService {
     @Autowired
     private AiGrpcClient aiGrpcClient;
 
+    /**
+     * 创建记录（提交后触发管道：Clean → Classify）
+     * Classify 支持拆分+分类一次返回多条结果，每条生成一条 record
+     */
     public ProcessResult process(UUID userId, String content) {
-        // 1. 长度检测（Java 端）
+        // 1. 长度检测（Java 端，>500 字提示用户，不阻断）
         if (content.length() > 500) {
-            return ProcessResult.tooLong();
+            // 前端提示，但不阻断处理
         }
 
-        // 2. gRPC → Python：AI 分类（携带用户 LLM 配置）
+        // 2. gRPC → Python：AI 分类（含拆分，携带用户 LLM 配置）
         ClassifyResponse classifyResult = aiGrpcClient.classify(userId, content);
         if (classifyResult.getSkip()) {
             return ProcessResult.skipped(classifyResult.getSkipReason());
         }
 
-        // 3. Java 端：保存记录到 records 表（关联 userId）
-        Record record = saveRecord(userId, content, classifyResult);
+        // 3. 每条分类结果保存为一条 record
+        List<Record> records = new ArrayList<>();
+        for (ClassifyItem item : classifyResult.getItemsList()) {
+            Record record = saveRecord(userId, content, item);
+            records.add(record);
+        }
 
         // 4. 不在这里做 Embedding，等用户审核通过后再做
-        return ProcessResult.pendingReview(record);
+        return ProcessResult.pendingReview(records);
     }
 
-    // 审核通过后调用
-    public ProcessResult approve(UUID userId, Long recordId, ClassifyResponse userModifications) {
+    /**
+     * 审核通过（confirmReview）
+     * 用户确认后触发 Embedding，然后标记为 DONE
+     */
+    public RecordVO confirmReview(UUID userId, Long recordId) {
         Record record = recordMapper.selectById(recordId);
         // 校验记录归属
         if (!record.getUserId().equals(userId)) {
             throw new AccessDeniedException("无权操作此记录");
         }
 
-        // 1. 应用用户修改（如果有）
-        if (userModifications != null) {
-            applyModifications(record, userModifications);
+        // 1. gRPC → Python：Embedding（携带用户 Embedding 配置）
+        //    失败不影响确认，记录仍变为 DONE
+        try {
+            EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
+            // 2. 保存向量到 chunks 表
+            Chunk chunk = saveChunk(userId, record.getId(), record.getContent(), embedResult);
+        } catch (Exception e) {
+            log.error("Embedding 失败，记录ID: {}", recordId, e);
         }
 
-        // 2. gRPC → Python：生成向量（携带用户 Embedding 配置）
-        EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
-
-        // 3. Java 端：保存向量到 chunks 表（关联 userId）
-        Chunk chunk = saveChunk(userId, record.getId(), record.getContent(), embedResult);
-
-        // 4. 更新状态为 done
-        record.setRecordStatus("done");
+        // 3. 更新状态为 done，记录锁定
+        record.setStatus(RecordStatus.DONE);
+        record.setUserReviewed(true);
         recordMapper.updateById(record);
 
-        return ProcessResult.success(record, chunk);
+        return toVO(record);
     }
 }
 ```
@@ -411,3 +422,4 @@ public class ChatService {
 | 2026-08-04 | v0.3 | 文档审查修正：统一开发计划、明确 grpcio-aio、补充配置管理说明 |
 | 2026-08-07 | v0.4 | 用户隔离：所有 gRPC 调用携带 userId 和用户配置（LlmConfig/EmbeddingConfig），RAG 检索、对话服务、记录处理服务新增 userId 参数；记录处理流程改为审核后才 Embedding；AiGrpcClient 从 user_settings 动态构建配置；三文档对齐修正 |
 | 2026-08-12 | v0.5 | 文档与代码对齐：包名 com/mirror → org/xianshen/mumirrorb；项目结构更新（common/pojo/pipeline 等）；AiGrpcClient 更新（UUID userId, SettingsMapper, CryptoUtils, buildLlmConfig 含 AiProtocol）；技术栈版本更新（Spring Boot 3.5, Java 21）；userId 类型 String → UUID |
+| 2026-08-12 | v0.6 | 设计修正：① RagService.embed() 补充 userId 参数；② RecordService.process() 更新为处理 ClassifyResponse 多条结果（repeated ClassifyItem）；③ approve() 重命名为 confirmReview()，Embedding 失败不影响确认；④ Embedding 从管道移出，改为 confirmReview() 中触发 |

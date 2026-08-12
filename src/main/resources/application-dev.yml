@@ -2,7 +2,7 @@
 spring:
   # 数据源配置（开发环境）
   datasource:
-    url: jdbc:postgresql://localhost:5432/mumirror?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    url: jdbc:postgresql://localhost:5432/mumirror?options=-c%20timezone=Asia/Shanghai
     username: postgres
     password: 123456
 
