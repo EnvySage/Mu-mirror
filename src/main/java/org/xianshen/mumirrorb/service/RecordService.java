@@ -5,6 +5,7 @@ import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -121,4 +122,13 @@ public interface RecordService {
      * @param userId   当前用户ID（验证所有权）
      */
     void softDelete(Long recordId, UUID userId);
+
+    /**
+     * 获取指定月份每天的有效记录数（用于日历标记）
+     *
+     * @param month 月份，格式 "2026-08"
+     * @param userId 当前用户ID
+     * @return key=日期（如 "2026-08-12"），value=该日有效记录数
+     */
+    Map<String, Integer> getCalendarDates(String month, UUID userId);
 }

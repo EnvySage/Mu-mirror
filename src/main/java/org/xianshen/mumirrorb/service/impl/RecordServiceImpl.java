@@ -22,9 +22,12 @@ import org.xianshen.mumirrorb.pipeline.event.RecordCreatedEvent;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -193,9 +196,9 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         }
 
-        // 2. 检查状态：只有 REVIEWING 状态（人工审查中）才允许删除
-        if (record.getStatus() != RecordStatus.REVIEWING) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能删除");
+        // 2. 检查状态：REVIEWING 和 FAILED 状态允许删除
+        if (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.FAILED) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查或失败的记录才能删除");
         }
 
         // 3. 设置软删除时间
@@ -280,5 +283,27 @@ public class RecordServiceImpl implements RecordService {
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, Integer> getCalendarDates(String month, UUID userId) {
+        // 解析月份 "2026-08" → YearMonth
+        YearMonth yearMonth = YearMonth.parse(month);
+        LocalDate startDate = yearMonth.atDay(1);
+        LocalDate endDate = yearMonth.plusMonths(1).atDay(1);
+
+        OffsetDateTime monthStart = startDate.atStartOfDay(ZoneOffset.ofHours(8));
+        OffsetDateTime monthEnd = endDate.atStartOfDay(ZoneOffset.ofHours(8));
+
+        List<Map<String, Object>> rows = recordMapper.countByDay(userId, monthStart, monthEnd);
+
+        Map<String, Integer> result = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String date = (String) row.get("date");
+            Number cnt = (Number) row.get("cnt");
+            result.put(date, cnt.intValue());
+        }
+        return result;
     }
 }

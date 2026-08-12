@@ -61,7 +61,7 @@ public class AiGrpcClient {
                     .build();
 
             RecordProcessorProto.ClassifyResponse response = recordStub
-                    .withDeadlineAfter(30, TimeUnit.SECONDS)
+                    .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .classify(request);
 
             log.info("Classify 返回: title={}, contentType={}, skip={}",

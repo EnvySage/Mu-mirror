@@ -18,6 +18,7 @@ import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.service.RecordService;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -313,5 +314,40 @@ public class RecordController {
         UUID userId = getCurrentUserId();
         recordService.softDelete(id, userId);
         return R.ok("记录已删除");
+    }
+
+    /**
+     * 获取日历标记数据
+     *
+     * 返回指定月份内每天的有效记录数，用于前端日历组件标记有记录的日期。
+     * 只统计未删除且非失败状态的记录。
+     *
+     * @param month 月份，格式 "2026-08"
+     * @return key=日期（如 "2026-08-12"），value=该日有效记录数
+     */
+    @Operation(
+            summary = "获取日历标记数据",
+            description = "返回指定月份内每天的有效记录数，用于日历组件标记有记录的日期。" +
+                    "只统计未删除且非失败状态的记录。月份格式：2026-08"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "查询成功",
+                    content = @Content(schema = @Schema(implementation = Map.class))
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "未登录或 Token 无效",
+                    content = @Content
+            )
+    })
+    @GetMapping("/calendar")
+    public R<Map<String, Integer>> calendar(
+            @Parameter(description = "月份，格式 2026-08", required = true, example = "2026-08")
+            @RequestParam String month) {
+        UUID userId = getCurrentUserId();
+        Map<String, Integer> result = recordService.getCalendarDates(month, userId);
+        return R.ok("查询成功", result);
     }
 }

@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-11（分类层接入 gRPC + LlmConfig 配置传递 + 模型协议字段）
+> 最后更新：2026-08-12（日历导航接口 + 文档与代码对齐 + Proto 同步）
 
 ---
 
@@ -25,10 +25,11 @@
 | P0 | 镜子/画像 (Mirror) | ⬜ 未开始 | 依赖 Records + AI 服务 |
 | P0 | 对话 (Chat) | ⬜ 未开始 | 依赖 Records + AI 服务 |
 | P0 | 用户设置 (Settings) | ✅ 完成 | AI 模型配置 CRUD + AES 加密 + 注册自动创建 |
+| P1 | 日历导航 (Calendar) | ✅ 完成 | 按月查询每天记录数，用于日历标记 |
 | P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
 | P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
 | P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
-| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通 |
+| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通，Proto 已同步 |
 | - | 前端 (Vue 3) | ⬜ 未开始 | |
 
 ---
@@ -203,7 +204,8 @@ CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
 | GET | `/api/records/{id}` | JWT | 获取单条记录详情 |
 | PUT | `/api/records/{id}` | JWT | 更新记录（仅REVIEWING状态允许） |
 | PUT | `/api/records/{id}/confirm` | JWT | 确认审查完成（REVIEWING → DONE） |
-| DELETE | `/api/records/{id}` | JWT | 软删除记录（仅REVIEWING状态允许） |
+| DELETE | `/api/records/{id}` | JWT | 软删除记录（仅REVIEWING/FAILED状态允许） |
+| GET | `/api/records/calendar` | JWT | 日历标记（返回指定月份每天有效记录数） |
 
 ### 配置模块
 
@@ -274,7 +276,46 @@ PROCESSING → REVIEWING → DONE
 
 ---
 
-## 九、更新记录（2026-08-11）
+## 九、更新记录（2026-08-12）
+
+### 日历导航接口
+
+1. **新增 `GET /api/records/calendar` 接口**
+   - 参数：`month`（格式 `2026-08`）
+   - 返回：`Map<String, Integer>`（日期 → 有效记录数）
+   - 只统计未删除且非 failed 的记录
+   - 时区按 `Asia/Shanghai` 转换
+   - 涉及文件：`RecordMapper.java`（SQL）、`RecordService.java`（接口）、`RecordServiceImpl.java`（实现）、`RecordController.java`（端点）
+
+2. **软删除权限调整**
+   - 之前：只有 REVIEWING 状态才能删除
+   - 现在：REVIEWING 和 FAILED 状态都允许删除
+
+3. **gRPC Classify 超时调整**
+   - 从 30 秒改为 180 秒（3 分钟），适应 LLM 处理耗时
+
+### 文档与代码对齐
+
+1. **三份设计文档全面修正**
+   - 修正数据库表结构（users/records/tags/user_settings）与实际 schema 一致
+   - 认证系统从"简单密码保护"改为 JWT 注册/登录
+   - API 端点与实际 Controller 一致
+   - 记录状态值统一：`pending_review` → `reviewing`，移除 `rejected`
+   - 模块结构更新：包名 `com/mirror` → `org/xianshen/mumirrorb`
+   - Proto 定义同步：`LlmConfig` 新增 `AiProtocol protocol` 字段
+   - 移除未实现的 RPC：`Split`、`EmbedBatch`
+   - LLM 工厂函数更新：按 `protocol` 路由（openai/anthropic）
+   - AiGrpcClient 代码示例更新（UUID userId, SettingsMapper, CryptoUtils）
+
+2. **发现并记录 Proto 同步问题**
+   - Python 端 `common_pb2.py` 过时，字段定义与 Java 端不一致
+   - 导致 gRPC 传输时字段错位（api_key/base_url/model 全部串位）
+   - 修复方法：在 Python 项目执行 `python generate_proto.py` 重新编译
+   - 同时 `record_processor.py` 中 `llm_config.ai_protocol` 需改为 `llm_config.protocol`
+
+---
+
+## 十、更新记录（2026-08-11）
 
 ### 分类层接入 gRPC + 配置传递
 
