@@ -47,7 +47,9 @@ public class RecordEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onRecordCreated(RecordCreatedEvent event) {
         Long recordId = event.getRecordId();
-        log.info("异步管道开始，记录ID: {}", recordId);
+        UUID userId = event.getUserId();
+        log.info("============ 异步管道开始 ============");
+        log.info("记录ID: {}, 用户ID: {}", recordId, userId);
 
         // 1. 查出记录
         Record originalRecord = recordMapper.selectById(recordId);
@@ -55,6 +57,7 @@ public class RecordEventListener {
             log.error("记录不存在，ID: {}", recordId);
             return;
         }
+        log.debug("原始记录内容: {}", originalRecord.getContent().substring(0, Math.min(100, originalRecord.getContent().length())));
 
         // 2. 跑管道（清洗 → 分类 + 拆分）
         try {
@@ -81,6 +84,7 @@ public class RecordEventListener {
                 log.info("无拆分，记录ID: {}, 等待用户审核", recordId);
             } else {
                 // 有拆分：第一条更新原记录，后续插入新记录
+                log.info("开始拆分处理，共 {} 条记录", records.size());
                 for (int i = 0; i < records.size(); i++) {
                     Record record = records.get(i);
                     record.setStatus(RecordStatus.REVIEWING);
@@ -90,12 +94,12 @@ public class RecordEventListener {
                         // 第一条：更新原记录
                         record.setId(recordId);
                         recordMapper.updateById(record);
-                        log.info("拆分 [{}]: 更新原记录 ID={}", i + 1, recordId);
+                        log.info("拆分 [{}]: 更新原记录 ID={}, title={}", i + 1, recordId, record.getTitle());
                     } else {
                         // 后续：插入新记录
                         record.setCreatedAt(OffsetDateTime.now());
                         recordMapper.insert(record);
-                        log.info("拆分 [{}]: 新记录 ID={}", i + 1, record.getId());
+                        log.info("拆分 [{}]: 新记录 ID={}, title={}", i + 1, record.getId(), record.getTitle());
                     }
 
                     // 保存关键词标签
@@ -104,11 +108,14 @@ public class RecordEventListener {
                 log.info("拆分完成，原记录 {} 条，共 {} 条记录等待审核", recordId, records.size());
             }
 
+            log.info("============ 异步管道结束 ============");
+
         } catch (Exception e) {
             originalRecord.setStatus(RecordStatus.FAILED);
             originalRecord.setUpdatedAt(OffsetDateTime.now());
             recordMapper.updateById(originalRecord);
             log.error("异步管道失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);
+            log.info("============ 异步管道结束(失败) ============");
         }
     }
 

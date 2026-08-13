@@ -54,6 +54,8 @@ public class AiGrpcClient {
         log.info("gRPC 调用 Classify，用户: {}, 内容长度: {}", userId, content.length());
         try {
             CommonProto.LlmConfig llmConfig = buildLlmConfig(userId);
+            log.debug("Classify LLM 配置: provider={}, model={}, protocol={}",
+                    llmConfig.getProvider(), llmConfig.getModel(), llmConfig.getProtocol());
 
             RecordProcessorProto.ClassifyRequest request = RecordProcessorProto.ClassifyRequest.newBuilder()
                     .setContent(content)
@@ -64,11 +66,24 @@ public class AiGrpcClient {
                     .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .classify(request);
 
-            log.info("Classify 返回: title={}, contentType={}, skip={}",
-                    response.getTitle(), response.getContentType(), response.getSkip());
+            // 记录拆分结果
+            int itemCount = response.getItemsList().size();
+            log.info("Classify 返回: skip={}, 拆分 {} 条", response.getSkip(), itemCount);
+
+            if (!response.getSkip()) {
+                for (int i = 0; i < response.getItemsList().size(); i++) {
+                    RecordProcessorProto.ClassifyItem item = response.getItemsList().get(i);
+                    log.info("  ClassifyItem [{}]: title={}, contentType={}, moods={}, keywords={}",
+                            i + 1, item.getTitle(), item.getContentType(),
+                            item.getMoodsList(), item.getKeywordsList());
+                }
+            } else {
+                log.info("Classify 跳过原因: {}", response.getSkipReason());
+            }
+
             return response;
         } catch (StatusRuntimeException e) {
-            log.error("gRPC Classify 调用失败: {}", e.getStatus(), e);
+            log.error("gRPC Classify 调用失败: status={}, 用户: {}", e.getStatus(), userId, e);
             throw e;
         }
     }

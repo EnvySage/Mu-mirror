@@ -52,8 +52,12 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO create(RecordDTO dto, UUID userId) {
+        log.info("============ 创建记录开始 ============");
+        log.info("用户ID: {}, 内容长度: {}", userId, dto.getContent() != null ? dto.getContent().length() : 0);
+
         // 1. 校验内容非空
         if (dto.getContent() == null || dto.getContent().isBlank()) {
+            log.warn("创建记录失败: 内容为空，用户ID: {}", userId);
             throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
         }
 
@@ -67,12 +71,14 @@ public class RecordServiceImpl implements RecordService {
                 .updatedAt(OffsetDateTime.now())
                 .build();
         recordMapper.insert(record);
-        log.info("记录已入库，ID: {}", record.getId());
+        log.info("记录已入库，ID: {}, 状态: processing", record.getId());
 
         // 3. 发布事件（事务提交后，监听器异步执行管道处理）
         eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
+        log.info("已发布 RecordCreatedEvent，记录ID: {}", record.getId());
 
         // 4. 立即返回（status=processing，前端显示转圈动画）
+        log.info("============ 创建记录结束 ============");
         return toVO(record);
     }
 
@@ -217,6 +223,9 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO confirmReview(Long recordId, UUID userId) {
+        log.info("============ confirmReview 开始 ============");
+        log.info("记录ID: {}, 用户ID: {}", recordId, userId);
+
         // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
@@ -226,21 +235,26 @@ public class RecordServiceImpl implements RecordService {
         );
 
         if (record == null) {
+            log.warn("记录不存在或已被删除，记录ID: {}, 用户ID: {}", recordId, userId);
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         }
 
         // 2. 检查状态：只有 REVIEWING 状态才能确认完成
         if (record.getStatus() != RecordStatus.REVIEWING) {
+            log.warn("记录状态不允许确认，记录ID: {}, 当前状态: {}", recordId, record.getStatus());
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能确认完成");
         }
+
+        log.debug("记录详情: title={}, contentType={}, mood={}", record.getTitle(), record.getContentType(), record.getMood());
 
         // 3. 标记已审核
         record.setUserReviewed(true);
 
         // 4. Embedding：将用户确认后的最终版本转向量
+        log.info("开始 Embedding，记录ID: {}", recordId);
         try {
             EmbeddingProto.EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
-            log.info("Embedding 完成，记录ID: {}, 维度: {}", recordId, embedResult.getDimension());
+            log.info("Embedding 完成，记录ID: {}, 维度: {}, 模型: {}", recordId, embedResult.getDimension(), embedResult.getModelName());
 
             // 构建元数据
             Map<String, Object> metadata = new HashMap<>();
@@ -254,6 +268,7 @@ public class RecordServiceImpl implements RecordService {
                 metadata.put("title", record.getTitle());
             }
             metadata.put("createdAt", record.getCreatedAt().toString());
+            log.debug("构建的元数据: {}", metadata);
 
             // 存入 chunks 表
             Chunk chunk = Chunk.builder()
@@ -265,18 +280,20 @@ public class RecordServiceImpl implements RecordService {
                     .createdAt(OffsetDateTime.now())
                     .build();
             chunkMapper.insert(chunk);
-            log.info("Chunk 已保存，记录ID: {}", recordId);
+            log.info("Chunk 已保存，记录ID: {}, 向量维度: {}", recordId, embedResult.getDimension());
         } catch (Exception e) {
             // Embedding 失败不影响确认，记录保持 DONE 状态，后续可重试
             log.error("Embedding 失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);
+            log.warn("Embedding 失败不影响确认流程，记录仍标记为 DONE");
         }
 
         // 5. 更新状态为 DONE，记录锁定
         record.setStatus(RecordStatus.DONE);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
-        log.info("记录审查已确认完成，ID: {}, 用户: {}", recordId, userId);
+        log.info("记录审查已确认完成，ID: {}, 用户: {}, 状态: DONE", recordId, userId);
 
+        log.info("============ confirmReview 结束 ============");
         return toVO(record);
     }
 
