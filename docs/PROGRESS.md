@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-13（拆分功能实现）
+> 最后更新：2026-08-13（TypeHandler 全局注册问题修复）
 
 ---
 
@@ -50,9 +50,11 @@ src/main/java/org/xianshen/mumirrorb/
 │   │   ├── AuthenticationException.java
 │   │   └── GlobalExceptionHandler.java
 │   ├── handler/
-│   │   ├── JsonbTypeHandler.java        # JSONB 类型处理器
+│   │   ├── JsonbTypeHandler.java        # JSONB 类型处理器（List<String>）
 │   │   ├── UuidTypeHandler.java         # UUID 类型处理器
-│   │   └── VectorTypeHandler.java       # pgvector 向量类型处理器
+│   │   ├── VectorTypeHandler.java       # pgvector 向量类型处理器
+│   │   └── jsonb/
+│   │       └── JsonbMapTypeHandler.java # JSONB 类型处理器（Map<String, Object>）
 │   ├── security/
 │   │   ├── JwtAuthenticationFilter.java # JWT 过滤器
 │   │   └── UserDetailsServiceImpl.java
@@ -92,6 +94,7 @@ src/main/java/org/xianshen/mumirrorb/
 │       ├── LoginVO.java
 │       ├── UserVO.java
 │       ├── RecordVO.java                # 记录视图对象
+│       ├── CalendarDayVO.java           # 日历日期统计（date + cnt）
 │       └── SettingsVO.java              # 配置视图对象（API Key 脱敏）
 ├── service/
 │   ├── AuthService.java
@@ -374,6 +377,28 @@ RecordPipeline.execute()
         ▼
     Java: 创建 2 条 record (status=reviewing)
 ```
+
+### TypeHandler 全局注册问题修复
+
+1. **Chunk.metadata 类型转换错误**
+   - 问题：`JsonbTypeHandler` 只支持 `List<String>`，Chunk.metadata 是 `Map<String, Object>`
+   - 修复：新增 `JsonbMapTypeHandler`，支持 Map 与 JSONB 的映射
+
+2. **JsonbMapTypeHandler 全局注册干扰**
+   - 问题：`type-handlers-package` 全局扫描所有子包，`JsonbMapTypeHandler` 的 `@MappedTypes(Map.class)` 干扰所有 Map 返回值
+   - 现象：日历接口 `countByDay` 返回的 `Map<String, Object>` 中 date 字段被错误地用 JSONB 解析
+   - 修复：将 `JsonbMapTypeHandler` 移到 `handler.jsonb` 子包（但无效，因为子包也会被扫描）
+
+3. **日历接口改用 CalendarDayVO**
+   - 问题：全局 TypeHandler 扫描无法避免对 Map 返回值的干扰
+   - 修复：新增 `CalendarDayVO` 类，`countByDay` 返回 `List<CalendarDayVO>` 替代 `List<Map>`
+   - 彻底避免 TypeHandler 对通用类型 Map 的干扰
+
+4. **经验教训**
+   - `type-handlers-package` 会扫描指定包及其所有子包
+   - `@MappedTypes(Map.class)` 这样的通用类型注解会影响所有 Map 返回值
+   - 自定义 TypeHandler 应该使用具体的 Java 类型（如 `List<String>`），而不是通用类型（如 `Map`）
+   - Mapper 返回值尽量用 DTO/VO 类，避免用 `Map<String, Object>`
 
 ---
 
