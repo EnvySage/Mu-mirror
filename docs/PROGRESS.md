@@ -300,6 +300,25 @@ PROCESSING → REVIEWING → DONE
 
 ## 九、更新记录（2026-08-13 — 拆分功能）
 
+### 拆分关联优化
+
+1. **新增 `originalRecordId` 字段**
+   - Record 实体类新增 `originalRecordId` 字段
+   - RecordVO 新增 `originalRecordId` 字段
+   - 拆分后的记录指向原记录 ID，非拆分记录为 NULL
+
+2. **ClassifyProcessor 设置关联**
+   - 第一条记录：`originalRecordId = null`（原记录）
+   - 后续记录：`originalRecordId = 原记录ID`（拆分生成）
+
+3. **数据库字段**
+   - `records` 表新增 `original_record_id` 字段
+   - 添加索引 `idx_records_original_record_id`
+
+4. **前端使用**
+   - 判断是否拆分：`record.originalRecordId !== null`
+   - 获取拆分组：`records.filter(r => r.originalRecordId === record.originalRecordId || r.id === record.originalRecordId)`
+
 ### 拆分功能实现
 
 1. **修改 Proto 定义**

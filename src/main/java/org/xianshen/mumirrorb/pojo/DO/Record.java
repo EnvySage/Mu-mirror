@@ -148,6 +148,23 @@ public class Record {
     private OffsetDateTime deletedAt;
 
     /**
+     * 原始记录ID（拆分场景）
+     *
+     * <p>当记录是由 AI 拆分生成时，此字段指向原始记录的 ID。</p>
+     * <p>非拆分场景下为 NULL。</p>
+     *
+     * <p><strong>示例：</strong></p>
+     * <pre>
+     * 用户输入: "今天上午学了Spring Boot，下午去健身"
+     * 拆分后：
+     *   - 记录42: originalRecordId = NULL （原记录）
+     *   - 记录43: originalRecordId = 42  （拆分生成的新记录）
+     * </pre>
+     */
+    @Schema(description = "原始记录ID（拆分场景，指向原记录，非拆分为NULL）", example = "null")
+    private Long originalRecordId;
+
+    /**
      * 关键词标签（非数据库字段，不持久化）
      *
      * <p>由管道 ClassifyProcessor 生成，Service 层取出后存入 tags 表</p>

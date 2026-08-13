@@ -340,6 +340,7 @@ public class RecordServiceImpl implements RecordService {
                 .status(record.getStatus())
                 .userReviewed(record.getUserReviewed())
                 .keywords(keywords)
+                .originalRecordId(record.getOriginalRecordId())
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
                 .build();

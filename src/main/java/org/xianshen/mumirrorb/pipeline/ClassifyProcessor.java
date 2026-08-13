@@ -83,6 +83,8 @@ public class ClassifyProcessor implements RecordProcessor {
             }
 
             List<Record> result = new ArrayList<>();
+            Long originalRecordId = record.getId();  // 原记录ID
+
             for (int i = 0; i < items.size(); i++) {
                 RecordProcessorProto.ClassifyItem item = items.get(i);
 
@@ -101,16 +103,20 @@ public class ClassifyProcessor implements RecordProcessor {
                         .updatedAt(OffsetDateTime.now())
                         .build();
 
-                // 第一条复用原记录 ID（更新原记录），后续插入新记录
                 if (i == 0) {
-                    newRecord.setId(record.getId());
+                    // 第一条：复用原记录 ID，originalRecordId 为 null（本身就是原记录）
+                    newRecord.setId(originalRecordId);
+                    newRecord.setOriginalRecordId(null);
+                } else {
+                    // 后续：插入新记录，originalRecordId 指向原记录
+                    newRecord.setOriginalRecordId(originalRecordId);
                 }
 
                 result.add(newRecord);
 
-                log.info("ClassifyProcessor 完成 [{}]: title={}, contentType={}, moods={}, keywords={}",
+                log.info("ClassifyProcessor 完成 [{}]: title={}, contentType={}, originalRecordId={}",
                         i + 1, newRecord.getTitle(), newRecord.getContentType(),
-                        newRecord.getMood(), newRecord.getKeywords());
+                        i == 0 ? "null(原记录)" : originalRecordId);
             }
 
             return result;

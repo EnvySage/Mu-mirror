@@ -166,6 +166,30 @@ public class RecordVO {
     private OffsetDateTime createdAt;
 
     /**
+     * 原始记录ID（拆分场景）
+     *
+     * <p>当记录是由 AI 拆分生成时，此字段指向原始记录的 ID。</p>
+     * <p>前端可通过此字段判断是否为拆分记录，并将同一 originalRecordId 的记录分组展示。</p>
+     *
+     * <p><strong>前端使用示例：</strong></p>
+     * <pre>
+     * // 判断是否为拆分记录
+     * const isSplit = record.originalRecordId !== null;
+     *
+     * // 获取同一拆分组的所有记录
+     * const splitGroup = records.filter(r =>
+     *     r.originalRecordId === record.originalRecordId ||
+     *     r.id === record.originalRecordId
+     * );
+     * </pre>
+     */
+    @Schema(
+            description = "原始记录ID（拆分场景，指向原记录，非拆分为null）",
+            example = "null"
+    )
+    private Long originalRecordId;
+
+    /**
      * 更新时间
      *
      * <p>记录最后一次更新的时间戳，格式：yyyy-MM-dd HH:mm:ss</p>

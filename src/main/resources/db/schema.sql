@@ -46,6 +46,10 @@ CREATE INDEX idx_records_deleted_at ON records(deleted_at);
 CREATE INDEX idx_records_user_not_deleted ON records(user_id, created_at)
     WHERE deleted_at IS NULL;
 
+-- 拆分关联字段
+ALTER TABLE records ADD COLUMN IF NOT EXISTS original_record_id BIGINT REFERENCES records(id);
+CREATE INDEX IF NOT EXISTS idx_records_original_record_id ON records(original_record_id);
+
 
 -- mood JSONB 的 GIN 索引（支持 @> 操作符查询，如查找包含 "anxious" 的记录）
 CREATE INDEX IF NOT EXISTS idx_records_mood ON records USING GIN (mood);
