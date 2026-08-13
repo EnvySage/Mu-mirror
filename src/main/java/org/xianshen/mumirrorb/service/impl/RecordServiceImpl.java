@@ -11,8 +11,10 @@ import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
+import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.mapper.TagMapper;
+import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DO.Tag;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
@@ -31,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.ArrayList;
 
 /**
  * 记录服务实现
@@ -42,6 +45,7 @@ public class RecordServiceImpl implements RecordService {
 
     private final RecordMapper recordMapper;
     private final TagMapper tagMapper;
+    private final ChunkMapper chunkMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final AiGrpcClient aiGrpcClient;
 
@@ -234,18 +238,34 @@ public class RecordServiceImpl implements RecordService {
         record.setUserReviewed(true);
 
         // 4. Embedding：将用户确认后的最终版本转向量
-        //    TODO: 向量存入 chunks 表（Chunk 实体 + ChunkMapper 待实现）
         try {
             EmbeddingProto.EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
             log.info("Embedding 完成，记录ID: {}, 维度: {}", recordId, embedResult.getDimension());
-            // TODO: 将 embedResult.getVectorList() 存入 chunks 表
-            // Chunk chunk = Chunk.builder()
-            //         .userId(userId)
-            //         .recordId(recordId)
-            //         .content(record.getContent())
-            //         .embedding(embedResult.getVectorList())
-            //         .build();
-            // chunkMapper.insert(chunk);
+
+            // 构建元数据
+            Map<String, Object> metadata = new HashMap<>();
+            if (record.getContentType() != null) {
+                metadata.put("contentType", record.getContentType().name().toLowerCase());
+            }
+            if (record.getMood() != null) {
+                metadata.put("mood", record.getMood());
+            }
+            if (record.getTitle() != null) {
+                metadata.put("title", record.getTitle());
+            }
+            metadata.put("createdAt", record.getCreatedAt().toString());
+
+            // 存入 chunks 表
+            Chunk chunk = Chunk.builder()
+                    .userId(userId)
+                    .recordId(recordId)
+                    .content(record.getContent())
+                    .metadata(metadata)
+                    .embedding(embedResult.getVectorList())
+                    .createdAt(OffsetDateTime.now())
+                    .build();
+            chunkMapper.insert(chunk);
+            log.info("Chunk 已保存，记录ID: {}", recordId);
         } catch (Exception e) {
             // Embedding 失败不影响确认，记录保持 DONE 状态，后续可重试
             log.error("Embedding 失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);

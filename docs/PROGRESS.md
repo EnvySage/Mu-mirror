@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-12（设计修正：拆分移至分类层 + Embedding 移出管道）
+> 最后更新：2026-08-12（Embedding 向量落库完成）
 
 ---
 
@@ -29,7 +29,7 @@
 | P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
 | P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
 | P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
-| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通，Proto 已同步 |
+| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通，Proto 已同步，Embedding 向量落库完成 |
 | - | 前端 (Vue 3) | ⬜ 未开始 | |
 
 ---
@@ -51,7 +51,8 @@ src/main/java/org/xianshen/mumirrorb/
 │   │   └── GlobalExceptionHandler.java
 │   ├── handler/
 │   │   ├── JsonbTypeHandler.java        # JSONB 类型处理器
-│   │   └── UuidTypeHandler.java         # UUID 类型处理器
+│   │   ├── UuidTypeHandler.java         # UUID 类型处理器
+│   │   └── VectorTypeHandler.java       # pgvector 向量类型处理器
 │   ├── security/
 │   │   ├── JwtAuthenticationFilter.java # JWT 过滤器
 │   │   └── UserDetailsServiceImpl.java
@@ -71,6 +72,7 @@ src/main/java/org/xianshen/mumirrorb/
 │   ├── UserMapper.java
 │   ├── RecordMapper.java
 │   ├── TagMapper.java
+│   ├── ChunkMapper.java                 # 向量块 Mapper（含相似度检索）
 │   └── SettingsMapper.java
 ├── pojo/
 │   ├── R.java                           # 统一响应 {code, message, data, timestamp}
@@ -78,6 +80,7 @@ src/main/java/org/xianshen/mumirrorb/
 │   │   ├── User.java                    # UUID id, username, passwordHash, createdAt
 │   │   ├── Record.java                  # 记录实体（UUID userId）
 │   │   ├── Tag.java                     # 标签实体
+│   │   ├── Chunk.java                   # 向量块实体（pgvector embedding）
 │   │   └── UserSettings.java            # 用户配置实体（LLM/Embedding 配置）
 │   ├── DTO/
 │   │   ├── UserLoginDTO.java
@@ -176,9 +179,26 @@ CREATE TABLE IF NOT EXISTS user_settings (
 CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
 ```
 
+### 已创建的表（新增 - pgvector）
+
+```sql
+-- chunks 表（向量存储，用于 RAG 检索）
+CREATE TABLE IF NOT EXISTS chunks (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    record_id BIGINT NOT NULL REFERENCES records(id),
+    content TEXT NOT NULL,
+    metadata JSONB,
+    embedding vector(1024),              -- BGE-m3 默认 1024 维
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
+```
+
 ### 待创建的表（设计文档中已定义）
 
-- `chunks` — pgvector 向量存储（embedding + metadata）
+- ~~`chunks` — pgvector 向量存储（embedding + metadata）~~ ✅ 已完成
 - `daily_summaries` — 每日摘要
 - `mirror_profiles` — AI 生成的用户画像（JSONB）
 - `conversation_history` — 对话历史
@@ -250,8 +270,8 @@ PROCESSING → REVIEWING → DONE
 1. ~~搭建 gRPC 基础设施~~ ✅ 已完成
 2. ~~分类层接入 gRPC~~ ✅ 已完成
 3. Python 端实现真实的 Classify（接 LLM，支持拆分+分类，返回 repeated ClassifyItem）
-4. 实现 Chunk 实体 + ChunkMapper + chunks 表（pgvector）
-5. confirmReview() 中 Embedding 存储向量（代码骨架已写好，待 Chunk 实体就绪后取消注释）
+4. ~~实现 Chunk 实体 + ChunkMapper + chunks 表（pgvector）~~ ✅ 已完成
+5. ~~confirmReview() 中 Embedding 存储向量~~ ✅ 已完成
 6. 实现镜子/画像模块（用户画像生成）
 
 **后续目标：**
@@ -275,6 +295,40 @@ PROCESSING → REVIEWING → DONE
 - **JWT**：24 小时过期，Bearer Token 放 Authorization 头
 - **软删除**：使用 `deleted_at` 字段，查询时自动过滤
 - **API 文档**：Knife4j，地址 `/api/doc.html`，所有接口有详细注解
+
+---
+
+## 九、更新记录（2026-08-12 — Embedding 向量落库）
+
+### Embedding 向量落库功能
+
+1. **添加 pgvector Java 依赖**
+   - pom.xml 新增 `com.pgvector:pgvector:0.1.6`
+
+2. **新建 VectorTypeHandler**
+   - 文件：`src/main/java/org/xianshen/mumirrorb/common/handler/VectorTypeHandler.java`
+   - 功能：PostgreSQL vector 类型与 Java List<Float> 的双向映射
+   - 参考 JsonbTypeHandler 模式实现
+
+3. **新建 Chunk 实体类**
+   - 文件：`src/main/java/org/xianshen/mumirrorb/pojo/DO/Chunk.java`
+   - 字段：id, userId, recordId, content, metadata(JSONB), embedding(vector), createdAt
+   - metadata 存储 contentType、mood、title、createdAt 等元数据
+
+4. **新建 ChunkMapper**
+   - 文件：`src/main/java/org/xianshen/mumirrorb/mapper/ChunkMapper.java`
+   - 方法：searchBySimilarity（余弦相似度检索）、searchBySimilarityWithFilter（带过滤）
+
+5. **新建 chunks 表 SQL**
+   - 文件：`src/main/resources/db/chunks.sql`
+   - 表结构：id, user_id, record_id, content, metadata, embedding(vector(1024)), created_at
+   - 索引：user_id、record_id
+
+6. **修改 RecordServiceImpl.confirmReview()**
+   - 注入 ChunkMapper
+   - 取消 Embedding 存储注释，完成向量落库逻辑
+   - 构建 metadata（contentType、mood、title、createdAt）
+   - Embedding 失败不影响确认流程
 
 ---
 
