@@ -1,7 +1,7 @@
 # AI 日记镜子系统 - 开发进度
 
 > 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-12（Embedding 向量落库完成）
+> 最后更新：2026-08-13（拆分功能实现）
 
 ---
 
@@ -29,7 +29,7 @@
 | P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
 | P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
 | P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
-| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通，Proto 已同步，Embedding 向量落库完成 |
+| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通，Proto 已同步，Embedding 向量落库完成，拆分功能已实现 |
 | - | 前端 (Vue 3) | ⬜ 未开始 | |
 
 ---
@@ -269,7 +269,7 @@ PROCESSING → REVIEWING → DONE
 
 1. ~~搭建 gRPC 基础设施~~ ✅ 已完成
 2. ~~分类层接入 gRPC~~ ✅ 已完成
-3. Python 端实现真实的 Classify（接 LLM，支持拆分+分类，返回 repeated ClassifyItem）
+3. ~~Python 端实现真实的 Classify（接 LLM，支持拆分+分类，返回 repeated ClassifyItem）~~ ✅ Java 端已实现
 4. ~~实现 Chunk 实体 + ChunkMapper + chunks 表（pgvector）~~ ✅ 已完成
 5. ~~confirmReview() 中 Embedding 存储向量~~ ✅ 已完成
 6. 实现镜子/画像模块（用户画像生成）
@@ -295,6 +295,66 @@ PROCESSING → REVIEWING → DONE
 - **JWT**：24 小时过期，Bearer Token 放 Authorization 头
 - **软删除**：使用 `deleted_at` 字段，查询时自动过滤
 - **API 文档**：Knife4j，地址 `/api/doc.html`，所有接口有详细注解
+
+---
+
+## 九、更新记录（2026-08-13 — 拆分功能）
+
+### 拆分功能实现
+
+1. **修改 Proto 定义**
+   - `ClassifyResponse` 改为支持拆分：`repeated ClassifyItem items = 3`
+   - 新增 `ClassifyItem` 消息：title, summary, content_type, moods, status, keywords
+   - 一次 LLM 调用可返回多条分类结果
+
+2. **修改 RecordProcessor 接口**
+   - 接口改为 `List<Record> process(List<Record> records)`
+   - 支持一条记录变成多条（拆分场景）
+
+3. **修改 CleanProcessor**
+   - 适配新接口，对每条记录做清洗（1:1 映射）
+
+4. **修改 ClassifyProcessor（核心）**
+   - 处理多条拆分结果
+   - 遍历 `response.getItemsList()`，为每条 ClassifyItem 创建 Record
+   - 第一条复用原记录 ID（更新原记录），后续插入新记录
+
+5. **修改 RecordPipeline**
+   - 输入单条记录，输出可能多条
+   - 将单条记录包装成 List，依次传递给处理器
+
+6. **修改 RecordEventListener（核心）**
+   - 处理拆分后的多条记录
+   - 无拆分：更新原记录
+   - 有拆分：第一条更新原记录，后续插入新记录
+   - 每条记录的关键词标签独立保存
+
+7. **重新编译 Proto**
+   - `mvn protobuf:compile protobuf:compile-custom`
+   - 3 个 proto 文件编译成功
+
+### 拆分流程
+
+```
+用户输入: "今天上午学了 Spring Boot，下午去健身"
+    │
+    ▼
+RecordCreatedEvent → RecordEventListener
+    │
+    ▼
+RecordPipeline.execute()
+    ├─ CleanProcessor: 文本清洗
+    └─ ClassifyProcessor: gRPC 调用 Python
+        │
+        ▼
+    Python LLM: 判断有两件事 → 拆分
+        │
+        ├─ ClassifyItem 1: { title: "学Spring Boot", type: "learning", ... }
+        └─ ClassifyItem 2: { title: "下午健身", type: "health", ... }
+        │
+        ▼
+    Java: 创建 2 条 record (status=reviewing)
+```
 
 ---
 

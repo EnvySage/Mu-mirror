@@ -5,6 +5,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 
+import java.util.List;
+
 /**
  * 第 1 层：文本清洗（纯代码，不调 AI）
  *
@@ -13,6 +15,8 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
  * - 合并多余换行
  * - 去除控制字符
  * - 空内容检测
+ *
+ * <p>输入输出数量不变（1:1 映射）</p>
  */
 @Slf4j
 @Component
@@ -20,7 +24,16 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
 public class CleanProcessor implements RecordProcessor {
 
     @Override
-    public Record process(Record record) {
+    public List<Record> process(List<Record> records) {
+        return records.stream()
+                .map(this::cleanOne)
+                .toList();
+    }
+
+    /**
+     * 清洗单条记录
+     */
+    private Record cleanOne(Record record) {
         String content = record.getContent();
 
         // 1. 去除首尾空白

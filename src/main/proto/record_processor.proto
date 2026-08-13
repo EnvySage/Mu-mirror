@@ -19,14 +19,19 @@ message ClassifyRequest {
   LlmConfig llm_config = 2;  // LLM 配置（每次请求携带）
 }
 
-// 分类响应
+// 分类响应（支持拆分：一次 LLM 调用可能返回多条结果）
 message ClassifyResponse {
   bool skip = 1;                    // 是否跳过（无意义内容）
   string skip_reason = 2;           // 跳过原因
-  string title = 3;                 // 标题（10字以内）
-  string summary = 4;               // 摘要（30字以内）
-  ContentType content_type = 5;     // 内容类型
-  repeated MoodType moods = 6;      // 情绪（多选）
-  TaskStatus status = 7;            // 状态（仅待办/计划类）
-  repeated string keywords = 8;     // 关键词 3-5 个
+  repeated ClassifyItem items = 3;  // 分类结果（1条或多条，拆分后的每条记录）
+}
+
+// 单条分类结果
+message ClassifyItem {
+  string title = 1;                 // 标题（10字以内）
+  string summary = 2;               // 摘要（30字以内）
+  ContentType content_type = 3;     // 内容类型
+  repeated MoodType moods = 4;      // 情绪（多选）
+  TaskStatus status = 5;            // 状态（仅待办/计划类）
+  repeated string keywords = 6;     // 关键词 3-5 个
 }
