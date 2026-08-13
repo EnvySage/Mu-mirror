@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.xianshen.mumirrorb.pojo.DO.Record;
+import org.xianshen.mumirrorb.pojo.VO.CalendarDayVO;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -36,7 +37,7 @@ public interface RecordMapper extends BaseMapper<Record> {
               AND created_at < #{monthEnd}
             GROUP BY TO_CHAR(created_at, 'YYYY-MM-DD')
             """)
-    List<Map<String, Object>> countByDay(@Param("userId") UUID userId,
-                                         @Param("monthStart") OffsetDateTime monthStart,
-                                         @Param("monthEnd") OffsetDateTime monthEnd);
+    List<CalendarDayVO> countByDay(@Param("userId") UUID userId,
+                                   @Param("monthStart") OffsetDateTime monthStart,
+                                   @Param("monthEnd") OffsetDateTime monthEnd);
 }

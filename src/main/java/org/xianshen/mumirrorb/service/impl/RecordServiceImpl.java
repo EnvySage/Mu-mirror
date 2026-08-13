@@ -19,6 +19,7 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DO.Tag;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
+import org.xianshen.mumirrorb.pojo.VO.CalendarDayVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.service.RecordService;
 
@@ -357,13 +358,11 @@ public class RecordServiceImpl implements RecordService {
         OffsetDateTime monthStart = startDate.atStartOfDay(ZoneOffset.ofHours(8)).toOffsetDateTime();
         OffsetDateTime monthEnd = endDate.atStartOfDay(ZoneOffset.ofHours(8)).toOffsetDateTime();
 
-        List<Map<String, Object>> rows = recordMapper.countByDay(userId, monthStart, monthEnd);
+        List<CalendarDayVO> rows = recordMapper.countByDay(userId, monthStart, monthEnd);
 
         Map<String, Integer> result = new HashMap<>();
-        for (Map<String, Object> row : rows) {
-            String date = (String) row.get("date");
-            Number cnt = (Number) row.get("cnt");
-            result.put(date, cnt.intValue());
+        for (CalendarDayVO row : rows) {
+            result.put(row.getDate(), row.getCnt());
         }
         return result;
     }
