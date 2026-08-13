@@ -94,3 +94,5 @@ CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ai_protocol VARCHAR(20) DEFAULT 'anthropic';
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS embedding_base_url TEXT;
 
+ALTER TABLE records ADD COLUMN IF NOT EXISTS original_record_id BIGINT REFERENCES records(id);
+CREATE INDEX IF NOT EXISTS idx_records_original_record_id ON records(original_record_id);

@@ -1,4 +1,4 @@
-package org.xianshen.mumirrorb.common.handler;
+package org.xianshen.mumirrorb.common.handler.jsonb;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;

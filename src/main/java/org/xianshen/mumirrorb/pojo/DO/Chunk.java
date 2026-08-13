@@ -9,7 +9,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.xianshen.mumirrorb.common.handler.JsonbMapTypeHandler;
+import org.xianshen.mumirrorb.common.handler.jsonb.JsonbMapTypeHandler;
 import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
 import org.xianshen.mumirrorb.common.handler.VectorTypeHandler;
 
