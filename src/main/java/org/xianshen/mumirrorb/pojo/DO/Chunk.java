@@ -9,7 +9,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.xianshen.mumirrorb.common.handler.JsonbTypeHandler;
+import org.xianshen.mumirrorb.common.handler.JsonbMapTypeHandler;
 import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
 import org.xianshen.mumirrorb.common.handler.VectorTypeHandler;
 
@@ -76,7 +76,7 @@ public class Chunk {
      * <p>包含：contentType, mood, title, summary, createdAt 等</p>
      * <p>用于向量检索后的元数据过滤</p>
      */
-    @TableField(typeHandler = JsonbTypeHandler.class)
+    @TableField(typeHandler = JsonbMapTypeHandler.class)
     @Schema(description = "元数据（类型、情绪、时间等）", example = "{\"contentType\":\"learning\",\"mood\":[\"happy\"]}")
     private Map<String, Object> metadata;
 
