@@ -50,6 +50,9 @@ CREATE INDEX idx_records_user_not_deleted ON records(user_id, created_at)
 ALTER TABLE records ADD COLUMN IF NOT EXISTS original_record_id BIGINT REFERENCES records(id);
 CREATE INDEX IF NOT EXISTS idx_records_original_record_id ON records(original_record_id);
 
+-- AI 拆分后的主题片段数组（JSONB，如 ["片段1", "片段2"]）
+ALTER TABLE records ADD COLUMN IF NOT EXISTS segment JSONB;
+
 
 -- mood JSONB 的 GIN 索引（支持 @> 操作符查询，如查找包含 "anxious" 的记录）
 CREATE INDEX IF NOT EXISTS idx_records_mood ON records USING GIN (mood);
@@ -96,3 +99,12 @@ ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS embedding_base_url TEXT;
 
 ALTER TABLE records ADD COLUMN IF NOT EXISTS original_record_id BIGINT REFERENCES records(id);
 CREATE INDEX IF NOT EXISTS idx_records_original_record_id ON records(original_record_id);
+
+
+
+ALTER TABLE records ADD COLUMN segment JSONB;
+ALTER TABLE records DROP COLUMN IF EXISTS title;
+ALTER TABLE records DROP COLUMN IF EXISTS summary;
+ALTER TABLE records DROP COLUMN IF EXISTS content_type;
+ALTER TABLE records DROP COLUMN IF EXISTS mood;
+ALTER TABLE records DROP COLUMN IF EXISTS original_record_id;

@@ -13,13 +13,12 @@ import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
-import org.xianshen.mumirrorb.mapper.TagMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
-import org.xianshen.mumirrorb.pojo.DO.Tag;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
 import org.xianshen.mumirrorb.pojo.VO.CalendarDayVO;
+import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.service.RecordService;
 
@@ -29,12 +28,10 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.ArrayList;
 
 /**
  * 记录服务实现
@@ -45,7 +42,6 @@ import java.util.ArrayList;
 public class RecordServiceImpl implements RecordService {
 
     private final RecordMapper recordMapper;
-    private final TagMapper tagMapper;
     private final ChunkMapper chunkMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final AiGrpcClient aiGrpcClient;
@@ -56,13 +52,10 @@ public class RecordServiceImpl implements RecordService {
         log.info("============ 创建记录开始 ============");
         log.info("用户ID: {}, 内容长度: {}", userId, dto.getContent() != null ? dto.getContent().length() : 0);
 
-        // 1. 校验内容非空
         if (dto.getContent() == null || dto.getContent().isBlank()) {
-            log.warn("创建记录失败: 内容为空，用户ID: {}", userId);
             throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
         }
 
-        // 2. 存原始内容入库（status=processing，数据不丢）
         Record record = Record.builder()
                 .userId(userId)
                 .content(dto.getContent())
@@ -74,11 +67,9 @@ public class RecordServiceImpl implements RecordService {
         recordMapper.insert(record);
         log.info("记录已入库，ID: {}, 状态: processing", record.getId());
 
-        // 3. 发布事件（事务提交后，监听器异步执行管道处理）
         eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
         log.info("已发布 RecordCreatedEvent，记录ID: {}", record.getId());
 
-        // 4. 立即返回（status=processing，前端显示转圈动画）
         log.info("============ 创建记录结束 ============");
         return toVO(record);
     }
@@ -86,39 +77,31 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional(readOnly = true)
     public List<RecordVO> list(RecordQueryDTO queryDTO, UUID userId) {
-        // 1. 处理日期范围（默认查询今天的记录）
         LocalDate startDate = queryDTO.getStartDate();
         LocalDate endDate = queryDTO.getEndDate();
 
         if (startDate == null && endDate == null) {
-            // 都不传，默认查询今天
             startDate = LocalDate.now();
             endDate = startDate;
         } else if (startDate == null) {
-            // 只传了 endDate，startDate 默认为 endDate
             startDate = endDate;
         } else if (endDate == null) {
-            // 只传了 startDate，endDate 默认为 startDate
             endDate = startDate;
         }
 
-        // 2. 转换为 OffsetDateTime 范围（UTC）
         OffsetDateTime startDateTime = startDate.atStartOfDay().atOffset(ZoneOffset.UTC);
         OffsetDateTime endDateTime = endDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
 
-        // 3. 构建查询条件（只查询未删除的记录）
         LambdaQueryWrapper<Record> wrapper = new LambdaQueryWrapper<Record>()
                 .eq(Record::getUserId, userId)
-                .isNull(Record::getDeletedAt)  // 软删除过滤
+                .isNull(Record::getDeletedAt)
                 .ge(Record::getCreatedAt, startDateTime)
                 .lt(Record::getCreatedAt, endDateTime)
                 .orderByDesc(Record::getCreatedAt);
 
-        // 4. 执行查询
         List<Record> records = recordMapper.selectList(wrapper);
         log.info("查询到 {} 条记录，用户: {}, 日期范围: {} ~ {}", records.size(), userId, startDate, endDate);
 
-        // 5. 转换为 VO 列表
         return records.stream()
                 .map(this::toVO)
                 .toList();
@@ -127,7 +110,6 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional(readOnly = true)
     public RecordVO getById(Long recordId, UUID userId) {
-        // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
                         .eq(Record::getId, recordId)
@@ -137,59 +119,6 @@ public class RecordServiceImpl implements RecordService {
 
         if (record == null) {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
-        }
-
-        return toVO(record);
-    }
-
-    @Override
-    @Transactional
-    public RecordVO update(Long recordId, RecordDTO dto, UUID userId) {
-        // 1. 查询记录并验证所有权
-        Record record = recordMapper.selectOne(
-                new LambdaQueryWrapper<Record>()
-                        .eq(Record::getId, recordId)
-                        .eq(Record::getUserId, userId)
-                        .isNull(Record::getDeletedAt)
-        );
-
-        if (record == null) {
-            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
-        }
-
-        // 2. 检查状态：只有 REVIEWING 状态（人工审查中）才允许更新
-        if (record.getStatus() != RecordStatus.REVIEWING) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能修改");
-        }
-
-        // 3. 更新允许修改的字段（content 不能修改，是原始输入）
-        if (dto.getTitle() != null) {
-            record.setTitle(dto.getTitle());
-        }
-        if (dto.getSummary() != null) {
-            record.setSummary(dto.getSummary());
-        }
-        if (dto.getContentType() != null) {
-            record.setContentType(dto.getContentType());
-        }
-        if (dto.getMood() != null) {
-            record.setMood(dto.getMood());
-        }
-        if (dto.getKeywords() != null) {
-            record.setKeywords(dto.getKeywords());
-        }
-
-        // 4. 标记用户已审核
-        record.setUserReviewed(true);
-        record.setUpdatedAt(OffsetDateTime.now());
-
-        // 5. 保存更新
-        recordMapper.updateById(record);
-        log.info("记录已更新，ID: {}, 用户: {}", recordId, userId);
-
-        // 6. 如果有新的关键词，更新标签表
-        if (dto.getKeywords() != null) {
-            updateTags(recordId, dto.getKeywords());
         }
 
         return toVO(record);
@@ -198,7 +127,6 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public void softDelete(Long recordId, UUID userId) {
-        // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
                         .eq(Record::getId, recordId)
@@ -210,12 +138,10 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         }
 
-        // 2. 检查状态：REVIEWING 和 FAILED 状态允许删除
         if (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.FAILED) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查或失败的记录才能删除");
         }
 
-        // 3. 设置软删除时间
         record.setDeletedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
         log.info("记录已软删除，ID: {}, 用户: {}", recordId, userId);
@@ -236,121 +162,88 @@ public class RecordServiceImpl implements RecordService {
         );
 
         if (record == null) {
-            log.warn("记录不存在或已被删除，记录ID: {}, 用户ID: {}", recordId, userId);
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         }
 
-        // 2. 检查状态：只有 REVIEWING 状态才能确认完成
         if (record.getStatus() != RecordStatus.REVIEWING) {
-            log.warn("记录状态不允许确认，记录ID: {}, 当前状态: {}", recordId, record.getStatus());
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能确认完成");
         }
 
-        log.debug("记录详情: title={}, contentType={}, mood={}", record.getTitle(), record.getContentType(), record.getMood());
-
-        // 3. 标记已审核
+        // 2. 标记已审核
         record.setUserReviewed(true);
 
-        // 4. Embedding：将用户确认后的最终版本转向量
-        log.info("开始 Embedding，记录ID: {}", recordId);
-        try {
-            EmbeddingProto.EmbedResponse embedResult = aiGrpcClient.embed(userId, record.getContent());
-            log.info("Embedding 完成，记录ID: {}, 维度: {}, 模型: {}", recordId, embedResult.getDimension(), embedResult.getModelName());
+        // 3. 遍历所有 Chunk，逐个做 embedding
+        List<Chunk> chunks = chunkMapper.selectList(
+                new LambdaQueryWrapper<Chunk>()
+                        .eq(Chunk::getRecordId, recordId)
+        );
+        log.info("开始 Embedding，记录ID: {}, Chunk 数量: {}", recordId, chunks.size());
 
-            // 构建元数据
-            Map<String, Object> metadata = new HashMap<>();
-            if (record.getContentType() != null) {
-                metadata.put("contentType", record.getContentType().name().toLowerCase());
+        for (Chunk chunk : chunks) {
+            String embeddingText = chunk.getSegment() != null ? chunk.getSegment() : chunk.getContent();
+            try {
+                EmbeddingProto.EmbedResponse embedResult = aiGrpcClient.embed(userId, embeddingText);
+                chunk.setEmbedding(embedResult.getVectorList());
+                chunkMapper.updateById(chunk);
+                log.info("Chunk Embedding 完成，ChunkID: {}, 维度: {}", chunk.getId(), embedResult.getDimension());
+            } catch (Exception e) {
+                log.error("Chunk Embedding 失败，ChunkID: {}，原因: {}", chunk.getId(), e.getMessage(), e);
+                // 单个 chunk 失败不影响其他 chunk
             }
-            if (record.getMood() != null) {
-                metadata.put("mood", record.getMood());
-            }
-            if (record.getTitle() != null) {
-                metadata.put("title", record.getTitle());
-            }
-            metadata.put("createdAt", record.getCreatedAt().toString());
-            log.debug("构建的元数据: {}", metadata);
-
-            // 存入 chunks 表
-            Chunk chunk = Chunk.builder()
-                    .userId(userId)
-                    .recordId(recordId)
-                    .content(record.getContent())
-                    .metadata(metadata)
-                    .embedding(embedResult.getVectorList())
-                    .createdAt(OffsetDateTime.now())
-                    .build();
-            chunkMapper.insert(chunk);
-            log.info("Chunk 已保存，记录ID: {}, 向量维度: {}", recordId, embedResult.getDimension());
-        } catch (Exception e) {
-            // Embedding 失败不影响确认，记录保持 DONE 状态，后续可重试
-            log.error("Embedding 失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);
-            log.warn("Embedding 失败不影响确认流程，记录仍标记为 DONE");
         }
 
-        // 5. 更新状态为 DONE，记录锁定
+        // 4. 更新 Record 状态为 DONE
         record.setStatus(RecordStatus.DONE);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
-        log.info("记录审查已确认完成，ID: {}, 用户: {}, 状态: DONE", recordId, userId);
+        log.info("记录审查已确认完成，ID: {}, 状态: DONE", recordId);
 
         log.info("============ confirmReview 结束 ============");
         return toVO(record);
     }
 
     /**
-     * 更新标签表（先删后插）
-     */
-    private void updateTags(Long recordId, List<String> keywords) {
-        // 删除旧标签
-        tagMapper.delete(
-                new LambdaQueryWrapper<Tag>()
-                        .eq(Tag::getRecordId, recordId)
-        );
-
-        // 插入新标签
-        if (keywords != null && !keywords.isEmpty()) {
-            List<Tag> tags = keywords.stream()
-                    .map(keyword -> Tag.builder()
-                            .recordId(recordId)
-                            .keyword(keyword)
-                            .createdAt(OffsetDateTime.now())
-                            .build())
-                    .toList();
-            tags.forEach(tagMapper::insert);
-        }
-    }
-
-    /**
-     * DO → VO 转换
+     * DO → VO 转换（包含关联的 Chunk 列表）
      */
     private RecordVO toVO(Record record) {
-        List<Tag> tags = tagMapper.selectList(
-                new LambdaQueryWrapper<Tag>()
-                        .eq(Tag::getRecordId, record.getId())
+        // 查询关联的 Chunks
+        List<Chunk> chunks = chunkMapper.selectList(
+                new LambdaQueryWrapper<Chunk>()
+                        .eq(Chunk::getRecordId, record.getId())
         );
-        List<String> keywords = tags.stream().map(Tag::getKeyword).toList();
+
+        List<ChunkVO> chunkVOs = chunks.stream()
+                .map(this::toChunkVO)
+                .toList();
 
         return RecordVO.builder()
                 .id(record.getId())
                 .content(record.getContent())
-                .title(record.getTitle())
-                .summary(record.getSummary())
-                .contentType(record.getContentType())
-                .mood(record.getMood() != null ? record.getMood() : Collections.emptyList())
+                .segment(record.getSegment())
                 .status(record.getStatus())
                 .userReviewed(record.getUserReviewed())
-                .keywords(keywords)
-                .originalRecordId(record.getOriginalRecordId())
+                .chunks(chunkVOs)
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
+                .build();
+    }
+
+    /**
+     * Chunk DO → ChunkVO 转换
+     */
+    private ChunkVO toChunkVO(Chunk chunk) {
+        return ChunkVO.builder()
+                .id(chunk.getId())
+                .recordId(chunk.getRecordId())
+                .segment(chunk.getSegment())
+                .metadata(chunk.getMetadata())
+                .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
                 .build();
     }
 
     @Override
     @Transactional(readOnly = true)
     public Map<String, Integer> getCalendarDates(String month, UUID userId) {
-        // 解析月份 "2026-08" → YearMonth
         YearMonth yearMonth = YearMonth.parse(month);
         LocalDate startDate = yearMonth.atDay(1);
         LocalDate endDate = yearMonth.plusMonths(1).atDay(1);

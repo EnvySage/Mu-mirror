@@ -169,57 +169,10 @@ public class RecordController {
     }
 
     /**
-     * 更新记录
+     * 更新 Chunk（审核阶段修改 AI 元数据）
      *
-     * 仅在记录处于"人工审查"（REVIEWING）状态时允许更新。
-     * 可以修改 AI 生成的字段：标题、摘要、内容类型、情绪标签、关键词。
-     * 不能修改用户的原始内容（content）。
-     *
-     * 更新后，记录的 userReviewed 标记会设为 true，表示用户已审核。
-     * 如果需要将状态改为"已完成"，请调用"确认审查完成"接口。
-     *
-     * @param id  记录ID
-     * @param dto 更新数据（只需提供需要修改的字段）
-     * @return 更新后的记录
+     * 请使用 Chunk 管理接口：PUT /chunks/{id}
      */
-    @Operation(
-            summary = "更新记录",
-            description = "仅在'人工审查'状态下允许更新。" +
-                    "可以修改标题、摘要、内容类型、情绪标签、关键词等 AI 生成的字段。" +
-                    "不能修改用户的原始内容。" +
-                    "更新后请调用'确认审查完成'接口将状态改为'已完成'。"
-    )
-    @ApiResponses(value = {
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "更新成功",
-                    content = @Content(schema = @Schema(implementation = RecordVO.class))
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "参数错误或记录状态不允许修改",
-                    content = @Content
-            ),
-            @ApiResponse(
-                    responseCode = "401",
-                    description = "未登录或 Token 无效",
-                    content = @Content
-            ),
-            @ApiResponse(
-                    responseCode = "404",
-                    description = "记录不存在或已被删除",
-                    content = @Content
-            )
-    })
-    @PutMapping("/{id}")
-    public R<RecordVO> update(
-            @Parameter(description = "记录ID", required = true, example = "1")
-            @PathVariable Long id,
-            @Valid @RequestBody RecordDTO dto) {
-        UUID userId = getCurrentUserId();
-        RecordVO record = recordService.update(id, dto, userId);
-        return R.ok("记录已更新", record);
-    }
 
     /**
      * 确认审查完成

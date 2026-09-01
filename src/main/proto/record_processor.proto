@@ -30,8 +30,9 @@ message ClassifyResponse {
 message ClassifyItem {
   string title = 1;                 // 标题（10字以内）
   string summary = 2;               // 摘要（30字以内）
-  ContentType content_type = 3;     // 内容类型
-  repeated MoodType moods = 4;      // 情绪（多选）
-  TaskStatus status = 5;            // 状态（仅待办/计划类）
-  repeated string keywords = 6;     // 关键词 3-5 个
+  string content = 3;               // 原文片段（拆分后对应的原文内容）
+  ContentType content_type = 4;     // 内容类型
+  repeated MoodType moods = 5;      // 情绪（多选）
+  TaskStatus status = 6;            // 状态（仅待办/计划类）
+  repeated string keywords = 7;     // 关键词 3-5 个
 }

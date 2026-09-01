@@ -5,7 +5,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
-import org.xianshen.mumirrorb.common.enums.ContentType;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
@@ -14,7 +13,9 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 第 2 层：AI 分类（生成标题、摘要、标签 + 拆分）
@@ -26,14 +27,17 @@ import java.util.List;
  *   <li>每条 ClassifyItem 独立生成标题/摘要/标签</li>
  * </ul>
  *
- * <p>如果 AI 判定内容无意义（skip=true），抛出异常，管道中断，record 标记为 FAILED。</p>
+ * <p><strong>新设计：</strong></p>
+ * <p>不再创建多条 Record。一条 Record 对应一条用户输入，segment 存拆分片段数组，
+ * chunkMetadataList 存每个片段的 AI 元数据，由 EventListener 创建 Chunk。</p>
  *
  * <p><strong>拆分示例：</strong></p>
  * <pre>
  * 输入: "今天上午学了 Spring Boot，下午去健身"
- * 输出: [
- *   ClassifyItem { title: "学Spring Boot", type: "learning", ... },
- *   ClassifyItem { title: "下午健身", type: "health", ... }
+ * Record.segment = ["今天上午学了 Spring Boot", "下午去健身"]
+ * Record.chunkMetadataList = [
+ *   {title: "学Spring Boot", contentType: "learning", ...},
+ *   {title: "下午健身", contentType: "health", ...}
  * ]
  * </pre>
  */
@@ -50,31 +54,31 @@ public class ClassifyProcessor implements RecordProcessor {
         List<Record> result = new ArrayList<>();
 
         for (Record record : records) {
-            List<Record> classified = classifyOne(record);
-            result.addAll(classified);
+            Record classified = classifyOne(record);
+            result.add(classified);
         }
 
         return result;
     }
 
     /**
-     * 分类单条记录（可能拆分成多条）
+     * 分类单条记录（生成 segment 数组 + chunk 元数据）
      */
-    private List<Record> classifyOne(Record record) {
+    private Record classifyOne(Record record) {
         String content = record.getContent();
         log.info("ClassifyProcessor 开始处理，记录ID: {}, 内容长度: {}", record.getId(), content.length());
 
         try {
-            // 1. 调用 gRPC 分类服务（携带用户的模型配置）
+            // 1. 调用 gRPC 分类服务
             RecordProcessorProto.ClassifyResponse response = aiGrpcClient.classify(record.getUserId(), content);
 
-            // 2. 检查是否跳过（无意义内容）
+            // 2. 检查是否跳过
             if (response.getSkip()) {
                 log.info("AI 判定跳过，原因: {}", response.getSkipReason());
                 throw new IllegalArgumentException("AI 判定内容无意义: " + response.getSkipReason());
             }
 
-            // 3. 遍历拆分结果，每条 ClassifyItem 创建一个 Record
+            // 3. 遍历拆分结果，构建 segment 数组和 chunkMetadataList
             List<RecordProcessorProto.ClassifyItem> items = response.getItemsList();
             log.info("ClassifyProcessor 拆分结果: {} 条", items.size());
 
@@ -82,44 +86,36 @@ public class ClassifyProcessor implements RecordProcessor {
                 throw new IllegalArgumentException("AI 返回的分类结果为空");
             }
 
-            List<Record> result = new ArrayList<>();
-            Long originalRecordId = record.getId();  // 原记录ID
+            List<String> segments = new ArrayList<>();
+            List<Map<String, Object>> chunkMetadataList = new ArrayList<>();
 
             for (int i = 0; i < items.size(); i++) {
                 RecordProcessorProto.ClassifyItem item = items.get(i);
 
-                // 复用原记录的基础信息，填充 AI 生成的字段
-                Record newRecord = Record.builder()
-                        .userId(record.getUserId())
-                        .content(record.getContent())  // 保留原始完整内容
-                        .title(item.getTitle())
-                        .summary(item.getSummary())
-                        .contentType(convertContentType(item.getContentType()))
-                        .mood(convertMoods(item.getMoodsList()))
-                        .keywords(item.getKeywordsList())
-                        .status(RecordStatus.PROCESSING)  // 后续 EventListener 会改为 REVIEWING
-                        .userReviewed(false)
-                        .createdAt(record.getCreatedAt())
-                        .updatedAt(OffsetDateTime.now())
-                        .build();
+                // segment 片段（原文）
+                segments.add(item.getContent());
 
-                if (i == 0) {
-                    // 第一条：复用原记录 ID，originalRecordId 为 null（本身就是原记录）
-                    newRecord.setId(originalRecordId);
-                    newRecord.setOriginalRecordId(null);
-                } else {
-                    // 后续：插入新记录，originalRecordId 指向原记录
-                    newRecord.setOriginalRecordId(originalRecordId);
-                }
+                // chunk 元数据
+                Map<String, Object> metadata = new HashMap<>();
+                metadata.put("title", item.getTitle());
+                metadata.put("summary", item.getSummary());
+                metadata.put("contentType", convertContentType(item.getContentType()));
+                metadata.put("mood", convertMoods(item.getMoodsList()));
+                metadata.put("keywords", item.getKeywordsList());
+                chunkMetadataList.add(metadata);
 
-                result.add(newRecord);
-
-                log.info("ClassifyProcessor 完成 [{}]: title={}, contentType={}, originalRecordId={}",
-                        i + 1, newRecord.getTitle(), newRecord.getContentType(),
-                        i == 0 ? "null(原记录)" : originalRecordId);
+                log.info("ClassifyProcessor 片段 [{}]: title={}, contentType={}, segment={}",
+                        i + 1, item.getTitle(), convertContentType(item.getContentType()),
+                        item.getContent());
             }
 
-            return result;
+            // 4. 更新原 Record（不创建新 Record）
+            record.setSegment(segments);
+            record.setChunkMetadataList(chunkMetadataList);
+            record.setStatus(RecordStatus.PROCESSING);
+            record.setUpdatedAt(OffsetDateTime.now());
+
+            return record;
 
         } catch (StatusRuntimeException e) {
             log.error("gRPC Classify 调用失败: {}", e.getStatus(), e);
@@ -128,18 +124,13 @@ public class ClassifyProcessor implements RecordProcessor {
     }
 
     /**
-     * Proto ContentType → Java ContentType
+     * Proto ContentType → 字符串
      */
-    private ContentType convertContentType(CommonProto.ContentType protoType) {
+    private String convertContentType(CommonProto.ContentType protoType) {
         if (protoType == CommonProto.ContentType.CONTENT_UNKNOWN) {
             return null;
         }
-        try {
-            return ContentType.valueOf(protoType.name());
-        } catch (IllegalArgumentException e) {
-            log.warn("未知的内容类型: {}, 返回 null", protoType);
-            return null;
-        }
+        return protoType.name().toLowerCase();
     }
 
     /**

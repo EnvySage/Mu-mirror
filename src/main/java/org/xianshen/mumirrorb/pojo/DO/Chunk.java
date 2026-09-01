@@ -67,8 +67,17 @@ public class Chunk {
     /**
      * 切片内容（整条记录的原始内容）
      */
-    @Schema(description = "切片内容", example = "今天学习了Spring Security的核心概念...")
+    @Schema(description = "切片内容（原始全文）", example = "今天学习了Spring Security的核心概念...")
     private String content;
+
+    /**
+     * 主题片段（用于 embedding）
+     *
+     * <p>AI 拆分后的主题摘要，embedding 基于此字段生成。</p>
+     * <p>非拆分场景下与 content 相同。</p>
+     */
+    @Schema(description = "主题片段（用于embedding）", example = "今天学习了Spring Security的核心概念...")
+    private String segment;
 
     /**
      * 元数据（JSONB）
