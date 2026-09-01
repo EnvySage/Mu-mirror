@@ -1,0 +1,1229 @@
+{
+  "最近学习怎么样": {
+    "expected_topics": [
+      "学习"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.42351800203323364,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "similarity": 0.41977659346004836,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "similarity": 0.3890843027284332,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "similarity": 0.37776513033405346,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "similarity": 0.37275517745285236,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "similarity": 0.36988277345546416,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.36583593487739563,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "similarity": 0.3594247102737427,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "similarity": 0.35654620191179565,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "similarity": 0.3507412462984779,
+        "relevant": 0
+      }
+    ]
+  },
+  "有没有提到编程": {
+    "expected_topics": [
+      "学习"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 11,
+        "record_id": 18,
+        "content": "毕设中期检查快到了，得赶紧把核心功能做完",
+        "similarity": 0.40277383352284146,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.39568362819205616,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "similarity": 0.3859364505391256,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 51,
+        "record_id": 58,
+        "content": "读完了《三体》第三部，程心这个角色争议真大",
+        "similarity": 0.38097067957941766,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 8,
+        "record_id": 15,
+        "content": "今天写了一天代码，把用户认证模块重构了一遍，JWT 逻辑清晰多了",
+        "similarity": 0.37084498231679097,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 9,
+        "record_id": 16,
+        "content": "Python 的 gRPC 写好了，Java 端调用成功，数据传过来了",
+        "similarity": 0.358606977296708,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "similarity": 0.3585071670564166,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "similarity": 0.3493465885325251,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.3407278758504355,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 3,
+        "record_id": 5,
+        "content": "论文第二章写了一半，感觉逻辑还是不太通顺，明天继续改",
+        "similarity": 0.34065311131915255,
+        "relevant": 0
+      }
+    ]
+  },
+  "论文写得怎么样了": {
+    "expected_topics": [
+      "学习"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "similarity": 0.7180537153450433,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "similarity": 0.7021352261941205,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 3,
+        "record_id": 5,
+        "content": "论文第二章写了一半，感觉逻辑还是不太通顺，明天继续改",
+        "similarity": 0.6269467695387154,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "similarity": 0.49828547229084297,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 11,
+        "record_id": 18,
+        "content": "毕设中期检查快到了，得赶紧把核心功能做完",
+        "similarity": 0.4493920176858921,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.4308815002441406,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "similarity": 0.4019762695424639,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "similarity": 0.3966938257217407,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "similarity": 0.3942175805568695,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 9,
+        "record_id": 16,
+        "content": "Python 的 gRPC 写好了，Java 端调用成功，数据传过来了",
+        "similarity": 0.390139346433225,
+        "relevant": 1
+      }
+    ]
+  },
+  "导师说了什么": {
+    "expected_topics": [
+      "学习"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "similarity": 0.6217201577591813,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "similarity": 0.4929521377654167,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "similarity": 0.39505327925244815,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 3,
+        "record_id": 5,
+        "content": "论文第二章写了一半，感觉逻辑还是不太通顺，明天继续改",
+        "similarity": 0.38612542235103775,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.3796049952507019,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "similarity": 0.37652591606820196,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "similarity": 0.35929945949915354,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "similarity": 0.35775476694107056,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "similarity": 0.3573919641194334,
+        "relevant": 0
+      }
+    ]
+  },
+  "最近有没有运动": {
+    "expected_topics": [
+      "运动"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "similarity": 0.4273403286933899,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "similarity": 0.4238386497593738,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "similarity": 0.405455445918117,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "similarity": 0.3987750769391617,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "similarity": 0.3937961459159851,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "similarity": 0.37533992528915405,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "similarity": 0.3733026087284088,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 24,
+        "record_id": 31,
+        "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+        "similarity": 0.36837060828559554,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 19,
+        "record_id": 26,
+        "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+        "similarity": 0.365221283747035,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "similarity": 0.35978991628945445,
+        "relevant": 1
+      }
+    ]
+  },
+  "跑步跑了多少": {
+    "expected_topics": [
+      "运动"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "similarity": 0.5708508321389331,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "similarity": 0.4761906408128336,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "similarity": 0.44588519794091175,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 21,
+        "record_id": 28,
+        "content": "骑共享单车去了公园，来回大概 15 公里",
+        "similarity": 0.41797794157200896,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 19,
+        "record_id": 26,
+        "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+        "similarity": 0.38250521265016924,
+        "relevant": 0
+      }
+    ]
+  },
+  "去健身房了吗": {
+    "expected_topics": [
+      "运动"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "similarity": 0.5685287375134992,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 24,
+        "record_id": 31,
+        "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+        "similarity": 0.4388163497180322,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "similarity": 0.4364396073556188,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "similarity": 0.4037609157704769,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "similarity": 0.38338358600335287,
+        "relevant": 1
+      }
+    ]
+  },
+  "最近吃了什么好吃的": {
+    "expected_topics": [
+      "饮食"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "similarity": 0.5667841950912244,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "similarity": 0.5340304056387908,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "similarity": 0.5266380153108255,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "similarity": 0.5054632124028684,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "similarity": 0.5048136410228237,
+        "relevant": 1
+      }
+    ]
+  },
+  "有没有自己做饭": {
+    "expected_topics": [
+      "饮食"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "similarity": 0.5408283633240571,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "similarity": 0.4537955061732386,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 31,
+        "record_id": 38,
+        "content": "尝试做了可乐鸡翅，第一次做居然成功了",
+        "similarity": 0.4316200146561867,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "similarity": 0.425960268137471,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "similarity": 0.38369352768938336,
+        "relevant": 1
+      }
+    ]
+  },
+  "喝了什么饮料": {
+    "expected_topics": [
+      "饮食"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "similarity": 0.5553245875432852,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 28,
+        "record_id": 35,
+        "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+        "similarity": 0.47406521284969017,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "similarity": 0.4340618848800659,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "similarity": 0.4145507936045766,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 52,
+        "record_id": 59,
+        "content": "去 KTV 唱了三个小时，嗓子都哑了",
+        "similarity": 0.40633989033161777,
+        "relevant": 0
+      }
+    ]
+  },
+  "最近心情怎么样": {
+    "expected_topics": [
+      "情感"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "similarity": 0.5713173321282071,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 37,
+        "record_id": 44,
+        "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+        "similarity": 0.5332204103469849,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "similarity": 0.5258019849180001,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "similarity": 0.49046844244003296,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "similarity": 0.4702103751772426,
+        "relevant": 1
+      }
+    ]
+  },
+  "有没有和家人联系": {
+    "expected_topics": [
+      "情感"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 37,
+        "record_id": 44,
+        "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+        "similarity": 0.5127363785819592,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.4014696596301036,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "similarity": 0.40103492730648393,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "similarity": 0.3721264157144555,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "similarity": 0.3525994595766737,
+        "relevant": 0
+      }
+    ]
+  },
+  "秋招怎么样了": {
+    "expected_topics": [
+      "情感"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 40,
+        "record_id": 47,
+        "content": "有点焦虑，秋招还没拿到满意的 offer",
+        "similarity": 0.7491868138313293,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "similarity": 0.5343795577996839,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "similarity": 0.41954466221002784,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.35888633131980896,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "similarity": 0.3519044518470764,
+        "relevant": 0
+      }
+    ]
+  },
+  "最近看了什么电影": {
+    "expected_topics": [
+      "娱乐"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "similarity": 0.4836938823370305,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "similarity": 0.4272823675106552,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 49,
+        "record_id": 56,
+        "content": "下午去看了个展览，现代艺术有些看不懂",
+        "similarity": 0.40960375013329164,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "similarity": 0.4042866287060609,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.3668891191482544,
+        "relevant": 0
+      }
+    ]
+  },
+  "玩了什么游戏": {
+    "expected_topics": [
+      "娱乐"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "similarity": 0.5240748808339318,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "similarity": 0.47446072406044904,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "similarity": 0.45706391846371663,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "similarity": 0.4468869332209905,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "similarity": 0.42377466872040404,
+        "relevant": 1
+      }
+    ]
+  },
+  "读了什么书": {
+    "expected_topics": [
+      "娱乐"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 51,
+        "record_id": 58,
+        "content": "读完了《三体》第三部，程心这个角色争议真大",
+        "similarity": 0.4041640580941458,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "similarity": 0.39077913761138916,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "similarity": 0.36760891579416155,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "similarity": 0.3568747341632843,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "similarity": 0.3556445327016996,
+        "relevant": 0
+      }
+    ]
+  },
+  "周末做了什么": {
+    "expected_topics": [
+      "运动",
+      "娱乐",
+      "饮食"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "similarity": 0.474404485559197,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "similarity": 0.4559633486314596,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "similarity": 0.41180843640515663,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "similarity": 0.3909893165839533,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "similarity": 0.38824421167373935,
+        "relevant": 0
+      }
+    ]
+  },
+  "最近有什么开心的事": {
+    "expected_topics": [
+      "情感",
+      "学习",
+      "运动"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.4917522668838501,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "similarity": 0.48214873777933576,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "similarity": 0.47496131211749926,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "similarity": 0.4698303061824862,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "similarity": 0.46641430258750916,
+        "relevant": 1
+      }
+    ]
+  },
+  "有没有和朋友出去": {
+    "expected_topics": [
+      "娱乐",
+      "饮食",
+      "运动"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "similarity": 0.5688101561793827,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "similarity": 0.5250219263142923,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "similarity": 0.5074133125718461,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.5025460273786198,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "similarity": 0.4694337528606506,
+        "relevant": 1
+      }
+    ]
+  },
+  "今天做了什么运动": {
+    "expected_topics": [
+      "运动"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "similarity": 0.5445314645767212,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "similarity": 0.5088137680999187,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "similarity": 0.5022639928898824,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "similarity": 0.47976624965667725,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "similarity": 0.4748426675796509,
+        "relevant": 1
+      }
+    ]
+  },
+  "最近压力大吗": {
+    "expected_topics": [
+      "情感",
+      "学习"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "similarity": 0.6208739650770405,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 40,
+        "record_id": 47,
+        "content": "有点焦虑，秋招还没拿到满意的 offer",
+        "similarity": 0.4371764790170337,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.40061975719391596,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "similarity": 0.3968811810946129,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "similarity": 0.3903677347192859,
+        "relevant": 0
+      }
+    ]
+  },
+  "有没有熬夜": {
+    "expected_topics": [
+      "学习",
+      "娱乐"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 50,
+        "record_id": 57,
+        "content": "刷了一晚上短视频，时间过得太快了",
+        "similarity": 0.5169777736345925,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "similarity": 0.4579702863657815,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "similarity": 0.4374499581724388,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "similarity": 0.4290921347792236,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 52,
+        "record_id": 59,
+        "content": "去 KTV 唱了三个小时，嗓子都哑了",
+        "similarity": 0.4237044786966562,
+        "relevant": 0
+      }
+    ]
+  },
+  "最近有什么新发现": {
+    "expected_topics": [
+      "学习",
+      "娱乐"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "similarity": 0.3728158175945282,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "similarity": 0.3601803564917836,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "similarity": 0.35347727814452246,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.3526652455329895,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "similarity": 0.3401689922708879,
+        "relevant": 0
+      }
+    ]
+  },
+  "有没有学新技术": {
+    "expected_topics": [
+      "学习"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "similarity": 0.363294075825634,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "similarity": 0.34323207566833736,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 8,
+        "record_id": 15,
+        "content": "今天写了一天代码，把用户认证模块重构了一遍，JWT 逻辑清晰多了",
+        "similarity": 0.3377455376234971,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "similarity": 0.3329749802641566,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "similarity": 0.3320905665186218,
+        "relevant": 1
+      }
+    ]
+  },
+  "最近看了什么动漫": {
+    "expected_topics": [
+      "娱乐"
+    ],
+    "annotations": [
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "similarity": 0.5718302385908233,
+        "relevant": 1
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "similarity": 0.4271920068745616,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "similarity": 0.38617492872997916,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "similarity": 0.3817215632366209,
+        "relevant": 0
+      },
+      {
+        "chunk_id": 49,
+        "record_id": 56,
+        "content": "下午去看了个展览，现代艺术有些看不懂",
+        "similarity": 0.37692783016396647,
+        "relevant": 0
+      }
+    ]
+  }
+}

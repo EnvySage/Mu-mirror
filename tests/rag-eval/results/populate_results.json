@@ -1,0 +1,394 @@
+[
+  {
+    "topic": "学习",
+    "content": "看了一篇关于 pgvector 的博客，向量数据库在 RAG 里用得很多",
+    "record_id": 14,
+    "status": "success",
+    "title": "学习pgvector",
+    "content_type": "learning"
+  },
+  {
+    "topic": "学习",
+    "content": "今天写了一天代码，把用户认证模块重构了一遍，JWT 逻辑清晰多了",
+    "record_id": 15,
+    "status": "success",
+    "title": "重构用户认证模块",
+    "content_type": "work"
+  },
+  {
+    "topic": "学习",
+    "content": "Python 的 gRPC 写好了，Java 端调用成功，数据传过来了",
+    "record_id": 16,
+    "status": "success",
+    "title": "Python gRP",
+    "content_type": "work"
+  },
+  {
+    "topic": "学习",
+    "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+    "record_id": 17,
+    "status": "success",
+    "title": "学习设计模式",
+    "content_type": "learning"
+  },
+  {
+    "topic": "学习",
+    "content": "毕设中期检查快到了，得赶紧把核心功能做完",
+    "record_id": 18,
+    "status": "success",
+    "title": "毕设核心功能完成",
+    "content_type": "todo"
+  },
+  {
+    "topic": "学习",
+    "content": "今天搞了一天 MyBatis-Plus 的 TypeHandler，踩了好多坑",
+    "record_id": 19,
+    "status": "success",
+    "title": "MyBatis-Pl",
+    "content_type": "learning"
+  },
+  {
+    "topic": "学习",
+    "content": "看了 PostgreSQL 的 JSONB 用法，存半结构化数据很方便",
+    "record_id": 20,
+    "status": "success",
+    "title": "学习PostgreS",
+    "content_type": "learning"
+  },
+  {
+    "topic": "学习",
+    "content": "今天终于理解了 Transformer 的 self-attention 机制",
+    "record_id": 21,
+    "status": "success",
+    "title": "理解Transfor",
+    "content_type": "learning"
+  },
+  {
+    "topic": "学习",
+    "content": "复习了 HTTP 状态码，301 和 302 的区别之前一直搞混",
+    "record_id": 22,
+    "status": "success",
+    "title": "复习HTTP状态码",
+    "content_type": "learning"
+  },
+  {
+    "topic": "运动",
+    "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+    "record_id": 23,
+    "status": "success",
+    "title": "晨跑五公里",
+    "content_type": "health"
+  },
+  {
+    "topic": "运动",
+    "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+    "record_id": 24,
+    "status": "success",
+    "title": "健身房锻炼",
+    "content_type": "health"
+  },
+  {
+    "topic": "运动",
+    "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+    "record_id": 25,
+    "status": "success",
+    "title": "打篮球",
+    "content_type": "social"
+  },
+  {
+    "topic": "运动",
+    "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+    "record_id": 26,
+    "status": "success",
+    "title": "游泳1000米",
+    "content_type": "health"
+  },
+  {
+    "topic": "运动",
+    "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+    "record_id": 27,
+    "status": "success",
+    "title": "晚上做瑜伽",
+    "content_type": "health"
+  },
+  {
+    "topic": "运动",
+    "content": "骑共享单车去了公园，来回大概 15 公里",
+    "record_id": 28,
+    "status": "success",
+    "title": "骑共享单车去公园",
+    "content_type": "note"
+  },
+  {
+    "topic": "运动",
+    "content": "今天打了羽毛球，对手太强了，被虐了",
+    "record_id": 29,
+    "status": "success",
+    "title": "打羽毛球",
+    "content_type": "note"
+  },
+  {
+    "topic": "运动",
+    "content": "晨跑的时候看到日出了，心情特别好",
+    "record_id": 30,
+    "status": "success",
+    "title": "晨跑看日出",
+    "content_type": "health"
+  },
+  {
+    "topic": "运动",
+    "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+    "record_id": 31,
+    "status": "success",
+    "title": "练腿深蹲80公斤",
+    "content_type": "health"
+  },
+  {
+    "topic": "运动",
+    "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+    "record_id": 32,
+    "status": "success",
+    "title": "下雨做俯卧撑",
+    "content_type": "health"
+  },
+  {
+    "topic": "饮食",
+    "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+    "record_id": 33,
+    "status": "success",
+    "title": "中午吃火锅",
+    "content_type": "social"
+  },
+  {
+    "topic": "饮食",
+    "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+    "record_id": 34,
+    "status": "success",
+    "title": "自制西红柿鸡蛋面",
+    "content_type": "note"
+  },
+  {
+    "topic": "饮食",
+    "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+    "record_id": 35,
+    "status": "success",
+    "title": "喝奶茶",
+    "content_type": "note"
+  },
+  {
+    "topic": "饮食",
+    "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+    "record_id": 36,
+    "status": "success",
+    "title": "早餐吃豆浆油条",
+    "content_type": "note"
+  },
+  {
+    "topic": "饮食",
+    "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+    "record_id": 37,
+    "status": "success",
+    "title": "麻辣香锅外卖",
+    "content_type": "note"
+  },
+  {
+    "topic": "饮食",
+    "content": "尝试做了可乐鸡翅，第一次做居然成功了",
+    "record_id": 38,
+    "status": "success",
+    "title": "可乐鸡翅首次成功",
+    "content_type": "note"
+  },
+  {
+    "topic": "饮食",
+    "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+    "record_id": 39,
+    "status": "success",
+    "title": "和朋友吃烧烤",
+    "content_type": "social"
+  },
+  {
+    "topic": "饮食",
+    "content": "减肥第三天，中午只吃了沙拉，下午好饿",
+    "record_id": 40,
+    "status": "success",
+    "title": "减肥第三天",
+    "content_type": "health"
+  },
+  {
+    "topic": "饮食",
+    "content": "学校门口新开了一家螺蛳粉，去尝了一下，味道很正宗",
+    "record_id": 41,
+    "status": "success",
+    "title": "尝试新开螺蛳粉店",
+    "content_type": "note"
+  },
+  {
+    "topic": "饮食",
+    "content": "今天吃了日料，三文鱼刺身很新鲜",
+    "record_id": 42,
+    "status": "success",
+    "title": "吃日料",
+    "content_type": "note"
+  },
+  {
+    "topic": "情感",
+    "content": "今天心情不太好，论文压力有点大，感觉写不完",
+    "record_id": 43,
+    "status": "success",
+    "title": "论文压力大",
+    "content_type": "learning"
+  },
+  {
+    "topic": "情感",
+    "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+    "record_id": 44,
+    "status": "success",
+    "title": "和妈妈打电话",
+    "content_type": "social"
+  },
+  {
+    "topic": "情感",
+    "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+    "record_id": 45,
+    "status": "success",
+    "title": "gRPC调通与毕业进",
+    "content_type": "learning"
+  },
+  {
+    "topic": "情感",
+    "content": "和女朋友吵了一架，为了一件小事，后来和好了",
+    "record_id": 46,
+    "status": "success",
+    "title": "吵架和和好",
+    "content_type": "social"
+  },
+  {
+    "topic": "情感",
+    "content": "有点焦虑，秋招还没拿到满意的 offer",
+    "record_id": 47,
+    "status": "success",
+    "title": "秋招求职焦虑",
+    "content_type": "work"
+  },
+  {
+    "topic": "情感",
+    "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+    "record_id": 48,
+    "status": "success",
+    "title": "获得导师肯定",
+    "content_type": "learning"
+  },
+  {
+    "topic": "情感",
+    "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+    "record_id": 49,
+    "status": "success",
+    "title": "阳台看月发呆",
+    "content_type": "thought"
+  },
+  {
+    "topic": "情感",
+    "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+    "record_id": 50,
+    "status": "success",
+    "title": "和高中同学视频聊天",
+    "content_type": "social"
+  },
+  {
+    "topic": "情感",
+    "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+    "record_id": 51,
+    "status": "success",
+    "title": "简历被拒",
+    "content_type": "work"
+  },
+  {
+    "topic": "情感",
+    "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+    "record_id": 52,
+    "status": "success",
+    "title": "回家吃妈妈做的红烧肉",
+    "content_type": "social"
+  },
+  {
+    "topic": "娱乐",
+    "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+    "record_id": 53,
+    "status": "success",
+    "title": "看电影《盗梦空间》",
+    "content_type": "note"
+  },
+  {
+    "topic": "娱乐",
+    "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+    "record_id": 54,
+    "status": "success",
+    "title": "和朋友打LOL",
+    "content_type": "social"
+  },
+  {
+    "topic": "娱乐",
+    "content": "追了一天的动漫，《进击的巨人》结局看完了",
+    "record_id": 55,
+    "status": "success",
+    "title": "看完动漫结局",
+    "content_type": "note"
+  },
+  {
+    "topic": "娱乐",
+    "content": "下午去看了个展览，现代艺术有些看不懂",
+    "record_id": 56,
+    "status": "success",
+    "title": "看展览",
+    "content_type": "note"
+  },
+  {
+    "topic": "娱乐",
+    "content": "刷了一晚上短视频，时间过得太快了",
+    "record_id": 57,
+    "status": "success",
+    "title": "刷短视频感慨",
+    "content_type": "thought"
+  },
+  {
+    "topic": "娱乐",
+    "content": "读完了《三体》第三部，程心这个角色争议真大",
+    "record_id": 58,
+    "status": "success",
+    "title": "读完《三体》第三部",
+    "content_type": "thought"
+  },
+  {
+    "topic": "娱乐",
+    "content": "去 KTV 唱了三个小时，嗓子都哑了",
+    "record_id": 59,
+    "status": "success",
+    "title": "KTV唱歌",
+    "content_type": "social"
+  },
+  {
+    "topic": "娱乐",
+    "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+    "record_id": 60,
+    "status": "success",
+    "title": "买新游戏《黑神话悟空",
+    "content_type": "thought"
+  },
+  {
+    "topic": "娱乐",
+    "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+    "record_id": 61,
+    "status": "success",
+    "title": "和朋友玩密室逃脱",
+    "content_type": "social"
+  },
+  {
+    "topic": "娱乐",
+    "content": "今天在家听了一天音乐，周杰伦的老歌还是好听",
+    "record_id": 62,
+    "status": "success",
+    "title": "在家听音乐",
+    "content_type": "note"
+  }
+]

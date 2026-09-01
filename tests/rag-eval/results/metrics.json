@@ -1,0 +1,187 @@
+{
+  "summary": {
+    "total_queries": 25,
+    "total_relevant": 95,
+    "recall@3": 0.7219999999999999,
+    "recall@5": 0.9542222222222222,
+    "recall@10": 1.0,
+    "mrr": 0.9733333333333333
+  },
+  "details": [
+    {
+      "query": "最近学习怎么样",
+      "relevant_count": 3,
+      "total_results": 10,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "有没有提到编程",
+      "relevant_count": 5,
+      "total_results": 10,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "论文写得怎么样了",
+      "relevant_count": 8,
+      "total_results": 10,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "导师说了什么",
+      "relevant_count": 2,
+      "total_results": 9,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近有没有运动",
+      "relevant_count": 9,
+      "total_results": 10,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "跑步跑了多少",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "去健身房了吗",
+      "relevant_count": 4,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近吃了什么好吃的",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "有没有自己做饭",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "喝了什么饮料",
+      "relevant_count": 3,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近心情怎么样",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "有没有和家人联系",
+      "relevant_count": 4,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "秋招怎么样了",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近看了什么电影",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "玩了什么游戏",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "读了什么书",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "周末做了什么",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近有什么开心的事",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "有没有和朋友出去",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "今天做了什么运动",
+      "relevant_count": 5,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近压力大吗",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "有没有熬夜",
+      "relevant_count": 3,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近有什么新发现",
+      "relevant_count": 2,
+      "total_results": 5,
+      "first_relevant_rank": 3,
+      "rr": 0.3333333333333333
+    },
+    {
+      "query": "有没有学新技术",
+      "relevant_count": 4,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    },
+    {
+      "query": "最近看了什么动漫",
+      "relevant_count": 1,
+      "total_results": 5,
+      "first_relevant_rank": 1,
+      "rr": 1.0
+    }
+  ]
+}

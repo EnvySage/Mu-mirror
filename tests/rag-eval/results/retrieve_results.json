@@ -1,0 +1,3576 @@
+[
+  {
+    "query": "最近学习怎么样",
+    "expected_topics": [
+      "学习"
+    ],
+    "results": [
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.42351800203323364
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.41977659346004836
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "metadata": {
+          "mood": [],
+          "title": "论文召回率实验",
+          "createdAt": "2026-09-01T03:09:25.147573Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.3890843027284332
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "简历被拒",
+          "createdAt": "2026-09-01T03:57:04.063669Z",
+          "contentType": "work"
+        },
+        "similarity": 0.37776513033405346
+      },
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "metadata": {
+          "mood": [],
+          "title": "晨跑五公里",
+          "createdAt": "2026-09-01T03:40:51.415951Z",
+          "contentType": "health"
+        },
+        "similarity": 0.37275517745285236
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "metadata": {
+          "mood": [
+            "sad",
+            "stressed",
+            "anxious"
+          ],
+          "title": "论文压力大",
+          "createdAt": "2026-09-01T03:53:52.414592Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.36988277345546416
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.36583593487739563
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.3594247102737427
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.35654620191179565
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3507412462984779
+      }
+    ]
+  },
+  {
+    "query": "有没有提到编程",
+    "expected_topics": [
+      "学习"
+    ],
+    "results": [
+      {
+        "chunk_id": 11,
+        "record_id": 18,
+        "content": "毕设中期检查快到了，得赶紧把核心功能做完",
+        "metadata": {
+          "mood": [],
+          "title": "毕设核心功能完成",
+          "createdAt": "2026-09-01T03:39:19.443033Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.40277383352284146
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.39568362819205616
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.3859364505391256
+      },
+      {
+        "chunk_id": 51,
+        "record_id": 58,
+        "content": "读完了《三体》第三部，程心这个角色争议真大",
+        "metadata": {
+          "mood": [],
+          "title": "读完《三体》第三部",
+          "createdAt": "2026-09-01T03:59:06.005768Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.38097067957941766
+      },
+      {
+        "chunk_id": 8,
+        "record_id": 15,
+        "content": "今天写了一天代码，把用户认证模块重构了一遍，JWT 逻辑清晰多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "重构用户认证模块",
+          "createdAt": "2026-09-01T03:38:02.582738Z",
+          "contentType": "work"
+        },
+        "similarity": 0.37084498231679097
+      },
+      {
+        "chunk_id": 9,
+        "record_id": 16,
+        "content": "Python 的 gRPC 写好了，Java 端调用成功，数据传过来了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "Python gRP",
+          "createdAt": "2026-09-01T03:38:32.457973Z",
+          "contentType": "work"
+        },
+        "similarity": 0.358606977296708
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "RAG论文阅读感想",
+          "createdAt": "2026-09-01T03:08:48.586814Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3585071670564166
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "metadata": {
+          "mood": [],
+          "title": "学习设计模式",
+          "createdAt": "2026-09-01T03:39:02.883779Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3493465885325251
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3407278758504355
+      },
+      {
+        "chunk_id": 3,
+        "record_id": 5,
+        "content": "论文第二章写了一半，感觉逻辑还是不太通顺，明天继续改",
+        "metadata": {
+          "mood": [
+            "confused"
+          ],
+          "title": "论文第二章进度",
+          "createdAt": "2026-09-01T03:08:31.664347Z",
+          "contentType": "work"
+        },
+        "similarity": 0.34065311131915255
+      }
+    ]
+  },
+  {
+    "query": "论文写得怎么样了",
+    "expected_topics": [
+      "学习"
+    ],
+    "results": [
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.7180537153450433
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "metadata": {
+          "mood": [
+            "sad",
+            "stressed",
+            "anxious"
+          ],
+          "title": "论文压力大",
+          "createdAt": "2026-09-01T03:53:52.414592Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.7021352261941205
+      },
+      {
+        "chunk_id": 3,
+        "record_id": 5,
+        "content": "论文第二章写了一半，感觉逻辑还是不太通顺，明天继续改",
+        "metadata": {
+          "mood": [
+            "confused"
+          ],
+          "title": "论文第二章进度",
+          "createdAt": "2026-09-01T03:08:31.664347Z",
+          "contentType": "work"
+        },
+        "similarity": 0.6269467695387154
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "metadata": {
+          "mood": [],
+          "title": "论文召回率实验",
+          "createdAt": "2026-09-01T03:09:25.147573Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.49828547229084297
+      },
+      {
+        "chunk_id": 11,
+        "record_id": 18,
+        "content": "毕设中期检查快到了，得赶紧把核心功能做完",
+        "metadata": {
+          "mood": [],
+          "title": "毕设核心功能完成",
+          "createdAt": "2026-09-01T03:39:19.443033Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.4493920176858921
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.4308815002441406
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "简历被拒",
+          "createdAt": "2026-09-01T03:57:04.063669Z",
+          "contentType": "work"
+        },
+        "similarity": 0.4019762695424639
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "RAG论文阅读感想",
+          "createdAt": "2026-09-01T03:08:48.586814Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3966938257217407
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "自制西红柿鸡蛋面",
+          "createdAt": "2026-09-01T03:48:42.395321Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3942175805568695
+      },
+      {
+        "chunk_id": 9,
+        "record_id": 16,
+        "content": "Python 的 gRPC 写好了，Java 端调用成功，数据传过来了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "Python gRP",
+          "createdAt": "2026-09-01T03:38:32.457973Z",
+          "contentType": "work"
+        },
+        "similarity": 0.390139346433225
+      }
+    ]
+  },
+  {
+    "query": "导师说了什么",
+    "expected_topics": [
+      "学习"
+    ],
+    "results": [
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.6217201577591813
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "metadata": {
+          "mood": [],
+          "title": "论文召回率实验",
+          "createdAt": "2026-09-01T03:09:25.147573Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.4929521377654167
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.4043787121772766
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "看电影《盗梦空间》",
+          "createdAt": "2026-09-01T03:57:38.766907Z",
+          "contentType": "note"
+        },
+        "similarity": 0.39505327925244815
+      },
+      {
+        "chunk_id": 3,
+        "record_id": 5,
+        "content": "论文第二章写了一半，感觉逻辑还是不太通顺，明天继续改",
+        "metadata": {
+          "mood": [
+            "confused"
+          ],
+          "title": "论文第二章进度",
+          "createdAt": "2026-09-01T03:08:31.664347Z",
+          "contentType": "work"
+        },
+        "similarity": 0.38612542235103775
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3796049952507019
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.37652591606820196
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.35929945949915354
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.35775476694107056
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "metadata": {
+          "mood": [
+            "sad",
+            "stressed",
+            "anxious"
+          ],
+          "title": "论文压力大",
+          "createdAt": "2026-09-01T03:53:52.414592Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3573919641194334
+      }
+    ]
+  },
+  {
+    "query": "最近有没有运动",
+    "expected_topics": [
+      "运动"
+    ],
+    "results": [
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4273403286933899
+      },
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "metadata": {
+          "mood": [],
+          "title": "晨跑五公里",
+          "createdAt": "2026-09-01T03:40:51.415951Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4238386497593738
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.405455445918117
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.3987750769391617
+      },
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "metadata": {
+          "mood": [],
+          "title": "健身房锻炼",
+          "createdAt": "2026-09-01T03:41:04.883624Z",
+          "contentType": "health"
+        },
+        "similarity": 0.3937961459159851
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "晚上做瑜伽",
+          "createdAt": "2026-09-01T03:42:12.013068Z",
+          "contentType": "health"
+        },
+        "similarity": 0.37533992528915405
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.3733026087284088
+      },
+      {
+        "chunk_id": 24,
+        "record_id": 31,
+        "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+        "metadata": {
+          "mood": [],
+          "title": "练腿深蹲80公斤",
+          "createdAt": "2026-09-01T03:47:43.683634Z",
+          "contentType": "health"
+        },
+        "similarity": 0.36837060828559554
+      },
+      {
+        "chunk_id": 19,
+        "record_id": 26,
+        "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "游泳1000米",
+          "createdAt": "2026-09-01T03:41:50.149502Z",
+          "contentType": "health"
+        },
+        "similarity": 0.365221283747035
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.35978991628945445
+      }
+    ]
+  },
+  {
+    "query": "跑步跑了多少",
+    "expected_topics": [
+      "运动"
+    ],
+    "results": [
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "metadata": {
+          "mood": [],
+          "title": "晨跑五公里",
+          "createdAt": "2026-09-01T03:40:51.415951Z",
+          "contentType": "health"
+        },
+        "similarity": 0.5708508321389331
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4761906408128336
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.44588519794091175
+      },
+      {
+        "chunk_id": 21,
+        "record_id": 28,
+        "content": "骑共享单车去了公园，来回大概 15 公里",
+        "metadata": {
+          "mood": [],
+          "title": "骑共享单车去公园",
+          "createdAt": "2026-09-01T03:46:41.071305Z",
+          "contentType": "note"
+        },
+        "similarity": 0.41797794157200896
+      },
+      {
+        "chunk_id": 19,
+        "record_id": 26,
+        "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "游泳1000米",
+          "createdAt": "2026-09-01T03:41:50.149502Z",
+          "contentType": "health"
+        },
+        "similarity": 0.38250521265016924
+      },
+      {
+        "chunk_id": 24,
+        "record_id": 31,
+        "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+        "metadata": {
+          "mood": [],
+          "title": "练腿深蹲80公斤",
+          "createdAt": "2026-09-01T03:47:43.683634Z",
+          "contentType": "health"
+        },
+        "similarity": 0.35250437088272024
+      },
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友打LOL",
+          "createdAt": "2026-09-01T03:57:52.660202Z",
+          "contentType": "social"
+        },
+        "similarity": 0.34215433425171193
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.31443459732635626
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3106861505116867
+      },
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "metadata": {
+          "mood": [],
+          "title": "健身房锻炼",
+          "createdAt": "2026-09-01T03:41:04.883624Z",
+          "contentType": "health"
+        },
+        "similarity": 0.3099621328700226
+      }
+    ]
+  },
+  {
+    "query": "去健身房了吗",
+    "expected_topics": [
+      "运动"
+    ],
+    "results": [
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "metadata": {
+          "mood": [],
+          "title": "健身房锻炼",
+          "createdAt": "2026-09-01T03:41:04.883624Z",
+          "contentType": "health"
+        },
+        "similarity": 0.5685287375134992
+      },
+      {
+        "chunk_id": 24,
+        "record_id": 31,
+        "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+        "metadata": {
+          "mood": [],
+          "title": "练腿深蹲80公斤",
+          "createdAt": "2026-09-01T03:47:43.683634Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4388163497180322
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4364396073556188
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "晚上做瑜伽",
+          "createdAt": "2026-09-01T03:42:12.013068Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4037609157704769
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.38338358600335287
+      },
+      {
+        "chunk_id": 19,
+        "record_id": 26,
+        "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "游泳1000米",
+          "createdAt": "2026-09-01T03:41:50.149502Z",
+          "contentType": "health"
+        },
+        "similarity": 0.3733936846256283
+      },
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "metadata": {
+          "mood": [],
+          "title": "晨跑五公里",
+          "createdAt": "2026-09-01T03:40:51.415951Z",
+          "contentType": "health"
+        },
+        "similarity": 0.3596527147707087
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.35523499784052404
+      },
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "metadata": {
+          "mood": [],
+          "title": "看完动漫结局",
+          "createdAt": "2026-09-01T03:58:11.434172Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3500807166003327
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "metadata": {
+          "mood": [],
+          "title": "早餐吃豆浆油条",
+          "createdAt": "2026-09-01T03:49:07.384629Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3463570269133438
+      }
+    ]
+  },
+  {
+    "query": "最近吃了什么好吃的",
+    "expected_topics": [
+      "饮食"
+    ],
+    "results": [
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.5667841950912244
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "metadata": {
+          "mood": [
+            "happy",
+            "grateful"
+          ],
+          "title": "回家吃妈妈做的红烧肉",
+          "createdAt": "2026-09-01T03:57:25.998695Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5340304056387908
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "中午吃火锅",
+          "createdAt": "2026-09-01T03:48:18.377915Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5266380153108255
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "自制西红柿鸡蛋面",
+          "createdAt": "2026-09-01T03:48:42.395321Z",
+          "contentType": "note"
+        },
+        "similarity": 0.5054632124028684
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "metadata": {
+          "mood": [],
+          "title": "早餐吃豆浆油条",
+          "createdAt": "2026-09-01T03:49:07.384629Z",
+          "contentType": "note"
+        },
+        "similarity": 0.5048136410228237
+      },
+      {
+        "chunk_id": 31,
+        "record_id": 38,
+        "content": "尝试做了可乐鸡翅，第一次做居然成功了",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "可乐鸡翅首次成功",
+          "createdAt": "2026-09-01T03:50:00.223125Z",
+          "contentType": "note"
+        },
+        "similarity": 0.48004120707266373
+      },
+      {
+        "chunk_id": 34,
+        "record_id": 41,
+        "content": "学校门口新开了一家螺蛳粉，去尝了一下，味道很正宗",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "尝试新开螺蛳粉店",
+          "createdAt": "2026-09-01T03:53:16.634751Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4659738262907378
+      },
+      {
+        "chunk_id": 28,
+        "record_id": 35,
+        "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "喝奶茶",
+          "createdAt": "2026-09-01T03:48:53.728485Z",
+          "contentType": "note"
+        },
+        "similarity": 0.44736000895500494
+      },
+      {
+        "chunk_id": 30,
+        "record_id": 37,
+        "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+        "metadata": {
+          "mood": [],
+          "title": "麻辣香锅外卖",
+          "createdAt": "2026-09-01T03:49:47.605810Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4229496545478646
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.42122697830200495
+      }
+    ]
+  },
+  {
+    "query": "有没有自己做饭",
+    "expected_topics": [
+      "饮食"
+    ],
+    "results": [
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "自制西红柿鸡蛋面",
+          "createdAt": "2026-09-01T03:48:42.395321Z",
+          "contentType": "note"
+        },
+        "similarity": 0.5408283633240571
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "metadata": {
+          "mood": [
+            "happy",
+            "grateful"
+          ],
+          "title": "回家吃妈妈做的红烧肉",
+          "createdAt": "2026-09-01T03:57:25.998695Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4537955061732386
+      },
+      {
+        "chunk_id": 31,
+        "record_id": 38,
+        "content": "尝试做了可乐鸡翅，第一次做居然成功了",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "可乐鸡翅首次成功",
+          "createdAt": "2026-09-01T03:50:00.223125Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4316200146561867
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "中午吃火锅",
+          "createdAt": "2026-09-01T03:48:18.377915Z",
+          "contentType": "social"
+        },
+        "similarity": 0.425960268137471
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "metadata": {
+          "mood": [],
+          "title": "早餐吃豆浆油条",
+          "createdAt": "2026-09-01T03:49:07.384629Z",
+          "contentType": "note"
+        },
+        "similarity": 0.38369352768938336
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.37496018781902096
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3716677912572699
+      },
+      {
+        "chunk_id": 30,
+        "record_id": 37,
+        "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+        "metadata": {
+          "mood": [],
+          "title": "麻辣香锅外卖",
+          "createdAt": "2026-09-01T03:49:47.605810Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3700148010271558
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.36109597567009866
+      },
+      {
+        "chunk_id": 14,
+        "record_id": 21,
+        "content": "今天终于理解了 Transformer 的 self-attention 机制",
+        "metadata": {
+          "mood": [
+            "satisfied",
+            "excited"
+          ],
+          "title": "理解Transfor",
+          "createdAt": "2026-09-01T03:40:28.518822Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3572235809929247
+      }
+    ]
+  },
+  {
+    "query": "喝了什么饮料",
+    "expected_topics": [
+      "饮食"
+    ],
+    "results": [
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5553245875432852
+      },
+      {
+        "chunk_id": 28,
+        "record_id": 35,
+        "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "喝奶茶",
+          "createdAt": "2026-09-01T03:48:53.728485Z",
+          "contentType": "note"
+        },
+        "similarity": 0.47406521284969017
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "metadata": {
+          "mood": [],
+          "title": "早餐吃豆浆油条",
+          "createdAt": "2026-09-01T03:49:07.384629Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4340618848800659
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "中午吃火锅",
+          "createdAt": "2026-09-01T03:48:18.377915Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4145507936045766
+      },
+      {
+        "chunk_id": 52,
+        "record_id": 59,
+        "content": "去 KTV 唱了三个小时，嗓子都哑了",
+        "metadata": {
+          "mood": [],
+          "title": "KTV唱歌",
+          "createdAt": "2026-09-01T03:59:23.852789Z",
+          "contentType": "social"
+        },
+        "similarity": 0.40633989033161777
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3496706277328362
+      },
+      {
+        "chunk_id": 30,
+        "record_id": 37,
+        "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+        "metadata": {
+          "mood": [],
+          "title": "麻辣香锅外卖",
+          "createdAt": "2026-09-01T03:49:47.605810Z",
+          "contentType": "note"
+        },
+        "similarity": 0.34756362565430776
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "看电影《盗梦空间》",
+          "createdAt": "2026-09-01T03:57:38.766907Z",
+          "contentType": "note"
+        },
+        "similarity": 0.34344456623329433
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3390575349330902
+      },
+      {
+        "chunk_id": 31,
+        "record_id": 38,
+        "content": "尝试做了可乐鸡翅，第一次做居然成功了",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "可乐鸡翅首次成功",
+          "createdAt": "2026-09-01T03:50:00.223125Z",
+          "contentType": "note"
+        },
+        "similarity": 0.33347851037979126
+      }
+    ]
+  },
+  {
+    "query": "最近心情怎么样",
+    "expected_topics": [
+      "情感"
+    ],
+    "results": [
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "metadata": {
+          "mood": [
+            "sad",
+            "stressed",
+            "anxious"
+          ],
+          "title": "论文压力大",
+          "createdAt": "2026-09-01T03:53:52.414592Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.5713173321282071
+      },
+      {
+        "chunk_id": 37,
+        "record_id": 44,
+        "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "和妈妈打电话",
+          "createdAt": "2026-09-01T03:54:05.741497Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5332204103469849
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.5258019849180001
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "阳台看月发呆",
+          "createdAt": "2026-09-01T03:56:22.098110Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.49046844244003296
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.4702103751772426
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "简历被拒",
+          "createdAt": "2026-09-01T03:57:04.063669Z",
+          "contentType": "work"
+        },
+        "similarity": 0.466008319437752
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.46427440643310547
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4465231927321447
+      },
+      {
+        "chunk_id": 40,
+        "record_id": 47,
+        "content": "有点焦虑，秋招还没拿到满意的 offer",
+        "metadata": {
+          "mood": [
+            "anxious"
+          ],
+          "title": "秋招求职焦虑",
+          "createdAt": "2026-09-01T03:55:23.842957Z",
+          "contentType": "work"
+        },
+        "similarity": 0.44544947147369385
+      },
+      {
+        "chunk_id": 28,
+        "record_id": 35,
+        "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "喝奶茶",
+          "createdAt": "2026-09-01T03:48:53.728485Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4413009548962693
+      }
+    ]
+  },
+  {
+    "query": "有没有和家人联系",
+    "expected_topics": [
+      "情感"
+    ],
+    "results": [
+      {
+        "chunk_id": 37,
+        "record_id": 44,
+        "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "和妈妈打电话",
+          "createdAt": "2026-09-01T03:54:05.741497Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5127363785819592
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4014696596301036
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.40103492730648393
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "metadata": {
+          "mood": [
+            "happy",
+            "grateful"
+          ],
+          "title": "回家吃妈妈做的红烧肉",
+          "createdAt": "2026-09-01T03:57:25.998695Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3721264157144555
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3525994595766737
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.34417956873543876
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3364458875124612
+      },
+      {
+        "chunk_id": 30,
+        "record_id": 37,
+        "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+        "metadata": {
+          "mood": [],
+          "title": "麻辣香锅外卖",
+          "createdAt": "2026-09-01T03:49:47.605810Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3260403178322291
+      },
+      {
+        "chunk_id": 11,
+        "record_id": 18,
+        "content": "毕设中期检查快到了，得赶紧把核心功能做完",
+        "metadata": {
+          "mood": [],
+          "title": "毕设核心功能完成",
+          "createdAt": "2026-09-01T03:39:19.443033Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.3216155575743036
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "简历被拒",
+          "createdAt": "2026-09-01T03:57:04.063669Z",
+          "contentType": "work"
+        },
+        "similarity": 0.31981888534258196
+      }
+    ]
+  },
+  {
+    "query": "秋招怎么样了",
+    "expected_topics": [
+      "情感"
+    ],
+    "results": [
+      {
+        "chunk_id": 40,
+        "record_id": 47,
+        "content": "有点焦虑，秋招还没拿到满意的 offer",
+        "metadata": {
+          "mood": [
+            "anxious"
+          ],
+          "title": "秋招求职焦虑",
+          "createdAt": "2026-09-01T03:55:23.842957Z",
+          "contentType": "work"
+        },
+        "similarity": 0.7491868138313293
+      },
+      {
+        "chunk_id": 44,
+        "record_id": 51,
+        "content": "今天被拒了一封简历，有点失落，但还是要继续投",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "简历被拒",
+          "createdAt": "2026-09-01T03:57:04.063669Z",
+          "contentType": "work"
+        },
+        "similarity": 0.5343795577996839
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "metadata": {
+          "mood": [],
+          "title": "论文召回率实验",
+          "createdAt": "2026-09-01T03:09:25.147573Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.41954466221002784
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.35888633131980896
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3519044518470764
+      },
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "metadata": {
+          "mood": [
+            "sad",
+            "stressed",
+            "anxious"
+          ],
+          "title": "论文压力大",
+          "createdAt": "2026-09-01T03:53:52.414592Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3345626990366788
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.32817162107398445
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "RAG论文阅读感想",
+          "createdAt": "2026-09-01T03:08:48.586814Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.32752692699432373
+      },
+      {
+        "chunk_id": 30,
+        "record_id": 37,
+        "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+        "metadata": {
+          "mood": [],
+          "title": "麻辣香锅外卖",
+          "createdAt": "2026-09-01T03:49:47.605810Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3269249493114619
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.32553682771105663
+      }
+    ]
+  },
+  {
+    "query": "最近看了什么电影",
+    "expected_topics": [
+      "娱乐"
+    ],
+    "results": [
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "看电影《盗梦空间》",
+          "createdAt": "2026-09-01T03:57:38.766907Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4836938823370305
+      },
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "metadata": {
+          "mood": [],
+          "title": "看完动漫结局",
+          "createdAt": "2026-09-01T03:58:11.434172Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4272823675106552
+      },
+      {
+        "chunk_id": 49,
+        "record_id": 56,
+        "content": "下午去看了个展览，现代艺术有些看不懂",
+        "metadata": {
+          "mood": [
+            "confused"
+          ],
+          "title": "看展览",
+          "createdAt": "2026-09-01T03:58:35.967900Z",
+          "contentType": "note"
+        },
+        "similarity": 0.40960375013329164
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "买新游戏《黑神话悟空",
+          "createdAt": "2026-09-01T03:59:35.417159Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.4042866287060609
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3668891191482544
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3641653737923287
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.36259082778746987
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "阳台看月发呆",
+          "createdAt": "2026-09-01T03:56:22.098110Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.36094367504119873
+      },
+      {
+        "chunk_id": 50,
+        "record_id": 57,
+        "content": "刷了一晚上短视频，时间过得太快了",
+        "metadata": {
+          "mood": [],
+          "title": "刷短视频感慨",
+          "createdAt": "2026-09-01T03:58:45.173869Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.36042870165195184
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.35068246722221375
+      }
+    ]
+  },
+  {
+    "query": "玩了什么游戏",
+    "expected_topics": [
+      "娱乐"
+    ],
+    "results": [
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友打LOL",
+          "createdAt": "2026-09-01T03:57:52.660202Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5240748808339318
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.47446072406044904
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "买新游戏《黑神话悟空",
+          "createdAt": "2026-09-01T03:59:35.417159Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.45706391846371663
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4468869332209905
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.42377466872040404
+      },
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "metadata": {
+          "mood": [],
+          "title": "看完动漫结局",
+          "createdAt": "2026-09-01T03:58:11.434172Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3834482570352248
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.37606672191222246
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "metadata": {
+          "mood": [],
+          "title": "学习设计模式",
+          "createdAt": "2026-09-01T03:39:02.883779Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3653083821947354
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.36485204906153457
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "中午吃火锅",
+          "createdAt": "2026-09-01T03:48:18.377915Z",
+          "contentType": "social"
+        },
+        "similarity": 0.36250250451259447
+      }
+    ]
+  },
+  {
+    "query": "读了什么书",
+    "expected_topics": [
+      "娱乐"
+    ],
+    "results": [
+      {
+        "chunk_id": 51,
+        "record_id": 58,
+        "content": "读完了《三体》第三部，程心这个角色争议真大",
+        "metadata": {
+          "mood": [],
+          "title": "读完《三体》第三部",
+          "createdAt": "2026-09-01T03:59:06.005768Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.4041640580941458
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "metadata": {
+          "mood": [],
+          "title": "学习设计模式",
+          "createdAt": "2026-09-01T03:39:02.883779Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.39077913761138916
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "看电影《盗梦空间》",
+          "createdAt": "2026-09-01T03:57:38.766907Z",
+          "contentType": "note"
+        },
+        "similarity": 0.36760891579416155
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "阳台看月发呆",
+          "createdAt": "2026-09-01T03:56:22.098110Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.3568747341632843
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3556445327016996
+      },
+      {
+        "chunk_id": 49,
+        "record_id": 56,
+        "content": "下午去看了个展览，现代艺术有些看不懂",
+        "metadata": {
+          "mood": [
+            "confused"
+          ],
+          "title": "看展览",
+          "createdAt": "2026-09-01T03:58:35.967900Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3457498344332084
+      },
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "metadata": {
+          "mood": [],
+          "title": "看完动漫结局",
+          "createdAt": "2026-09-01T03:58:11.434172Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3421141599348694
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "RAG论文阅读感想",
+          "createdAt": "2026-09-01T03:08:48.586814Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3305962085723877
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.33023146806767834
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.32643262586399224
+      }
+    ]
+  },
+  {
+    "query": "周末做了什么",
+    "expected_topics": [
+      "运动",
+      "娱乐",
+      "饮食"
+    ],
+    "results": [
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "metadata": {
+          "mood": [
+            "happy",
+            "grateful"
+          ],
+          "title": "回家吃妈妈做的红烧肉",
+          "createdAt": "2026-09-01T03:57:25.998695Z",
+          "contentType": "social"
+        },
+        "similarity": 0.474404485559197
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4559633486314596
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.41180843640515663
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3909893165839533
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.38824421167373935
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3851422437940697
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.38453889581329315
+      },
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "metadata": {
+          "mood": [],
+          "title": "健身房锻炼",
+          "createdAt": "2026-09-01T03:41:04.883624Z",
+          "contentType": "health"
+        },
+        "similarity": 0.38206896888798725
+      },
+      {
+        "chunk_id": 28,
+        "record_id": 35,
+        "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "喝奶茶",
+          "createdAt": "2026-09-01T03:48:53.728485Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3783110380172756
+      },
+      {
+        "chunk_id": 50,
+        "record_id": 57,
+        "content": "刷了一晚上短视频，时间过得太快了",
+        "metadata": {
+          "mood": [],
+          "title": "刷短视频感慨",
+          "createdAt": "2026-09-01T03:58:45.173869Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.3760532028659238
+      }
+    ]
+  },
+  {
+    "query": "最近有什么开心的事",
+    "expected_topics": [
+      "情感",
+      "学习",
+      "运动"
+    ],
+    "results": [
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.4917522668838501
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.48214873777933576
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.47496131211749926
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.4698303061824862
+      },
+      {
+        "chunk_id": 45,
+        "record_id": 52,
+        "content": "周末回家了一趟，吃了妈妈做的红烧肉，幸福感爆棚",
+        "metadata": {
+          "mood": [
+            "happy",
+            "grateful"
+          ],
+          "title": "回家吃妈妈做的红烧肉",
+          "createdAt": "2026-09-01T03:57:25.998695Z",
+          "contentType": "social"
+        },
+        "similarity": 0.46641430258750916
+      },
+      {
+        "chunk_id": 31,
+        "record_id": 38,
+        "content": "尝试做了可乐鸡翅，第一次做居然成功了",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "可乐鸡翅首次成功",
+          "createdAt": "2026-09-01T03:50:00.223125Z",
+          "contentType": "note"
+        },
+        "similarity": 0.450042724609375
+      },
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友打LOL",
+          "createdAt": "2026-09-01T03:57:52.660202Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4468417763710022
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.42350924015045166
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "自制西红柿鸡蛋面",
+          "createdAt": "2026-09-01T03:48:42.395321Z",
+          "contentType": "note"
+        },
+        "similarity": 0.42007914185523987
+      },
+      {
+        "chunk_id": 28,
+        "record_id": 35,
+        "content": "下午喝了杯奶茶，罪恶感满满但是很快乐",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "喝奶茶",
+          "createdAt": "2026-09-01T03:48:53.728485Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4169143984862811
+      }
+    ]
+  },
+  {
+    "query": "有没有和朋友出去",
+    "expected_topics": [
+      "娱乐",
+      "饮食",
+      "运动"
+    ],
+    "results": [
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5688101561793827
+      },
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友打LOL",
+          "createdAt": "2026-09-01T03:57:52.660202Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5250219263142923
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5074133125718461
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.5025460273786198
+      },
+      {
+        "chunk_id": 26,
+        "record_id": 33,
+        "content": "中午和室友去吃了火锅，点了个鸳鸯锅，辣的太爽了",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "中午吃火锅",
+          "createdAt": "2026-09-01T03:48:18.377915Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4694337528606506
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.45978109658417
+      },
+      {
+        "chunk_id": 37,
+        "record_id": 44,
+        "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "和妈妈打电话",
+          "createdAt": "2026-09-01T03:54:05.741497Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4200753694795184
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.4068944575457115
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "metadata": {
+          "mood": [],
+          "title": "早餐吃豆浆油条",
+          "createdAt": "2026-09-01T03:49:07.384629Z",
+          "contentType": "note"
+        },
+        "similarity": 0.37700189283495833
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "阳台看月发呆",
+          "createdAt": "2026-09-01T03:56:22.098110Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.37089164170299904
+      }
+    ]
+  },
+  {
+    "query": "今天做了什么运动",
+    "expected_topics": [
+      "运动"
+    ],
+    "results": [
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.5445314645767212
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.5088137680999187
+      },
+      {
+        "chunk_id": 23,
+        "record_id": 30,
+        "content": "晨跑的时候看到日出了，心情特别好",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "晨跑看日出",
+          "createdAt": "2026-09-01T03:47:27.918237Z",
+          "contentType": "health"
+        },
+        "similarity": 0.5022639928898824
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "晚上做瑜伽",
+          "createdAt": "2026-09-01T03:42:12.013068Z",
+          "contentType": "health"
+        },
+        "similarity": 0.47976624965667725
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.4748426675796509
+      },
+      {
+        "chunk_id": 19,
+        "record_id": 26,
+        "content": "今天游泳游了 1000 米，自由泳终于不那么累了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "游泳1000米",
+          "createdAt": "2026-09-01T03:41:50.149502Z",
+          "contentType": "health"
+        },
+        "similarity": 0.47143772074209056
+      },
+      {
+        "chunk_id": 18,
+        "record_id": 25,
+        "content": "和朋友打了一场篮球，投篮手感不错，赢了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "打篮球",
+          "createdAt": "2026-09-01T03:41:30.404922Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4572958673658458
+      },
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "metadata": {
+          "mood": [],
+          "title": "健身房锻炼",
+          "createdAt": "2026-09-01T03:41:04.883624Z",
+          "contentType": "health"
+        },
+        "similarity": 0.452743262052536
+      },
+      {
+        "chunk_id": 16,
+        "record_id": 23,
+        "content": "今天早上跑了五公里，配速 5 分半，比上周快了一点",
+        "metadata": {
+          "mood": [],
+          "title": "晨跑五公里",
+          "createdAt": "2026-09-01T03:40:51.415951Z",
+          "contentType": "health"
+        },
+        "similarity": 0.43620625518523204
+      },
+      {
+        "chunk_id": 24,
+        "record_id": 31,
+        "content": "练了腿，深蹲做到 80 公斤，腿都软了",
+        "metadata": {
+          "mood": [],
+          "title": "练腿深蹲80公斤",
+          "createdAt": "2026-09-01T03:47:43.683634Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4097065437189913
+      }
+    ]
+  },
+  {
+    "query": "最近压力大吗",
+    "expected_topics": [
+      "情感",
+      "学习"
+    ],
+    "results": [
+      {
+        "chunk_id": 36,
+        "record_id": 43,
+        "content": "今天心情不太好，论文压力有点大，感觉写不完",
+        "metadata": {
+          "mood": [
+            "sad",
+            "stressed",
+            "anxious"
+          ],
+          "title": "论文压力大",
+          "createdAt": "2026-09-01T03:53:52.414592Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.6208739650770405
+      },
+      {
+        "chunk_id": 40,
+        "record_id": 47,
+        "content": "有点焦虑，秋招还没拿到满意的 offer",
+        "metadata": {
+          "mood": [
+            "anxious"
+          ],
+          "title": "秋招求职焦虑",
+          "createdAt": "2026-09-01T03:55:23.842957Z",
+          "contentType": "work"
+        },
+        "similarity": 0.4371764790170337
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.40061975719391596
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3968811810946129
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3903677347192859
+      },
+      {
+        "chunk_id": 22,
+        "record_id": 29,
+        "content": "今天打了羽毛球，对手太强了，被虐了",
+        "metadata": {
+          "mood": [
+            "sad"
+          ],
+          "title": "打羽毛球",
+          "createdAt": "2026-09-01T03:47:05.761198Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3861163739527368
+      },
+      {
+        "chunk_id": 37,
+        "record_id": 44,
+        "content": "和妈妈打了个电话，聊了半小时，感觉好多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "和妈妈打电话",
+          "createdAt": "2026-09-01T03:54:05.741497Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3815615290868739
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.37678311397979014
+      },
+      {
+        "chunk_id": 25,
+        "record_id": 32,
+        "content": "今天下雨没法跑步，在宿舍做了 100 个俯卧撑",
+        "metadata": {
+          "mood": [],
+          "title": "下雨做俯卧撑",
+          "createdAt": "2026-09-01T03:47:57.373690Z",
+          "contentType": "health"
+        },
+        "similarity": 0.3751388900023369
+      },
+      {
+        "chunk_id": 17,
+        "record_id": 24,
+        "content": "下午去健身房练了胸和三头，卧推加了 5 公斤",
+        "metadata": {
+          "mood": [],
+          "title": "健身房锻炼",
+          "createdAt": "2026-09-01T03:41:04.883624Z",
+          "contentType": "health"
+        },
+        "similarity": 0.37076897534039555
+      }
+    ]
+  },
+  {
+    "query": "有没有熬夜",
+    "expected_topics": [
+      "学习",
+      "娱乐"
+    ],
+    "results": [
+      {
+        "chunk_id": 50,
+        "record_id": 57,
+        "content": "刷了一晚上短视频，时间过得太快了",
+        "metadata": {
+          "mood": [],
+          "title": "刷短视频感慨",
+          "createdAt": "2026-09-01T03:58:45.173869Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.5169777736345925
+      },
+      {
+        "chunk_id": 32,
+        "record_id": 39,
+        "content": "和朋友去吃了烧烤，喝了几瓶啤酒",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友吃烧烤",
+          "createdAt": "2026-09-01T03:50:24.692321Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4579702863657815
+      },
+      {
+        "chunk_id": 20,
+        "record_id": 27,
+        "content": "晚上做了半小时瑜伽，拉伸完身体舒服多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "晚上做瑜伽",
+          "createdAt": "2026-09-01T03:42:12.013068Z",
+          "contentType": "health"
+        },
+        "similarity": 0.4374499581724388
+      },
+      {
+        "chunk_id": 42,
+        "record_id": 49,
+        "content": "晚上一个人在阳台坐了会儿，看着月亮发呆，难得的安静",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "阳台看月发呆",
+          "createdAt": "2026-09-01T03:56:22.098110Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.4290921347792236
+      },
+      {
+        "chunk_id": 52,
+        "record_id": 59,
+        "content": "去 KTV 唱了三个小时，嗓子都哑了",
+        "metadata": {
+          "mood": [],
+          "title": "KTV唱歌",
+          "createdAt": "2026-09-01T03:59:23.852789Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4237044786966562
+      },
+      {
+        "chunk_id": 30,
+        "record_id": 37,
+        "content": "晚上点了份麻辣香锅外卖，等了一个小时才送到",
+        "metadata": {
+          "mood": [],
+          "title": "麻辣香锅外卖",
+          "createdAt": "2026-09-01T03:49:47.605810Z",
+          "contentType": "note"
+        },
+        "similarity": 0.422776255425253
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "看电影《盗梦空间》",
+          "createdAt": "2026-09-01T03:57:38.766907Z",
+          "contentType": "note"
+        },
+        "similarity": 0.42250663839339975
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.4038480760960632
+      },
+      {
+        "chunk_id": 29,
+        "record_id": 36,
+        "content": "早上去食堂吃了豆浆油条，好久没吃这个组合了",
+        "metadata": {
+          "mood": [],
+          "title": "早餐吃豆浆油条",
+          "createdAt": "2026-09-01T03:49:07.384629Z",
+          "contentType": "note"
+        },
+        "similarity": 0.40208824885417593
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "metadata": {
+          "mood": [],
+          "title": "学习设计模式",
+          "createdAt": "2026-09-01T03:39:02.883779Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3990014731288841
+      }
+    ]
+  },
+  {
+    "query": "最近有什么新发现",
+    "expected_topics": [
+      "学习",
+      "娱乐"
+    ],
+    "results": [
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.3728158175945282
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "买新游戏《黑神话悟空",
+          "createdAt": "2026-09-01T03:59:35.417159Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.3601803564917836
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.35347727814452246
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3526652455329895
+      },
+      {
+        "chunk_id": 54,
+        "record_id": 61,
+        "content": "周末和朋友去了密室逃脱，解谜好难但是很刺激",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "和朋友玩密室逃脱",
+          "createdAt": "2026-09-01T03:59:51.946651Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3401689922708879
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "RAG论文阅读感想",
+          "createdAt": "2026-09-01T03:08:48.586814Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3345123529434204
+      },
+      {
+        "chunk_id": 41,
+        "record_id": 48,
+        "content": "今天收到导师的肯定，说论文写得不错，信心增加了不少",
+        "metadata": {
+          "mood": [
+            "happy",
+            "satisfied"
+          ],
+          "title": "获得导师肯定",
+          "createdAt": "2026-09-01T03:55:35.646848Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.32188681829650356
+      },
+      {
+        "chunk_id": 34,
+        "record_id": 41,
+        "content": "学校门口新开了一家螺蛳粉，去尝了一下，味道很正宗",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "尝试新开螺蛳粉店",
+          "createdAt": "2026-09-01T03:53:16.634751Z",
+          "contentType": "note"
+        },
+        "similarity": 0.31195002794265747
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3107556104660034
+      },
+      {
+        "chunk_id": 6,
+        "record_id": 8,
+        "content": "导师开会讨论了论文方向，让我重点做召回率的实验",
+        "metadata": {
+          "mood": [],
+          "title": "论文召回率实验",
+          "createdAt": "2026-09-01T03:09:25.147573Z",
+          "contentType": "todo"
+        },
+        "similarity": 0.30372251890435975
+      }
+    ]
+  },
+  {
+    "query": "有没有学新技术",
+    "expected_topics": [
+      "学习"
+    ],
+    "results": [
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.363294075825634
+      },
+      {
+        "chunk_id": 4,
+        "record_id": 6,
+        "content": "看了几篇关于 RAG 的论文，Retrieval Augmented Generation 这个思路挺有意思",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "RAG论文阅读感想",
+          "createdAt": "2026-09-01T03:08:48.586814Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.34323207566833736
+      },
+      {
+        "chunk_id": 8,
+        "record_id": 15,
+        "content": "今天写了一天代码，把用户认证模块重构了一遍，JWT 逻辑清晰多了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "重构用户认证模块",
+          "createdAt": "2026-09-01T03:38:02.582738Z",
+          "contentType": "work"
+        },
+        "similarity": 0.3377455376234971
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3329749802641566
+      },
+      {
+        "chunk_id": 27,
+        "record_id": 34,
+        "content": "自己做了一碗西红柿鸡蛋面，味道还不错",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "自制西红柿鸡蛋面",
+          "createdAt": "2026-09-01T03:48:42.395321Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3320905665186218
+      },
+      {
+        "chunk_id": 10,
+        "record_id": 17,
+        "content": "下午在图书馆看了两个小时设计模式，工厂模式和策略模式用得最多",
+        "metadata": {
+          "mood": [],
+          "title": "学习设计模式",
+          "createdAt": "2026-09-01T03:39:02.883779Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.331264922954587
+      },
+      {
+        "chunk_id": 1,
+        "record_id": 1,
+        "content": "今天恢复日记项目的开发",
+        "metadata": {
+          "mood": [
+            "calm"
+          ],
+          "title": "恢复日记项目开发",
+          "createdAt": "2026-08-25T13:49:54.655134Z",
+          "contentType": "work"
+        },
+        "similarity": 0.3303297856548366
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3293082514199095
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "买新游戏《黑神话悟空",
+          "createdAt": "2026-09-01T03:59:35.417159Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.3220943414540798
+      },
+      {
+        "chunk_id": 34,
+        "record_id": 41,
+        "content": "学校门口新开了一家螺蛳粉，去尝了一下，味道很正宗",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "尝试新开螺蛳粉店",
+          "createdAt": "2026-09-01T03:53:16.634751Z",
+          "contentType": "note"
+        },
+        "similarity": 0.3107625934708893
+      }
+    ]
+  },
+  {
+    "query": "最近看了什么动漫",
+    "expected_topics": [
+      "娱乐"
+    ],
+    "results": [
+      {
+        "chunk_id": 48,
+        "record_id": 55,
+        "content": "追了一天的动漫，《进击的巨人》结局看完了",
+        "metadata": {
+          "mood": [],
+          "title": "看完动漫结局",
+          "createdAt": "2026-09-01T03:58:11.434172Z",
+          "contentType": "note"
+        },
+        "similarity": 0.5718302385908233
+      },
+      {
+        "chunk_id": 35,
+        "record_id": 42,
+        "content": "今天吃了日料，三文鱼刺身很新鲜",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "吃日料",
+          "createdAt": "2026-09-01T03:53:32.594147Z",
+          "contentType": "note"
+        },
+        "similarity": 0.4271920068745616
+      },
+      {
+        "chunk_id": 46,
+        "record_id": 53,
+        "content": "晚上看了一部电影《盗梦空间》，剧情太烧脑了",
+        "metadata": {
+          "mood": [
+            "satisfied"
+          ],
+          "title": "看电影《盗梦空间》",
+          "createdAt": "2026-09-01T03:57:38.766907Z",
+          "contentType": "note"
+        },
+        "similarity": 0.38617492872997916
+      },
+      {
+        "chunk_id": 53,
+        "record_id": 60,
+        "content": "买了一款新游戏《黑神话悟空》，画面太震撼了",
+        "metadata": {
+          "mood": [
+            "excited"
+          ],
+          "title": "买新游戏《黑神话悟空",
+          "createdAt": "2026-09-01T03:59:35.417159Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.3817215632366209
+      },
+      {
+        "chunk_id": 49,
+        "record_id": 56,
+        "content": "下午去看了个展览，现代艺术有些看不懂",
+        "metadata": {
+          "mood": [
+            "confused"
+          ],
+          "title": "看展览",
+          "createdAt": "2026-09-01T03:58:35.967900Z",
+          "contentType": "note"
+        },
+        "similarity": 0.37692783016396647
+      },
+      {
+        "chunk_id": 47,
+        "record_id": 54,
+        "content": "和朋友开黑打了三把英雄联盟，赢了两把",
+        "metadata": {
+          "mood": [],
+          "title": "和朋友打LOL",
+          "createdAt": "2026-09-01T03:57:52.660202Z",
+          "contentType": "social"
+        },
+        "similarity": 0.3639310896396637
+      },
+      {
+        "chunk_id": 38,
+        "record_id": 45,
+        "content": "今天特别开心，因为 gRPC 终于调通了，感觉离毕业又近了一步",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "gRPC调通与毕业进",
+          "createdAt": "2026-09-01T03:54:28.163438Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.35889315605163574
+      },
+      {
+        "chunk_id": 50,
+        "record_id": 57,
+        "content": "刷了一晚上短视频，时间过得太快了",
+        "metadata": {
+          "mood": [],
+          "title": "刷短视频感慨",
+          "createdAt": "2026-09-01T03:58:45.173869Z",
+          "contentType": "thought"
+        },
+        "similarity": 0.3560888873365191
+      },
+      {
+        "chunk_id": 43,
+        "record_id": 50,
+        "content": "好久没见高中同学了，视频聊了一下，大家都各自忙",
+        "metadata": {
+          "mood": [],
+          "title": "和高中同学视频聊天",
+          "createdAt": "2026-09-01T03:56:48.425137Z",
+          "contentType": "social"
+        },
+        "similarity": 0.34987252950668335
+      },
+      {
+        "chunk_id": 2,
+        "record_id": 4,
+        "content": "今天学了一下午 Spring Boot，终于把 gRPC 的链路调通了，开心",
+        "metadata": {
+          "mood": [
+            "happy"
+          ],
+          "title": "学习Spring B",
+          "createdAt": "2026-09-01T03:07:57.466958Z",
+          "contentType": "learning"
+        },
+        "similarity": 0.3452809453010559
+      }
+    ]
+  }
+]
