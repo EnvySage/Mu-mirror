@@ -260,9 +260,11 @@ PROCESSING → REVIEWING → DONE
 
 | 文件 | 内容 |
 |------|------|
-| `docs/2026-07-23-ai-diary-mirror-design.md` | 主设计文档 v1.1（功能、数据库、API、提示词模板） |
-| `docs/2026-07-23-mirror-implementation.md` | 实现文档 v0.3（技术选型、项目结构、核心代码模式） |
-| `docs/2026-08-04-ai-service-design.md` | AI 服务设计 v0.2（Proto 定义、Python 模块、部署方案） |
+| `2026-09-03-system-design-v2.md` | **总设计文档 v2.1（唯一权威文档）**：Chunk 业务单元模型、segment 手动调整、画像快照、对话、测试设计、开发路线图 |
+| `archive/2026-07-23-ai-diary-mirror-design.md` | 旧主设计 v1.4（已归档，不再维护） |
+| `archive/2026-07-23-mirror-implementation.md` | 旧实现文档 v0.6（已归档） |
+| `archive/2026-08-04-ai-service-design.md` | 旧 AI 服务设计 v0.5（已归档） |
+| `archive/2026-08-18-optimization-design.md` | 旧优化设计 v0.3（已归档，增量已并入 v2.1 第六章） |
 
 ---
 

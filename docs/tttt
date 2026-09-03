@@ -1,0 +1,23 @@
+本轮补全内容
+1. 五个待定决策全部落成裁决（#17~#21，第十五/十八章同步更新）
+
+每日总结 → 系统 Record 方案：废除 daily_summaries 表，总结作为 source='system' 的 Record + Chunk 进系统，复用全部 RAG/检索/来源引用链路；新增 records.source 列做统计口径分离
+Embedding 维度硬约束 1024：设置页校验拒绝其他维度，HNSW 索引一次建成，动态维度写进论文 future work
+auto 审核确认接线（EventListener 建 Chunk 后直接走 confirm 流程，约 20 行）
+POST /records/{id}/retry 确认实现（兑现“重新尝试”承诺）
+JSON 只导出不导入
+2. 四个新章节（专为你分发给 py/前端团队写的）
+
+第八章 前端协作契约：响应包装/R 处理、processing 轮询方案（2-3s 轮询 /records/{id}）、片段卡片交互 → 端点序列映射表（合并=改A+删B、拆分=改A+增B，多步序列前端怎么 await）、13+8+3 标签中文显示对照表、RecordVO/ChunkVO 的 TypeScript 定义——前端可以直接照着建 Mock 开发
+第九章 Python 协作清单：9 项待办（proto 重编译、single 模式、ApiEmbedder 接 base_url、mirror_chat/profile 实现、异常→gRPC 状态码映射），标了关联阶段，附“不可破坏的契约要点”
+第十三章 测试设计：单测/集成（Testcontainers + pgvector）/API 测试（Apifox Mock 配合前端并行）、检索效果评估（Hit@5/MRR 三组对比实验，直接出论文第 4 章数据）
+第十四章 开发路线图：阶段 0-6 排期，每阶段标注涉及端（Java/Python/前端）
+3. 杂项已处理
+
+旧文档 4 份已 git mv 到 docs/archive/，v2.1 表格里同步了新路径
+PROGRESS.md 文档索引已指向 v2.1
+交接建议
+前端团队：重点读第二、三、五、六、八、十章（文档开头有分工导航）——第八章契约足够他们直接起 Vue 项目
+Python 团队：重点读第七、九、十四章——9.2 的待办清单按阶段做即可，阶段 0 就有他们的活（ApiEmbedder base_url + 健康检查）
+一句话说明文档地位：2026-09-03-system-design-v2.md 是唯一权威文档，与旧文档冲突以第十五章裁决清单为准
+文档没动任何代码。等 py 和前端各自消化后，他们大概率会对第八/九章的契约提问题，届时改 v2.1 对应章节即可。需要我现在把当前状态 commit 一下吗（文档归档 + 新文档 + PROGRESS 更新都在工作区未提交）？
