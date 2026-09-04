@@ -10,7 +10,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
-import org.xianshen.mumirrorb.common.handler.JsonbTypeHandler;
 import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
 
 import java.time.OffsetDateTime;
@@ -64,20 +63,20 @@ public class Record {
     private String content;
 
     /**
-     * AI 拆分后的主题片段数组（JSONB）
+     * AI 拆分后的主题片段数组（非数据库字段，不持久化）
      *
-     * <p>一条记录可能包含多个主题，AI 拆分后每个片段存为数组元素。</p>
-     * <p>非拆分场景下数组只有一个元素。</p>
-     *
-     * <p><strong>示例：</strong></p>
-     * <pre>
-     * 输入: "今天上午学了Spring Boot，下午去健身"
-     * segment: ["今天上午学了Spring Boot", "下午去健身"]
-     * </pre>
+     * <p>segment 唯一真源是 chunks.segment（设计文档 v2.1 裁决 #2）。</p>
+     * <p>由 ClassifyProcessor 生成，EventListener 读取后创建 Chunk。</p>
      */
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    @Schema(description = "AI拆分后的主题片段数组", example = "[\"上午学了Spring Boot\", \"下午去健身\"]")
+    @TableField(exist = false)
+    @Schema(description = "AI拆分后的主题片段数组（内存传递，不持久化）", example = "[\"上午学了Spring Boot\", \"下午去健身\"]")
     private List<String> segment;
+
+    /**
+     * 记录来源：user=用户输入 / system=系统生成（如每日总结）
+     */
+    @Schema(description = "记录来源", example = "user", allowableValues = {"user", "system"})
+    private String source;
 
     /**
      * 处理状态
@@ -108,6 +107,15 @@ public class Record {
      */
     @Schema(description = "软删除时间（NULL表示未删除）", example = "null")
     private OffsetDateTime deletedAt;
+
+    /**
+     * 失败原因（仅 FAILED 状态有值；管道异常 / AI 判定跳过原因透出给前端）
+     *
+     * <p>依赖 DDL：ALTER TABLE records ADD COLUMN fail_reason TEXT（@agent-DB，见 agent-B 日志）。
+     * MyBatis-Plus 默认 NOT_NULL 字段策略：创建/正常更新不写该列，仅失败路径写入，重试时显式置 NULL。</p>
+     */
+    @Schema(description = "失败原因（仅 failed 状态）", example = "AI 判定内容无意义: 无实质信息")
+    private String failReason;
 
     /**
      * Chunk 元数据列表（非数据库字段，不持久化）

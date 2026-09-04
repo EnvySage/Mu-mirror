@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.*;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
 import org.xianshen.mumirrorb.pojo.R;
+import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
+import org.xianshen.mumirrorb.service.ChunkService;
 import org.xianshen.mumirrorb.service.RecordService;
 
 import java.util.List;
@@ -41,6 +43,7 @@ import java.util.UUID;
 public class RecordController {
 
     private final RecordService recordService;
+    private final ChunkService chunkService;
 
     /**
      * 获取当前登录用户的UUID
@@ -223,6 +226,34 @@ public class RecordController {
     }
 
     /**
+     * 重试失败的记录
+     *
+     * 仅 FAILED 状态的记录可重试。重置状态为"处理中"并重新触发 AI 管道，
+     * 前端继续按 processing 状态轮询（设计文档 4.3，裁决 #21）。
+     *
+     * @param id 记录ID
+     * @return 重试后的记录（状态 PROCESSING）
+     */
+    @Operation(
+            summary = "重试失败记录",
+            description = "仅'处理失败'状态的记录可重试。重置为'处理中'并重新触发 AI 管道。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "已重新提交处理",
+                    content = @Content(schema = @Schema(implementation = RecordVO.class))),
+            @ApiResponse(responseCode = "400", description = "记录状态不允许重试（非 failed）"),
+            @ApiResponse(responseCode = "404", description = "记录不存在或已被删除")
+    })
+    @PostMapping("/{id}/retry")
+    public R<RecordVO> retry(
+            @Parameter(description = "记录ID", required = true, example = "1")
+            @PathVariable Long id) {
+        UUID userId = getCurrentUserId();
+        RecordVO record = recordService.retry(id, userId);
+        return R.ok("已重新提交处理", record);
+    }
+
+    /**
      * 软删除记录
      * <p>
      * 仅在记录处于"人工审查"（REVIEWING）状态时允许删除。
@@ -302,5 +333,37 @@ public class RecordController {
         UUID userId = getCurrentUserId();
         Map<String, Integer> result = recordService.getCalendarDates(month, userId);
         return R.ok("查询成功", result);
+    }
+
+    /**
+     * 新增片段（审核阶段"增片段"）
+     *
+     * 用户手写一段新内容，后端同步调用单段分类（single=true）回填 AI 元数据。
+     * 分类失败不阻断：metadata 为空照常返回，confirm 时兜底重试（设计文档 5.2/5.6）。
+     *
+     * @param id 记录ID
+     * @param body {"segment": "片段文本"}
+     * @return 新建的 Chunk（含 AI 回填的 metadata，如有）
+     */
+    @Operation(
+            summary = "新增片段",
+            description = "审核阶段为记录手写新增一个片段，后端自动单段分类回填元数据。" +
+                    "只有 REVIEWING 状态的记录允许操作；分类失败不阻断。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "新增成功",
+                    content = @Content(schema = @Schema(implementation = ChunkVO.class))),
+            @ApiResponse(responseCode = "400", description = "状态不允许或片段为空"),
+            @ApiResponse(responseCode = "404", description = "记录不存在")
+    })
+    @PostMapping("/{id}/chunks")
+    public R<ChunkVO> addChunk(
+            @Parameter(description = "记录ID", required = true, example = "1")
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        UUID userId = getCurrentUserId();
+        String segment = body == null ? null : body.get("segment");
+        ChunkVO chunk = chunkService.add(id, segment, userId);
+        return R.ok("片段已新增", chunk);
     }
 }

@@ -11,6 +11,7 @@ import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
+import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
@@ -20,6 +21,7 @@ import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
 import org.xianshen.mumirrorb.pojo.VO.CalendarDayVO;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
+import org.xianshen.mumirrorb.pipeline.ClassifyItemConverter;
 import org.xianshen.mumirrorb.service.RecordService;
 
 import org.xianshen.mumirrorb.pipeline.event.RecordCreatedEvent;
@@ -59,6 +61,7 @@ public class RecordServiceImpl implements RecordService {
         Record record = Record.builder()
                 .userId(userId)
                 .content(dto.getContent())
+                .source("user")
                 .status(RecordStatus.PROCESSING)
                 .userReviewed(false)
                 .createdAt(OffsetDateTime.now())
@@ -94,6 +97,7 @@ public class RecordServiceImpl implements RecordService {
 
         LambdaQueryWrapper<Record> wrapper = new LambdaQueryWrapper<Record>()
                 .eq(Record::getUserId, userId)
+                .eq(Record::getSource, "user")       // 统计口径：只查用户输入，排除系统记录
                 .isNull(Record::getDeletedAt)
                 .ge(Record::getCreatedAt, startDateTime)
                 .lt(Record::getCreatedAt, endDateTime)
@@ -149,6 +153,37 @@ public class RecordServiceImpl implements RecordService {
 
     @Override
     @Transactional
+    public RecordVO retry(Long recordId, UUID userId) {
+        log.info("============ retry 开始，记录ID: {}, 用户: {} ============", recordId, userId);
+
+        Record record = recordMapper.selectOne(
+                new LambdaQueryWrapper<Record>()
+                        .eq(Record::getId, recordId)
+                        .eq(Record::getUserId, userId)
+                        .isNull(Record::getDeletedAt)
+        );
+
+        if (record == null) {
+            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
+        }
+
+        // 裁决 #21：仅 FAILED 可重试（重跑分类管道）
+        if (record.getStatus() != RecordStatus.FAILED) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有处理失败的记录才能重试");
+        }
+
+        record.setStatus(RecordStatus.PROCESSING);
+        record.setFailReason(null); // 清除上次失败原因
+        record.setUpdatedAt(OffsetDateTime.now());
+        recordMapper.updateById(record);
+
+        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
+        log.info("记录已重置为 processing 并重新发布管道事件，ID: {}", recordId);
+        return toVO(record);
+    }
+
+    @Override
+    @Transactional
     public RecordVO confirmReview(Long recordId, UUID userId) {
         log.info("============ confirmReview 开始 ============");
         log.info("记录ID: {}, 用户ID: {}", recordId, userId);
@@ -169,14 +204,45 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能确认完成");
         }
 
-        // 2. 标记已审核
-        record.setUserReviewed(true);
-
-        // 3. 遍历所有 Chunk，逐个做 embedding
+        // 2. 查询所有 Chunk
         List<Chunk> chunks = chunkMapper.selectList(
                 new LambdaQueryWrapper<Chunk>()
                         .eq(Chunk::getRecordId, recordId)
         );
+
+        // 3. 校验至少保留 1 个 Chunk（设计文档 5.2）
+        if (chunks.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "记录至少需要保留一个片段才能确认");
+        }
+
+        // 4. 补分类（设计文档 5.4 核心裁决）：classified_segment IS NULL 的 Chunk
+        //    = 文本从未被分类过，或已被用户改过 → 单段分类（single=true，禁止拆分）回填 metadata
+        //    失败不阻断：保留旧 metadata 继续（5.6）
+        for (Chunk chunk : chunks) {
+            if (chunk.getClassifiedSegment() != null) {
+                continue; // 文本未变（或只改了标签），直接入库，不调 LLM
+            }
+            String text = chunk.getSegment() != null ? chunk.getSegment() : chunk.getContent();
+            try {
+                RecordProcessorProto.ClassifyResponse response = aiGrpcClient.classifySingle(userId, text);
+                if (!response.getSkip() && response.getItemsCount() > 0) {
+                    Map<String, Object> metadata = ClassifyItemConverter.toMetadata(response.getItems(0));
+                    chunk.setMetadata(metadata);
+                    chunk.setClassifiedSegment(text);
+                    chunkMapper.updateById(chunk);
+                    log.info("补分类完成，ChunkID: {}", chunk.getId());
+                } else {
+                    log.warn("补分类跳过/空结果，ChunkID: {}，保留旧 metadata 继续", chunk.getId());
+                }
+            } catch (Exception e) {
+                log.warn("补分类失败，ChunkID: {}，保留旧 metadata 继续。原因: {}", chunk.getId(), e.getMessage());
+            }
+        }
+
+        // 5. 标记已审核
+        record.setUserReviewed(true);
+
+        // 6. 遍历所有 Chunk，逐个做 embedding（文本 = segment，回退 content）
         log.info("开始 Embedding，记录ID: {}, Chunk 数量: {}", recordId, chunks.size());
 
         for (Chunk chunk : chunks) {
@@ -188,11 +254,11 @@ public class RecordServiceImpl implements RecordService {
                 log.info("Chunk Embedding 完成，ChunkID: {}, 维度: {}", chunk.getId(), embedResult.getDimension());
             } catch (Exception e) {
                 log.error("Chunk Embedding 失败，ChunkID: {}，原因: {}", chunk.getId(), e.getMessage(), e);
-                // 单个 chunk 失败不影响其他 chunk
+                // 单个 chunk 失败不影响其他 chunk（裁决 #5：失败不阻断，向量后续补录）
             }
         }
 
-        // 4. 更新 Record 状态为 DONE
+        // 7. 更新 Record 状态为 DONE
         record.setStatus(RecordStatus.DONE);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
@@ -219,9 +285,10 @@ public class RecordServiceImpl implements RecordService {
         return RecordVO.builder()
                 .id(record.getId())
                 .content(record.getContent())
-                .segment(record.getSegment())
+                .segments(chunkVOs.stream().map(ChunkVO::getSegment).toList())
                 .status(record.getStatus())
                 .userReviewed(record.getUserReviewed())
+                .failReason(record.getFailReason())
                 .chunks(chunkVOs)
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())

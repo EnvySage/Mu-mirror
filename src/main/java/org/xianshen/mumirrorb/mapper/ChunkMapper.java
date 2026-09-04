@@ -27,6 +27,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * 向量相似度检索（余弦距离）
      *
      * <p>使用 pgvector 的 <=> 操作符计算余弦距离，返回最相似的 chunks。</p>
+     * <p>JOIN records 排除软删除记录（技术债"检索排除软删除"）；
+     *    软删除记录的 chunks 物理保留，由 SQL 关联过滤。</p>
      *
      * @param userId      用户ID（隔离不同用户的数据）
      * @param queryVector 查询向量（由 Python Embedding 服务生成）
@@ -34,11 +36,14 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * @return 相似的 chunks 列表（按相似度排序）
      */
     @Select("""
-            SELECT id, user_id, record_id, content, metadata, created_at,
-                   1 - (embedding <=> #{queryVector}::vector) AS similarity
-            FROM chunks
-            WHERE user_id = #{userId}::uuid
-            ORDER BY embedding <=> #{queryVector}::vector
+            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.created_at,
+                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND c.embedding IS NOT NULL
+            ORDER BY c.embedding <=> #{queryVector}::vector
             LIMIT #{limit}
             """)
     List<Chunk> searchBySimilarity(@Param("userId") UUID userId,
@@ -55,12 +60,15 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * @return 相似的 chunks 列表
      */
     @Select("""
-            SELECT id, user_id, record_id, content, metadata, created_at,
-                   1 - (embedding <=> #{queryVector}::vector) AS similarity
-            FROM chunks
-            WHERE user_id = #{userId}::uuid
-              AND (#{contentType} IS NULL OR metadata->>'contentType' = #{contentType})
-            ORDER BY embedding <=> #{queryVector}::vector
+            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.created_at,
+                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND c.embedding IS NOT NULL
+              AND (#{contentType} IS NULL OR c.metadata->>'contentType' = #{contentType})
+            ORDER BY c.embedding <=> #{queryVector}::vector
             LIMIT #{limit}
             """)
     List<Chunk> searchBySimilarityWithFilter(@Param("userId") UUID userId,

@@ -42,6 +42,15 @@ public interface RecordService {
     void softDelete(Long recordId, UUID userId);
 
     /**
+     * FAILED 重试：重跑分类管道（设计文档 4.3 / 裁决 #21）
+     *
+     * <p>仅 FAILED 状态允许；重置为 PROCESSING 并重新发布 RecordCreatedEvent。</p>
+     *
+     * @return 重试后的记录（状态 PROCESSING）
+     */
+    RecordVO retry(Long recordId, UUID userId);
+
+    /**
      * 获取指定月份每天的有效记录数
      */
     Map<String, Integer> getCalendarDates(String month, UUID userId);

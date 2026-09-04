@@ -90,16 +90,34 @@ public class Chunk {
     private Map<String, Object> metadata;
 
     /**
+     * 生成当前 metadata 时所用的 segment 文本
+     *
+     * <p>状态机（设计文档 5.3，confirm 补分类判据 5.4）：</p>
+     * <ul>
+     *   <li>AI 分类回填 metadata 时 → 写入当时文本</li>
+     *   <li>用户改动 segment 文本时 → 置 NULL（元数据编辑不影响它）</li>
+     *   <li>手动新增 Chunk → 初始为 NULL</li>
+     * </ul>
+     * <p>NULL = 这段文本从未被分类过或已被用户改过，confirm 时需补分类。</p>
+     */
+    @Schema(description = "生成当前metadata时所用的segment文本；NULL=未分类或文本已改", example = "今天上午学了Spring Boot")
+    private String classifiedSegment;
+
+    /**
+     * 用户是否编辑过（文本或元数据）
+     *
+     * <p>不参与业务逻辑，用于统计"AI 拆分被人工修正的比例"（论文数据点，13.5）。</p>
+     */
+    @Schema(description = "用户是否编辑过（文本或元数据）", example = "false")
+    private Boolean userEdited;
+
+    /**
      * 向量嵌入（pgvector）
      *
-     * <p>维度取决于 embedding 模型：</p>
-     * <ul>
-     *   <li>BGE-m3 本地：1024 维</li>
-     *   <li>OpenAI text-embedding-3-small：1536 维</li>
-     * </ul>
+     * <p>维度硬约束 1024（设计文档 3.4，裁决 #18），与 HNSW 索引列一致。</p>
      */
     @TableField(typeHandler = VectorTypeHandler.class)
-    @Schema(description = "向量嵌入（维度取决于模型）")
+    @Schema(description = "向量嵌入（1024 维）")
     private List<Float> embedding;
 
     /**

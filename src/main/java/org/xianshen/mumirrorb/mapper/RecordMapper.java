@@ -32,6 +32,7 @@ public interface RecordMapper extends BaseMapper<Record> {
             FROM records
             WHERE user_id = #{userId}::uuid
               AND deleted_at IS NULL
+              AND source = 'user'
               AND status != 'failed'
               AND created_at >= #{monthStart}
               AND created_at < #{monthEnd}

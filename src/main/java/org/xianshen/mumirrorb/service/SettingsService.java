@@ -50,7 +50,7 @@ public interface SettingsService {
     /**
      * 测试 AI 连接
      *
-     * <p>使用当前用户的 AI 配置，发送一个简单的测试请求。</p>
+     * <p>真实探测：gRPC GetModelInfo 探测 Python AI 服务可达性。</p>
      *
      * @param userId 当前用户ID
      * @return 测试结果描述
@@ -58,9 +58,15 @@ public interface SettingsService {
     String testAiConnection(UUID userId);
 
     /**
-     * 测试数据库连接
+     * 测试 Embedding 连接 + 维度校验（裁决 #18：非 1024 维拒绝）
      *
-     * <p>测试当前数据库连接是否正常。</p>
+     * @param userId 当前用户ID
+     * @return 测试结果描述（含模型名与维度）
+     */
+    String testEmbeddingConnection(UUID userId);
+
+    /**
+     * 测试数据库连接
      *
      * @return 测试结果描述
      */

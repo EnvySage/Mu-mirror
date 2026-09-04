@@ -62,4 +62,28 @@ public class ChunkController {
         ChunkVO chunk = chunkService.update(id, dto, userId);
         return R.ok("Chunk 已更新", chunk);
     }
+
+    /**
+     * 删除 Chunk（审核阶段"删片段"）
+     *
+     * 仅在所属记录处于 REVIEWING 状态时允许删除。
+     * 合并两段 = 改 A 为全部文本 + 删 B（前端按序调用）。
+     */
+    @Operation(
+            summary = "删除Chunk",
+            description = "审核阶段删除一个片段。只有REVIEWING状态的记录才允许删除。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "删除成功"),
+            @ApiResponse(responseCode = "400", description = "状态不允许删除"),
+            @ApiResponse(responseCode = "404", description = "Chunk不存在")
+    })
+    @DeleteMapping("/{id}")
+    public R<String> delete(
+            @Parameter(description = "Chunk ID", required = true, example = "1")
+            @PathVariable Long id) {
+        UUID userId = getCurrentUserId();
+        chunkService.delete(id, userId);
+        return R.ok("Chunk 已删除");
+    }
 }
