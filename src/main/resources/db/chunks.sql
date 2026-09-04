@@ -1,28 +1,12 @@
 -- ============================================================
--- 向量块表（pgvector，用于 RAG 检索）
--- 执行前确保 PostgreSQL 已安装 pgvector 扩展
+-- chunks.sql —— 已并入 schema.sql（v2.1 基准重写），本文件仅保留占位说明
 -- ============================================================
-
--- 安装 pgvector 扩展（如果尚未安装）
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- 向量块表
-CREATE TABLE IF NOT EXISTS chunks (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),      -- 所属用户
-    record_id BIGINT NOT NULL REFERENCES records(id), -- 关联记录
-    content TEXT NOT NULL,                            -- 切片内容（整条记录的原始内容）
-    segment TEXT,                                     -- 主题片段（用于 embedding）
-    metadata JSONB,                                   -- 元数据（类型、情绪、时间等）
-    embedding vector(1024),                           -- 向量嵌入（BGE-m3 默认 1024 维）
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- chunks 索引
-CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
-
--- 向量相似度检索索引（IVFFlat，适合中等数据量）
--- 注意：需要先有一定数据量（建议 1000+ 条）才能创建此索引
--- CREATE INDEX idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-ALTER TABLE chunks ADD COLUMN IF NOT EXISTS segment TEXT;
+-- 历史：chunks 表最初单独放在本文件（含旧 IVFFlat 索引注释与一条
+-- ALTER TABLE ... ADD COLUMN segment）。v2.1 重写基准 DDL 时，
+-- chunks 表（含 segment/classified_segment/user_edited/metadata/embedding
+-- vector(1024) 与 HNSW 索引）已完整并入 schema.sql。
+--
+-- 本文件不再包含任何 DDL，保留仅为兼容部署脚本中
+-- "db/schema.sql + db/chunks.sql" 的执行顺序引用
+-- （见设计文档 12.部署）。新部署只需执行 schema.sql。
+-- ============================================================

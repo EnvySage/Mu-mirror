@@ -1,110 +1,134 @@
--- 用户表（对应设计文档）
+-- ============================================================
+-- Mu-mirror-B 基准 DDL（设计文档 v2.1 对齐版）
+-- 全量新建形态：不含任何 ALTER/DROP 堆叠，从空库一次建齐。
+-- 幂等：可重复执行（IF NOT EXISTS）。
+--
+-- 执行顺序（docker-entrypoint-initdb.d 按文件名字典序）：
+--   1. schema.sql        ← 本文件，唯一权威基准（chunks 已并入）
+--   2. migration-v2.sql  ← 仅存量旧库迁移用；空库执行为无害空操作
+--   3. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
+-- 对应设计文档：Mu-mirror-B/docs/2026-09-03-system-design-v2.md 第三章、3.4、裁决 #2/#6/#8/#9/#14/#17/#18/#20
+-- ============================================================
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- ============================================================
+-- 用户表（不变）
+-- ============================================================
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username VARCHAR(50) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
--- 创建索引
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- ============================================================
--- 记录表（核心业务表，对应设计文档 5.1）
+-- 记录表（v2.1：source 区分用户/系统生成，裁决 #20；segment 列已废除，裁决 #2）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS records (
     id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES users(id),                          -- 关联用户（预留多用户）
-    content TEXT NOT NULL,                                       -- 用户原始输入
-    title VARCHAR(200),                                          -- AI 生成的标题（10字以内）
-    summary TEXT,                                                -- AI 生成的摘要（30字以内）
-    content_type VARCHAR(20),                                    -- 内容类型："todo/thought/learning/plan/note/work/social/health"
-    mood JSONB,                                                  -- 情绪：多选数组，如 ["happy", "calm"]
-    status VARCHAR(20) DEFAULT 'processing',                    -- 处理状态：processing/done/failed
-    user_reviewed BOOLEAN DEFAULT FALSE,                         -- 用户是否已审核标签
+    user_id UUID NOT NULL REFERENCES users(id),
+    content TEXT NOT NULL,                              -- 原始输入，不可修改
+    source VARCHAR(20) DEFAULT 'user',                  -- user=用户输入 / system=系统生成（每日总结，裁决 #17）
+    status VARCHAR(20) DEFAULT 'processing',            -- processing/reviewing/done/failed
+    user_reviewed BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ,                             -- 软删除
+    fail_reason TEXT                                    -- 失败原因（仅 failed；前端卡片透出，8.2）
 );
-
--- records 索引
 CREATE INDEX IF NOT EXISTS idx_records_user_id ON records(user_id);
-CREATE INDEX IF NOT EXISTS idx_records_content_type ON records(content_type);
-CREATE INDEX IF NOT EXISTS idx_records_status ON records(status);
 CREATE INDEX IF NOT EXISTS idx_records_created_at ON records(created_at DESC);
-
-
-
-
--- 给 records 表添加 deleted_at 字段
-ALTER TABLE records
-    ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL;
-
--- 添加索引（提高软删除查询性能）
-CREATE INDEX idx_records_deleted_at ON records(deleted_at);
-
--- 可选：添加复合索引（用户 + 未删除 + 创建时间）
-CREATE INDEX idx_records_user_not_deleted ON records(user_id, created_at)
+CREATE INDEX IF NOT EXISTS idx_records_status ON records(status);
+CREATE INDEX IF NOT EXISTS idx_records_deleted_at ON records(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_records_user_not_deleted ON records(user_id, created_at)
     WHERE deleted_at IS NULL;
 
--- 拆分关联字段
-ALTER TABLE records ADD COLUMN IF NOT EXISTS original_record_id BIGINT REFERENCES records(id);
-CREATE INDEX IF NOT EXISTS idx_records_original_record_id ON records(original_record_id);
-
--- AI 拆分后的主题片段数组（JSONB，如 ["片段1", "片段2"]）
-ALTER TABLE records ADD COLUMN IF NOT EXISTS segment JSONB;
-
-
--- mood JSONB 的 GIN 索引（支持 @> 操作符查询，如查找包含 "anxious" 的记录）
-CREATE INDEX IF NOT EXISTS idx_records_mood ON records USING GIN (mood);
-
 -- ============================================================
--- 标签表（关键词标签，一条记录可有多个关键词）
+-- 向量块表（v2.0 唯一业务单元：segment + AI 元数据 + 向量）
 -- ============================================================
-CREATE TABLE IF NOT EXISTS tags (
+CREATE TABLE IF NOT EXISTS chunks (
     id BIGSERIAL PRIMARY KEY,
-    record_id BIGINT NOT NULL REFERENCES records(id) ON DELETE CASCADE,  -- 级联删除
-    keyword VARCHAR(50) NOT NULL,                                -- 关键词
+    user_id UUID NOT NULL REFERENCES users(id),
+    record_id BIGINT NOT NULL REFERENCES records(id),
+    content TEXT NOT NULL,              -- 整条记录原文（冗余存储，检索展示用）
+    segment TEXT,                       -- 语义片段（embedding 输入文本；唯一真源，裁决 #2）
+    metadata JSONB,                     -- AI 元数据（title/summary/contentType/mood/keywords/taskStatus）
+    classified_segment TEXT,            -- 生成当前 metadata 时所用的 segment 文本；NULL = 未分类/文本已改
+    user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
+    embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
--- tags 索引
-CREATE INDEX IF NOT EXISTS idx_tags_record_id ON tags(record_id);
-CREATE INDEX IF NOT EXISTS idx_tags_keyword ON tags(keyword);
+CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
 
 -- ============================================================
 -- 用户配置表（AI 模型配置，每个用户一条）
+-- rag_half_life：RAG 时间衰减半衰期（天，7-365），6.4 规划项
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_settings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID UNIQUE NOT NULL REFERENCES users(id),
-    -- LLM 配置
-    ai_provider VARCHAR(50),         -- AI 提供商：openai/zhipu/qwen
-    ai_api_key TEXT,                 -- API Key（加密存储）
-    ai_base_url TEXT,                -- API 地址
-    ai_model VARCHAR(100),           -- 模型名称
-    -- Embedding 配置
-    embedding_source VARCHAR(20) DEFAULT 'local', -- local / api
-    embedding_api_key TEXT,          -- Embedding API Key（加密）
-    embedding_model VARCHAR(100),    -- Embedding 模型名
-    -- 审核配置
-    review_mode VARCHAR(20) DEFAULT 'manual', -- manual / auto
+    ai_provider VARCHAR(50),                        -- AI 提供商：openai/zhipu/qwen
+    ai_protocol VARCHAR(20) DEFAULT 'anthropic',    -- openai / anthropic
+    ai_api_key TEXT,                                -- API Key（AES-256-GCM 加密）
+    ai_base_url TEXT,
+    ai_model VARCHAR(100),
+    embedding_source VARCHAR(20) DEFAULT 'local',   -- local / api
+    embedding_base_url TEXT,
+    embedding_api_key TEXT,                         -- 加密
+    embedding_model VARCHAR(100),
+    review_mode VARCHAR(20) DEFAULT 'manual',       -- manual / auto
+    rag_half_life INT DEFAULT 30,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
--- user_settings 索引
 CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
-ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ai_protocol VARCHAR(20) DEFAULT 'anthropic';
-ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS embedding_base_url TEXT;
 
-ALTER TABLE records ADD COLUMN IF NOT EXISTS original_record_id BIGINT REFERENCES records(id);
-CREATE INDEX IF NOT EXISTS idx_records_original_record_id ON records(original_record_id);
+-- ============================================================
+-- 画像快照（取代旧 mirror_profiles，6.5）
+-- 每用户仅 ~14 份（手动保 2 + 月度保 12）→ 不建向量索引，顺序扫描更快（裁决 #14）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS profile_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    snapshot_type VARCHAR(20) NOT NULL,   -- manual（用户触发）/ monthly（每月1号定时）
+    mood_analysis TEXT,
+    learning_analysis TEXT,
+    todo_analysis TEXT,
+    rhythm_analysis TEXT,
+    user_tags JSONB,                      -- ["技术学习", "夜猫子"]
+    overall_summary TEXT,
+    embedding vector(1024),               -- 漂移检测用（五维文本按固定顺序拼接后向量化）
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_user ON profile_snapshots(user_id, snapshot_type, created_at DESC);
 
+-- ============================================================
+-- 会话（6.6；无 last_message_at，统一用 updated_at，裁决 #9）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    title VARCHAR(200),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()   -- 每次新消息触碰；会话列表按它倒序
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON chat_sessions(user_id, updated_at DESC);
 
-
-ALTER TABLE records ADD COLUMN segment JSONB;
-ALTER TABLE records DROP COLUMN IF EXISTS title;
-ALTER TABLE records DROP COLUMN IF EXISTS summary;
-ALTER TABLE records DROP COLUMN IF EXISTS content_type;
-ALTER TABLE records DROP COLUMN IF EXISTS mood;
-ALTER TABLE records DROP COLUMN IF EXISTS original_record_id;
+-- ============================================================
+-- 对话历史（sources 落库，裁决 #8：来源追溯是对话模块核心卖点）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS conversation_history (
+    id BIGSERIAL PRIMARY KEY,
+    session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id),
+    role VARCHAR(20) NOT NULL,             -- user / assistant
+    content TEXT NOT NULL,
+    sources JSONB,                         -- [{record_id, quote, date}]，assistant 消息的来源追溯
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_history_session ON conversation_history(session_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_history_user ON conversation_history(user_id, created_at DESC);

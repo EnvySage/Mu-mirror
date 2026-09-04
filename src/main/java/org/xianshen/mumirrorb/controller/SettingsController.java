@@ -122,6 +122,31 @@ public class SettingsController {
     }
 
     /**
+     * 测试 Embedding 连接 + 维度校验
+     *
+     * <p>调 gRPC GetModelInfo 校验维度是否 1024（裁决 #18），
+     * 非 1024 维返回错误"当前版本仅支持 1024 维模型"。</p>
+     *
+     * @return 测试结果
+     */
+    @Operation(
+            summary = "测试 Embedding 连接",
+            description = "校验 Embedding 服务可达性与维度（当前版本仅支持 1024 维模型）"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "连接正常（含模型名与维度）"),
+            @ApiResponse(responseCode = "400", description = "维度不符或其他配置问题"),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效"),
+            @ApiResponse(responseCode = "500", description = "AI 服务不可达")
+    })
+    @PostMapping("/test-embedding")
+    public R<String> testEmbeddingConnection() {
+        UUID userId = getCurrentUserId();
+        String result = settingsService.testEmbeddingConnection(userId);
+        return R.ok(result);
+    }
+
+    /**
      * 测试数据库连接
      *
      * <p>测试当前数据库连接是否正常。</p>

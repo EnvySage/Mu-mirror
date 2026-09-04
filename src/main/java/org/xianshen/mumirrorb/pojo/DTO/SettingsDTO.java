@@ -74,4 +74,10 @@ public class SettingsDTO {
      */
     @Schema(description = "审核模式", example = "manual", allowableValues = {"manual", "auto"})
     private String reviewMode;
+
+    /**
+     * RAG 时间衰减半衰期（天，7-365）
+     */
+    @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")
+    private Integer ragHalfLife;
 }

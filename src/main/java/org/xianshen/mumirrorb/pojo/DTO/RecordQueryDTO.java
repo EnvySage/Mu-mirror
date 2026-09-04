@@ -2,9 +2,6 @@ package org.xianshen.mumirrorb.pojo.DTO;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
-import org.xianshen.mumirrorb.common.enums.ContentType;
-import org.xianshen.mumirrorb.common.enums.MoodType;
-import org.xianshen.mumirrorb.common.enums.RecordStatus;
 
 import java.time.LocalDate;
 
@@ -24,66 +21,12 @@ import java.time.LocalDate;
  * <p><strong>示例：</strong></p>
  * <ul>
  *   <li>GET /api/records - 查询今天的记录</li>
- *   <li>GET /api/records?startDate=2026-08-01 - 查询 2026-08-01 的记录</li>
- *   <li>GET /api/records?startDate=2026-08-01&endDate=2026-08-07 - 查询 8月1日到7日的记录</li>
+ *   <li>GET /api/records?startDate=2026-08-01&endDate=2026-08-07 - 查询日期范围</li>
  * </ul>
  */
 @Data
 @Schema(description = "记录查询条件DTO - 用于筛选记录列表")
 public class RecordQueryDTO {
-
-    /**
-     * 页码（从 1 开始，默认 1）
-     */
-    @Schema(
-            description = "页码（从1开始）",
-            example = "1",
-            defaultValue = "1",
-            minimum = "1"
-    )
-    private Integer page = 1;
-
-    /**
-     * 每页条数（默认 20）
-     */
-    @Schema(
-            description = "每页条数",
-            example = "20",
-            defaultValue = "20",
-            minimum = "1",
-            maximum = "100"
-    )
-    private Integer size = 20;
-
-    /**
-     * 按内容类型筛选
-     */
-    @Schema(
-            description = "按内容类型筛选",
-            example = "learning",
-            allowableValues = {"todo", "thought", "learning", "plan", "note", "work", "social", "health"}
-    )
-    private ContentType contentType;
-
-    /**
-     * 按情绪筛选（查包含该情绪的记录）
-     */
-    @Schema(
-            description = "按情绪筛选（查询包含该情绪的记录）",
-            example = "happy",
-            allowableValues = {"happy", "sad", "calm", "excited", "anxious", "productive", "tired", "neutral"}
-    )
-    private MoodType mood;
-
-    /**
-     * 按处理状态筛选
-     */
-    @Schema(
-            description = "按处理状态筛选",
-            example = "done",
-            allowableValues = {"processing", "reviewing", "done", "failed"}
-    )
-    private RecordStatus status;
 
     /**
      * 开始日期（筛选 created_at >= 此日期）

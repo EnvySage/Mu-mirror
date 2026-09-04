@@ -66,6 +66,9 @@ public class SettingsVO {
     @Schema(description = "审核模式", example = "manual")
     private String reviewMode;
 
+    @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")
+    private Integer ragHalfLife;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "创建时间", example = "2026-08-07 14:30:00")
     private OffsetDateTime createdAt;

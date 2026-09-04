@@ -29,15 +29,20 @@ public class CryptoUtils {
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128;
 
-    // 默认密钥（32 字节 = 256 位），生产环境应从配置读取
-    // TODO: 从 application.yml 或环境变量读取
+    // 密钥外置（设计文档 v2.1 第十六章）：优先环境变量 MUMIRROR_AES_KEY，缺失时回退默认值（仅限开发）
+    private static final String ENV_KEY_NAME = "MUMIRROR_AES_KEY";
     private static final String DEFAULT_KEY = "MuMirror-DefaultKey-2026!@#$%^&*";
 
     /**
      * 获取加密密钥
      */
     private static SecretKeySpec getKey() {
-        byte[] keyBytes = DEFAULT_KEY.getBytes(StandardCharsets.UTF_8);
+        String keySource = System.getenv(ENV_KEY_NAME);
+        if (keySource == null || keySource.isBlank()) {
+            log.warn("环境变量 {} 未设置，使用内置默认 AES 密钥（仅限开发环境）", ENV_KEY_NAME);
+            keySource = DEFAULT_KEY;
+        }
+        byte[] keyBytes = keySource.getBytes(StandardCharsets.UTF_8);
         // 确保密钥长度为 32 字节
         byte[] paddedKey = new byte[32];
         System.arraycopy(keyBytes, 0, paddedKey, 0, Math.min(keyBytes.length, 32));

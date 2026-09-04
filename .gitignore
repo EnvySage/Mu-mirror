@@ -58,3 +58,5 @@ logs/
 ### 本地开发临时文件 ###
 temp/
 tmp/
+
+application-dev.yml

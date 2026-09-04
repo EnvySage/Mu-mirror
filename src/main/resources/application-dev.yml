@@ -30,7 +30,7 @@ jwt:
 logging:
   level:
     root: INFO
-    org.xianshen.mumirrorb: DEBUG
+    org.xianshen.mumirrorb: WARN
     org.springframework.security: DEBUG
     com.baomidou.mybatisplus: DEBUG
   pattern:

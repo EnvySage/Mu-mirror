@@ -119,10 +119,19 @@ public class UserSettings {
     /**
      * 审核模式
      *
-     <p>manual: 手动审核（默认），auto: 自动审核</p>
+     <p>manual: 手动审核（默认），auto: 自动审核（管道完成直接 confirm，无审核窗口）</p>
      */
     @Schema(description = "审核模式", example = "manual", allowableValues = {"manual", "auto"})
     private String reviewMode;
+
+    /**
+     * RAG 时间衰减半衰期（天，7-365）
+     *
+     * <p>对话 SEMANTIC/HYBRID 检索的衰减因子分母：1 + 天数差 / half_life（设计文档 6.6）。
+     * 默认 30 天。ExtractIntent 返回 time_range 时衰减自动关闭。</p>
+     */
+    @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")
+    private Integer ragHalfLife;
 
     /**
      * 创建时间

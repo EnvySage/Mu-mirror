@@ -43,10 +43,10 @@ public class RecordVO {
     private String content;
 
     /**
-     * AI 拆分后的主题片段数组
+     * AI 拆分后的主题片段列表（从 chunks 推导，segment 真源是 chunks.segment）
      */
-    @Schema(description = "AI拆分后的主题片段数组", example = "[\"上午学了Spring Boot\", \"下午去健身\"]")
-    private List<String> segment;
+    @Schema(description = "AI拆分后的主题片段列表（从chunks推导）", example = "[\"上午学了Spring Boot\", \"下午去健身\"]")
+    private List<String> segments;
 
     /**
      * 处理状态
@@ -60,6 +60,12 @@ public class RecordVO {
      */
     @Schema(description = "用户是否已审核", example = "false")
     private Boolean userReviewed;
+
+    /**
+     * 失败原因（仅 failed 状态，前端 failed 卡片显示；8.2：错误提示含 skip 原因）
+     */
+    @Schema(description = "失败原因（仅 failed 状态）", example = "AI 判定内容无意义: 无实质信息")
+    private String failReason;
 
     /**
      * 关联的 Chunk 列表
