@@ -349,6 +349,7 @@ public class ChatServiceImpl implements ChatService {
             return existing;
         }
         ChatSession session = ChatSession.builder()
+                .id(UUID.randomUUID()) // 表主键无默认值（未用 gen_random_uuid()），应用侧生成
                 .userId(userId)
                 .title(question.length() > TITLE_MAX_LEN ? question.substring(0, TITLE_MAX_LEN) : question)
                 .createdAt(OffsetDateTime.now(ZONE))
@@ -434,7 +435,9 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * moods 列表 → pgvector jsonb ?| 操作符的 text[] 字面量（如 {"happy","calm"}）
+     * moods 列表 → jsonb_exists_any 的 text[] 字面量（如 {"happy","calm"}）。
+     * （E2E 联调修复：pgjdbc 把 jsonb 的 ?| 操作符当占位符解析，改用
+     * jsonb_exists_any(metadata->'mood', ?::text[]) 函数形式，占位符不再歧义。）
      */
     private String toPgTextArray(List<String> moods) {
         if (moods == null || moods.isEmpty()) {

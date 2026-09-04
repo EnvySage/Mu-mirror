@@ -23,7 +23,7 @@ import java.util.Map;
  * 如 {@code [{"record_id":1,"quote":"...","date":"2026-09-03"}]}。</p>
  *
  * <p>与 {@link JsonbTypeHandler}（List&lt;String&gt;）、
- * {@link org.xianshen.mumirrorb.common.handler.jsonb.JsonbMapTypeHandler}（Map）的区别：
+ * {@link org.xianshen.mumirrorb.common.typehandler.JsonbMapTypeHandler}（Map）的区别：
  * 三者 MappedTypes 不同（List 接口重载需靠泛型区分，MyBatis 按字段声明类型路由）。</p>
  */
 @MappedTypes(List.class)

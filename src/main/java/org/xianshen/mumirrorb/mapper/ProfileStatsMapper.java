@@ -73,7 +73,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND c.metadata ? 'mood'
+              AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
             GROUP BY m.value
             ORDER BY count DESC
@@ -95,7 +95,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND c.metadata ? 'keywords'
+              AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
             GROUP BY k.value
             ORDER BY count DESC

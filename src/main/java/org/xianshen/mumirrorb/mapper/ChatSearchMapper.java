@@ -48,7 +48,7 @@ public interface ChatSearchMapper {
               AND r.source = 'user'
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
-              <if test="moods != null and moods.size() > 0">AND c.metadata->'mood' ?| #{moodArray}</if>
+              <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
             ORDER BY r.created_at DESC
@@ -134,7 +134,7 @@ public interface ChatSearchMapper {
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
-              <if test="moods != null and moods.size() > 0">AND c.metadata->'mood' ?| #{moodArray}</if>
+              <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
             ORDER BY score ASC

@@ -69,25 +69,39 @@ public class VectorTypeHandler extends BaseTypeHandler<List<Float>> {
         if (obj == null) {
             return null;
         }
-        if (obj instanceof PGvector) {
-            float[] array = ((PGvector) obj).toArray();
-            List<Float> list = new ArrayList<>(array.length);
-            for (float f : array) {
-                list.add(f);
-            }
-            return list;
+        if (obj instanceof PGvector pgVector) {
+            return toFloatList(pgVector.toArray());
+        }
+        // pgvector-java 未在连接上 registerTypes 时，pgjdbc 返回通用 PGobject
+        // （type="vector"，value="[0.01,0.02,...]"），E2E 联调实测导致 hasEmbedding 恒为 false
+        if (obj instanceof org.postgresql.util.PGobject pgObject) {
+            return parseString(pgObject.getValue());
         }
         // 兜底：尝试解析字符串格式 "[1.0,2.0,3.0]"
-        if (obj instanceof String) {
-            String str = (String) obj;
-            str = str.substring(1, str.length() - 1); // 去掉 []
-            String[] parts = str.split(",");
-            List<Float> list = new ArrayList<>(parts.length);
-            for (String part : parts) {
-                list.add(Float.parseFloat(part.trim()));
-            }
-            return list;
+        if (obj instanceof String str) {
+            return parseString(str);
         }
         return null;
+    }
+
+    private List<Float> toFloatList(float[] array) {
+        List<Float> list = new ArrayList<>(array.length);
+        for (float f : array) {
+            list.add(f);
+        }
+        return list;
+    }
+
+    private List<Float> parseString(String str) {
+        if (str == null || str.length() < 2) {
+            return null;
+        }
+        str = str.substring(1, str.length() - 1); // 去掉 []
+        String[] parts = str.split(",");
+        List<Float> list = new ArrayList<>(parts.length);
+        for (String part : parts) {
+            list.add(Float.parseFloat(part.trim()));
+        }
+        return list;
     }
 }

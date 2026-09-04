@@ -144,8 +144,14 @@ public class ExportServiceImpl implements ExportService {
     }
 
     private String resolveUsername(UUID userId) {
-        User user = userMapper.selectById(userId.toString());
-        return user != null ? user.getUsername() : null;
+        // users.id 是 uuid 列：selectById(String) 会让 pgjdbc 报 uuid = character varying
+        // 无法比较（E2E 修复），改用 CAST 绑定为 uuid 的查询
+        Map<String, Object> row = userMapper.selectMaps(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<User>()
+                        .select("username")
+                        .apply("id = {0}::uuid", userId.toString()))
+                .stream().findFirst().orElse(null);
+        return row != null && row.get("username") != null ? row.get("username").toString() : null;
     }
 
     private String format(java.time.OffsetDateTime time) {

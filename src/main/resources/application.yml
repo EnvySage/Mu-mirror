@@ -32,7 +32,11 @@ spring:
       pool-prepared-statements: true
       max-pool-prepared-statement-per-connection-size: 20
       # 监控统计
-      filters: stat,wall
+      # filters 移除 wall（E2E 联调修复）：druid wall 防火墙不识别 PostgreSQL 的
+      # CROSS JOIN LATERAL 语法（ProfileStatsMapper/DailySummaryMapper 情绪、关键词
+      # 统计 SQL），解析抛 ParserException: TODO pos。画像生成接口实测被拦。
+      # dev/内网场景保留 stat 监控即可；如需开启 wall 需升级 druid 或改写 SQL。
+      filters: stat
       stat-view-servlet:
         enabled: true
         url-pattern: /druid/*

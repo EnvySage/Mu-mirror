@@ -113,7 +113,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public UserVO getCurrentUser(String userId) {
-        User user = userMapper.selectById(userId);
+        // users.id 是 uuid 列：selectById(String) 会让 pgjdbc 报 uuid = character varying
+        // 无法比较（E2E 修复），改用 CAST 绑定为 uuid 的查询
+        User user = userMapper.selectOne(
+                new LambdaQueryWrapper<User>()
+                        .apply("id = {0}::uuid", userId));
         if (user == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "用户不存在");
         }

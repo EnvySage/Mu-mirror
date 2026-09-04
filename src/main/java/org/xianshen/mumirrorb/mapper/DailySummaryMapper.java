@@ -49,7 +49,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
-              AND c.metadata ? 'contentType'
+              AND jsonb_exists(c.metadata, 'contentType')
             GROUP BY c.metadata->>'contentType'
             ORDER BY count DESC
             """)
@@ -72,7 +72,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
-              AND c.metadata ? 'mood'
+              AND jsonb_exists(c.metadata, 'mood')
             GROUP BY m.value
             ORDER BY count DESC
             """)
