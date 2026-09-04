@@ -95,17 +95,11 @@ public class ClassifyProcessor implements RecordProcessor {
                 // segment 片段（原文）
                 segments.add(item.getContent());
 
-                // chunk 元数据
-                Map<String, Object> metadata = new HashMap<>();
-                metadata.put("title", item.getTitle());
-                metadata.put("summary", item.getSummary());
-                metadata.put("contentType", convertContentType(item.getContentType()));
-                metadata.put("mood", convertMoods(item.getMoodsList()));
-                metadata.put("keywords", item.getKeywordsList());
-                chunkMetadataList.add(metadata);
+                // chunk 元数据（含 taskStatus，裁决 #16）
+                chunkMetadataList.add(ClassifyItemConverter.toMetadata(item));
 
                 log.info("ClassifyProcessor 片段 [{}]: title={}, contentType={}, segment={}",
-                        i + 1, item.getTitle(), convertContentType(item.getContentType()),
+                        i + 1, item.getTitle(), ClassifyItemConverter.convertContentType(item.getContentType()),
                         item.getContent());
             }
 
@@ -121,26 +115,5 @@ public class ClassifyProcessor implements RecordProcessor {
             log.error("gRPC Classify 调用失败: {}", e.getStatus(), e);
             throw new RuntimeException("AI 分类服务调用失败: " + e.getStatus().getDescription(), e);
         }
-    }
-
-    /**
-     * Proto ContentType → 字符串
-     */
-    private String convertContentType(CommonProto.ContentType protoType) {
-        if (protoType == CommonProto.ContentType.CONTENT_UNKNOWN) {
-            return null;
-        }
-        return protoType.name().toLowerCase();
-    }
-
-    /**
-     * Proto MoodType 列表 → 小写字符串列表
-     */
-    private List<String> convertMoods(List<CommonProto.MoodType> moodsList) {
-        return moodsList.stream()
-                .filter(m -> m != CommonProto.MoodType.MOOD_UNKNOWN)
-                .map(Enum::name)
-                .map(String::toLowerCase)
-                .toList();
     }
 }

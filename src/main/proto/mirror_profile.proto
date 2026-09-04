@@ -1,0 +1,72 @@
+syntax = "proto3";
+package mirror;
+
+import "common.proto";
+
+option java_package = "org.xianshen.mumirrorb.grpc.gen";
+option java_outer_classname = "MirrorProfileProto";
+
+service MirrorProfile {
+  rpc GenerateProfile(GenerateProfileRequest) returns (GenerateProfileResponse);
+}
+
+message GenerateProfileRequest {
+  repeated TodoItem todos = 1;
+  repeated LearningItem learnings = 2;
+  repeated MoodStat mood_stats = 3;
+  repeated KeywordStat keywords = 4;
+  ActiveTimeStats active_time = 5;
+  int32 total_records = 6;
+  string time_range = 7;
+  LlmConfig llm_config = 8;
+  repeated ChatRecord recent_chats = 9;  // 最近会话（优先近 7 天），可为空
+}
+
+message TodoItem {
+  int64 record_id = 1;
+  string title = 2;
+  string summary = 3;
+  string created_at = 4;
+}
+
+message LearningItem {
+  int64 record_id = 1;
+  string title = 2;
+  string summary = 3;
+  repeated string keywords = 4;
+  string created_at = 5;
+}
+
+message MoodStat {
+  string mood = 1;
+  int32 count = 2;
+  float percentage = 3;
+}
+
+message KeywordStat {
+  string keyword = 1;
+  int32 count = 2;
+}
+
+message ActiveTimeStats {
+  map<string, int32> hour_distribution = 1;
+  map<string, int32> weekday_distribution = 2;
+  int32 records_last_7_days = 3;
+  string peak_hour = 4;
+}
+
+message ChatRecord {
+  string role = 1;        // user / assistant
+  string content = 2;
+  string created_at = 3;
+}
+
+message GenerateProfileResponse {
+  string todo_analysis = 1;
+  string learning_analysis = 2;
+  string mood_analysis = 3;
+  repeated string user_tags = 4;
+  string rhythm_analysis = 5;
+  string overall_summary = 6;
+}
+// ---- Java 侧追加（与 AI 侧语义一致，仅补 option 声明，不改字段号） ----

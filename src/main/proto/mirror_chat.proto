@@ -1,0 +1,61 @@
+syntax = "proto3";
+package mirror;
+
+import "common.proto";
+
+option java_package = "org.xianshen.mumirrorb.grpc.gen";
+option java_outer_classname = "MirrorChatProto";
+
+service MirrorChat {
+  rpc ExtractIntent(ExtractIntentRequest) returns (ExtractIntentResponse);
+  rpc Chat(ChatRequest) returns (stream ChatChunk);
+}
+
+message ExtractIntentRequest {
+  string query = 1;
+  LlmConfig llm_config = 2;
+}
+
+message ExtractIntentResponse {
+  // query_type 四选一（英文小写）：profile / structured / semantic / hybrid
+  // PROFILE→查画像快照；STRUCTURED→元数据过滤；SEMANTIC→纯向量；HYBRID→过滤+向量+时间衰减
+  string query_type = 1;
+  optional string content_type = 2;  // 8 类英文小写（todo/thought/learning/plan/note/work/social/health），无法确定则不填
+  repeated string moods = 3;         // 13 情绪英文小写
+  string time_range = 4;             // 如 "最近7天"，空表示未提及
+  string rewritten_query = 5;        // 改写后的检索 query
+}
+
+message ChatRequest {
+  string question = 1;
+  repeated ChatMessage history = 2;
+  repeated RetrievedChunk chunks = 3;
+  LlmConfig llm_config = 4;
+}
+
+message ChatMessage {
+  string role = 1;
+  string content = 2;
+}
+
+message RetrievedChunk {
+  int64 record_id = 1;
+  string content = 2;
+  string title = 3;
+  string created_at = 4;
+  string content_type = 5;
+  repeated string moods = 6;
+  float score = 7;
+}
+
+message ChatChunk {
+  string content = 1;
+  bool done = 2;
+  repeated Source sources = 3;
+}
+
+message Source {
+  int64 record_id = 1;
+  string quote = 2;
+  string date = 3;
+}

@@ -1,5 +1,6 @@
 package org.xianshen.mumirrorb.pipeline.event;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -8,14 +9,18 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
+import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pipeline.RecordPipeline;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
+import org.xianshen.mumirrorb.pojo.DO.UserSettings;
+import org.xianshen.mumirrorb.service.RecordService;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 记录事件监听器
@@ -37,6 +42,8 @@ public class RecordEventListener {
     private final RecordPipeline pipeline;
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
+    private final RecordService recordService;
+    private final SettingsMapper settingsMapper;
 
     /**
      * 记录创建后，异步执行管道处理
@@ -62,6 +69,7 @@ public class RecordEventListener {
             if (results.isEmpty()) {
                 log.error("管道返回空结果，记录ID: {}", recordId);
                 record.setStatus(RecordStatus.FAILED);
+                record.setFailReason("AI 返回空结果");
                 record.setUpdatedAt(OffsetDateTime.now());
                 recordMapper.updateById(record);
                 return;
@@ -92,6 +100,9 @@ public class RecordEventListener {
                             .content(record.getContent())
                             .segment(segments.get(i))
                             .metadata(metadata)
+                            // AI 刚分类过：classified_segment = 当时文本；非用户编辑（设计文档 5.3）
+                            .classifiedSegment(segments.get(i))
+                            .userEdited(false)
                             .createdAt(OffsetDateTime.now())
                             .build();
                     chunkMapper.insert(chunk);
@@ -99,14 +110,35 @@ public class RecordEventListener {
                 }
             }
 
+            // 6. auto 审核模式接线（设计文档 5.5）：无审核窗口，直接执行 confirm 流程
+            String reviewMode = getReviewMode(record.getUserId());
+            if ("auto".equals(reviewMode)) {
+                log.info("review_mode=auto，记录ID: {} 直接确认", recordId);
+                recordService.confirmReview(recordId, record.getUserId());
+            }
+
             log.info("============ 异步管道结束 ============");
 
         } catch (Exception e) {
             record.setStatus(RecordStatus.FAILED);
+            // fail_reason 透出（前端 failed 卡片显示具体原因）；截断防超长堆栈
+            String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            record.setFailReason(reason.length() > 500 ? reason.substring(0, 500) : reason);
             record.setUpdatedAt(OffsetDateTime.now());
             recordMapper.updateById(record);
             log.error("异步管道失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);
             log.info("============ 异步管道结束(失败) ============");
         }
+    }
+
+    /**
+     * 读取用户审核模式（manual / auto；缺省 manual）
+     */
+    private String getReviewMode(UUID userId) {
+        UserSettings settings = settingsMapper.selectOne(
+                new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
+        return settings != null && settings.getReviewMode() != null
+                ? settings.getReviewMode()
+                : "manual";
     }
 }
