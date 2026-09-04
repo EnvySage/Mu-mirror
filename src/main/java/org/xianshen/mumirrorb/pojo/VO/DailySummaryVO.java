@@ -35,7 +35,7 @@ public class DailySummaryVO {
     @Schema(description = "统计信息（metadata.recordCount 等）")
     private Map<String, Object> stats;
 
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "生成时间")
     private OffsetDateTime createdAt;
 

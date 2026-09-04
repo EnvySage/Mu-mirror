@@ -21,6 +21,6 @@ public class UserVO {
 
     private String username;
 
-    @JsonFormat(pattern = "yyyy-MM-dd")
+    @JsonFormat(pattern = "yyyy-MM-dd", timezone = "Asia/Shanghai")
     private OffsetDateTime createdAt;
 }

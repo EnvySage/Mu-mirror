@@ -69,11 +69,11 @@ public class SettingsVO {
     @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")
     private Integer ragHalfLife;
 
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "创建时间", example = "2026-08-07 14:30:00")
     private OffsetDateTime createdAt;
 
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "更新时间", example = "2026-08-07 15:45:00")
     private OffsetDateTime updatedAt;
 }

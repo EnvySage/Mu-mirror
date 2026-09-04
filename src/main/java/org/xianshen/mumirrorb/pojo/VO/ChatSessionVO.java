@@ -31,11 +31,11 @@ public class ChatSessionVO {
     @Schema(description = "历史消息（仅 GET /mirror/sessions/{id} 返回；列表接口为 null）")
     private List<MessageVO> messages;
 
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;
 
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "更新时间（会话列表排序键）")
     private OffsetDateTime updatedAt;
 
@@ -65,7 +65,7 @@ public class ChatSessionVO {
                 example = "[{\"record_id\":1,\"quote\":\"...\",\"date\":\"2026-09-03\"}]")
         private List<Map<String, Object>> sources;
 
-        @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+        @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
         @Schema(description = "创建时间")
         private OffsetDateTime createdAt;
     }

@@ -29,6 +29,7 @@ import org.xianshen.mumirrorb.pipeline.event.RecordCreatedEvent;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
@@ -92,8 +93,9 @@ public class RecordServiceImpl implements RecordService {
             endDate = startDate;
         }
 
-        OffsetDateTime startDateTime = startDate.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime endDateTime = endDate.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        // 日期口径统一 Asia/Shanghai（与日历统计 TO_CHAR ... AT TIME ZONE 一致）
+        OffsetDateTime startDateTime = startDate.atStartOfDay(ZoneId.of("Asia/Shanghai")).toOffsetDateTime();
+        OffsetDateTime endDateTime = endDate.plusDays(1).atStartOfDay(ZoneId.of("Asia/Shanghai")).toOffsetDateTime();
 
         LambdaQueryWrapper<Record> wrapper = new LambdaQueryWrapper<Record>()
                 .eq(Record::getUserId, userId)

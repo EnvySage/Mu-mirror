@@ -78,16 +78,16 @@ public class RecordVO {
     private List<ChunkVO> chunks;
 
     /**
-     * 创建时间
+     * 创建时间（Asia/Shanghai，与前端渲染时区一致）
      */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "创建时间", example = "2026-08-07 14:30:00")
     private OffsetDateTime createdAt;
 
     /**
-     * 更新时间
+     * 更新时间（Asia/Shanghai，与前端渲染时区一致）
      */
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "更新时间", example = "2026-08-07 15:45:00")
     private OffsetDateTime updatedAt;
 }
