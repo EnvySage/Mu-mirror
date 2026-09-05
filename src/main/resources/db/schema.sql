@@ -154,3 +154,45 @@ CREATE TABLE IF NOT EXISTS user_terms (
     CONSTRAINT uq_user_terms UNIQUE (user_id, term)
 );
 CREATE INDEX IF NOT EXISTS idx_user_terms_user_status ON user_terms(user_id, status);
+
+-- ============================================================
+-- vault 用户资产保管 + tool_calls 工具审计（dialogue-enhancement-ideas.md C/E 组，2026-09-05）
+-- 存储定稿：Postgres BYTEA 直存（数据主权 100% 收敛），20MB 单文件上限（配置化）
+-- 三档消化：文本全消化/图片借用户描述/音视频元数据；SHA-256 去重；硬删除
+-- ============================================================
+CREATE TABLE IF NOT EXISTS vault_items (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    original_name VARCHAR(255) NOT NULL,     -- 清洗后原文件名（路径穿越防护）
+    storage_key VARCHAR(500) NOT NULL,       -- {userId}/{yyyyMM}/{uuid}.ext（VaultStorage 接口抽象参数）
+    size_bytes BIGINT NOT NULL,
+    mime VARCHAR(100) NOT NULL,              -- magic bytes 校验后的真实 mime
+    sha256 VARCHAR(64),                      -- 同用户同内容去重
+    category VARCHAR(20),                    -- 复用 contentType 枚举
+    description VARCHAR(500),                -- 用户一句话提示 / LLM 自动命名（三层渐进）
+    digest_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/done/skipped/failed
+    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_vault_items_user ON vault_items(user_id, deleted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vault_sha ON vault_items(user_id, sha256) WHERE sha256 IS NOT NULL AND deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS vault_blobs (
+    vault_item_id BIGINT PRIMARY KEY REFERENCES vault_items(id) ON DELETE CASCADE,
+    data BYTEA NOT NULL
+);
+
+-- toolcalling 审计（论文素材：工具使用频率/成功率/延迟分布）
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    session_id UUID,
+    tool VARCHAR(50) NOT NULL,
+    args JSONB DEFAULT '{}'::jsonb,
+    result_summary VARCHAR(500),
+    success BOOLEAN NOT NULL DEFAULT true,
+    latency_ms INT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_user ON tool_calls(user_id, created_at);
