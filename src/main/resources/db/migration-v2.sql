@@ -84,3 +84,22 @@ CREATE INDEX IF NOT EXISTS idx_history_session ON conversation_history(session_i
 CREATE INDEX IF NOT EXISTS idx_history_user ON conversation_history(user_id, created_at DESC);
 
 -- ---------- 8. 已删除记录的 chunks 保留（软删除记录不进检索，由 SQL 关联过滤，见 ChunkMapper） ----------
+
+-- 2026-09-05 个人词典 user_terms（lexicon-design.md）
+CREATE TABLE IF NOT EXISTS user_terms (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    term VARCHAR(100) NOT NULL,
+    aliases JSONB DEFAULT '[]'::jsonb,
+    description TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    query_hit_count INT DEFAULT 0,
+    content_hit_count INT DEFAULT 0,
+    last_confirmed_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ,
+    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_user_terms UNIQUE (user_id, term)
+);
+CREATE INDEX IF NOT EXISTS idx_user_terms_user_status ON user_terms(user_id, status);

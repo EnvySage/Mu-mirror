@@ -132,3 +132,25 @@ CREATE TABLE IF NOT EXISTS conversation_history (
 );
 CREATE INDEX IF NOT EXISTS idx_history_session ON conversation_history(session_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_history_user ON conversation_history(user_id, created_at DESC);
+
+-- ============================================================
+-- user_terms 个人词典（lexicon-design.md v1.0，2026-09-05）
+-- 机器猜的 pending 只展示不注入；confirmed 才生效（哲学同审核机制）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_terms (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    term VARCHAR(100) NOT NULL,
+    aliases JSONB DEFAULT '[]'::jsonb,     -- ["毕设","那个设计"]
+    description TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/confirmed/dismissed
+    query_hit_count INT DEFAULT 0,          -- 用户提问命中（注入优先级）
+    content_hit_count INT DEFAULT 0,        -- 入库内容命中（过期沉底）
+    last_confirmed_at TIMESTAMPTZ,          -- confirmed 卡片"最后确认于x日"
+    last_seen_at TIMESTAMPTZ,               -- 最近语料出现（衰减依据）
+    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_user_terms UNIQUE (user_id, term)
+);
+CREATE INDEX IF NOT EXISTS idx_user_terms_user_status ON user_terms(user_id, status);
