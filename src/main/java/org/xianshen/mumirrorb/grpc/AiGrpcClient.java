@@ -138,6 +138,10 @@ public class AiGrpcClient {
      * @return 向量化结果
      */
     public EmbeddingProto.EmbedResponse embed(UUID userId, String text) {
+        // 防御：query 为空直接抛业务异常（调用方兜底），避免 NPE 打穿 SSE 流
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("embed 入参 text 为空");
+        }
         log.info("gRPC 调用 Embed，用户: {}, 文本长度: {}", userId, text.length());
         try {
             CommonProto.EmbeddingConfig embedConfig = buildEmbeddingConfig(userId);

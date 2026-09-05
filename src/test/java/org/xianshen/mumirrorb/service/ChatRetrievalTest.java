@@ -228,4 +228,22 @@ class ChatRetrievalTest {
         verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
                 "assistant".equals(h.getRole()) && "暂时无法回答".equals(h.getContent())));
     }
+
+    @Test
+    @DisplayName("ExtractIntent 超时回退 HYBRID：fallback 携带原文 rewritten_query，embed 收到非空文本不 NPE")
+    void intentTimeout_fallbackCarriesOriginalQuery() {
+        when(aiGrpcClient.extractIntent(USER_ID, "昨天上班我忙了什么"))
+                .thenThrow(new io.grpc.StatusRuntimeException(io.grpc.Status.DEADLINE_EXCEEDED));
+        when(searchMapper.searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
+                anyBoolean(), anyDouble(), anyInt())).thenReturn(hit());
+        when(aiGrpcClient.chatStream(eq(USER_ID), any()))
+                .thenReturn(List.of(answerChunk()).iterator());
+
+        chatService.chat(USER_ID, ChatRequestDTO.builder().question("昨天上班我忙了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+
+        // 关键断言：embed 收到的是原文（非 null/空），HYBRID 检索用原文作向量检索 query
+        verify(aiGrpcClient).embed(eq(USER_ID), eq("昨天上班我忙了什么"));
+        verify(searchMapper).searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
+                anyBoolean(), anyDouble(), anyInt());
+    }
 }

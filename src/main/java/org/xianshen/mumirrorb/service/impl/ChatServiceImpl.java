@@ -393,7 +393,12 @@ public class ChatServiceImpl implements ChatService {
             return aiGrpcClient.extractIntent(userId, question);
         } catch (Exception e) {
             log.warn("ExtractIntent 失败，回退 HYBRID，用户: {}，原因: {}", userId, e.getMessage());
-            return MirrorChatProto.ExtractIntentResponse.newBuilder().setQueryType("hybrid").build();
+            // 兜底响应必须带 rewritten_query=原问题（设计 9.2：改写失败兜底原文），
+            // 否则 searchHybrid 里 rewritten() 返回 null → embed(null) NPE
+            return MirrorChatProto.ExtractIntentResponse.newBuilder()
+                    .setQueryType("hybrid")
+                    .setRewrittenQuery(question)
+                    .build();
         }
     }
 
