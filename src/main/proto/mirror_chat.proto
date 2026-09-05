@@ -9,6 +9,27 @@ option java_outer_classname = "MirrorChatProto";
 service MirrorChat {
   rpc ExtractIntent(ExtractIntentRequest) returns (ExtractIntentResponse);
   rpc Chat(ChatRequest) returns (stream ChatChunk);
+  // 工具计划（toolcalling-vault-design.md 第 1/6 节）：LLM 按 JSON 约定输出 ≤2 步工具调用计划；
+  // 失败/超时(3s)/空计划 → B 侧跳过走现有 RAG，零回归
+  rpc PlanTools(PlanToolsRequest) returns (PlanToolsReply);
+}
+
+// 工具计划请求
+message PlanToolsRequest {
+  string question = 1;                    // 用户原始提问
+  repeated GlossaryTerm glossary = 2;     // confirmed 个人词典（与对话同口径）
+  repeated ToolSpec tools = 3;            // Java 注册表快照（ToolSpec 定义在 common.proto）
+  LlmConfig llm_config = 4;
+}
+
+// 工具计划响应
+message PlanToolsReply {
+  repeated PlannedCall calls = 1;         // ≤2 步；空 = 不用工具
+}
+
+message PlannedCall {
+  string tool = 1;        // 工具名（须在注册表内，否则 B 侧跳过）
+  string args_json = 2;   // 参数 JSON 文本（B 侧解析执行）
 }
 
 message ExtractIntentRequest {
@@ -32,7 +53,8 @@ message ChatRequest {
   repeated ChatMessage history = 2;
   repeated RetrievedChunk chunks = 3;
   LlmConfig llm_config = 4;
-  repeated GlossaryTerm glossary = 5; // 用户个人词典（confirmed top 30，软约束注入）
+  repeated GlossaryTerm glossary = 5;      // 用户个人词典（confirmed top 30，软约束注入）
+  repeated ToolResult tool_results = 6;    // 工具执行结果（PlanTools→执行→塞入；空=未走工具）
 }
 
 message ChatMessage {

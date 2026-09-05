@@ -12,6 +12,11 @@ spring:
   profiles:
     active: dev
 
+  servlet:
+    multipart:
+      max-file-size: 21MB       # vault 单文件 20MB 上限（业务层 VaultProperties 校验，容器留 1MB 余量给表单）
+      max-request-size: 25MB
+
   # 数据源配置（公共部分）
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
@@ -84,3 +89,13 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+
+# vault 资产保管（toolcalling-vault-design.md 3.1：全部配置化）
+vault:
+  max-file-size-bytes: 20971520        # 单文件 20MB
+  quota-bytes: 524288000               # 每用户配额 500MB
+  digest-max-chars: 100000             # 全消化文本上限（≈5万 token）
+  plan-tools-timeout-ms: 3000          # PlanTools 规划超时
+  max-tool-calls: 2                    # 单次对话最多工具步数
+  find-item-limit: 10
+  search-records-limit: 20

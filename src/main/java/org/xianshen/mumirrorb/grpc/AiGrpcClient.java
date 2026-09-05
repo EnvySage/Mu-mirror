@@ -377,6 +377,37 @@ public class AiGrpcClient {
     }
 
     /**
+     * 工具计划（toolcalling-vault-design.md 第 1/6 节方案 A）
+     *
+     * <p>Python PlanTools RPC：LLM 按 JSON 约定输出 ≤2 步工具调用计划。
+     * 超时默认 3s（设计稿：规划必须快，失败直接跳过走 RAG——绝不拖慢对话）。
+     * Python 未上线时抛 UNAVAILABLE，调用方（ToolOrchestrator）降级返回空计划。</p>
+     *
+     * @param userId     用户 ID（llm_config 在此补齐）
+     * @param request    已组装请求（question/glossary/tools）
+     * @param timeoutMs  规划超时毫秒（设计稿 3s）
+     * @return 计划（可能为空 = 不用工具）
+     */
+    public MirrorChatProto.PlanToolsReply planTools(UUID userId,
+                                                    MirrorChatProto.PlanToolsRequest request,
+                                                    long timeoutMs) {
+        log.info("gRPC 调用 PlanTools，用户: {}, 问题: {}", userId, request.getQuestion());
+        try {
+            MirrorChatProto.PlanToolsRequest enriched = request.toBuilder()
+                    .setLlmConfig(buildLlmConfig(userId))
+                    .build();
+            MirrorChatProto.PlanToolsReply response = chatStub
+                    .withDeadlineAfter(Math.max(timeoutMs, 100), TimeUnit.MILLISECONDS)
+                    .planTools(enriched);
+            log.info("PlanTools 返回: {} 步计划", response.getCallsCount());
+            return response;
+        } catch (StatusRuntimeException e) {
+            log.info("gRPC PlanTools 调用失败（调用方降级走 RAG）: status={}, 用户: {}", e.getStatus(), userId);
+            throw e;
+        }
+    }
+
+    /**
      * 词条候选抽取（个人词典，lexicon-design.md 第 3 节）
      *
      * <p>Python 侧 ExtractTerms RPC（第 7 套 prompt）由 AI Agent 本轮实现；

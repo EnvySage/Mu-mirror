@@ -112,6 +112,15 @@ public class Chunk {
     private Boolean userEdited;
 
     /**
+     * vault 资产挂链（toolcalling-vault-design.md 3.3 全消化）
+     *
+     * <p>vault 文件全消化时其文本走 chunk 管道，此列 = 所属 vault_item_id；
+     * vault 硬删除时 FK ON DELETE CASCADE 级联清 chunk（向量库无孤儿）。</p>
+     */
+    @Schema(description = "所属vault资产ID（全消化挂链；普通记录 chunk 为 null）", example = "1")
+    private Long vaultItemId;
+
+    /**
      * 向量嵌入（pgvector）
      *
      * <p>维度硬约束 1024（设计文档 3.4，裁决 #18），与 HNSW 索引列一致。</p>

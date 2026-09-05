@@ -57,11 +57,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     metadata JSONB,                     -- AI 元数据（title/summary/contentType/mood/keywords/taskStatus）
     classified_segment TEXT,            -- 生成当前 metadata 时所用的 segment 文本；NULL = 未分类/文本已改
     user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
+    vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE,  -- vault 全消化产物挂链（vault 删除时级联清，向量库无孤儿）
     embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_vault_item ON chunks(vault_item_id);  -- vault 消化 chunks 溯源/级联清
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
 
 -- ============================================================

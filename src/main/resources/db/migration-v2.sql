@@ -105,3 +105,40 @@ CREATE TABLE IF NOT EXISTS user_terms (
 );
 CREATE INDEX IF NOT EXISTS idx_user_terms_user_status ON user_terms(user_id, status);
 ALTER TABLE user_terms ADD COLUMN IF NOT EXISTS source_record_id BIGINT; -- 2026-09-06 存量库补列（F 契约）
+
+-- 2026-09-05/06 toolcalling+vault（toolcalling-vault-design.md；DB Agent af60c45 建表，B 补 chunks 挂链列）
+CREATE TABLE IF NOT EXISTS vault_items (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    original_name VARCHAR(255) NOT NULL,
+    storage_key VARCHAR(500) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    mime VARCHAR(100) NOT NULL,
+    sha256 VARCHAR(64),
+    category VARCHAR(20),
+    description VARCHAR(500),
+    digest_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_vault_items_user ON vault_items(user_id, deleted_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vault_sha ON vault_items(user_id, sha256) WHERE sha256 IS NOT NULL AND deleted_at IS NULL;
+CREATE TABLE IF NOT EXISTS vault_blobs (
+    vault_item_id BIGINT PRIMARY KEY REFERENCES vault_items(id) ON DELETE CASCADE,
+    data BYTEA NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    session_id UUID,
+    tool VARCHAR(50) NOT NULL,
+    args JSONB DEFAULT '{}'::jsonb,
+    result_summary VARCHAR(500),
+    success BOOLEAN NOT NULL DEFAULT true,
+    latency_ms INT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_user ON tool_calls(user_id, created_at);
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE; -- vault 全消化 chunk 挂链（级联清，无孤儿）
+CREATE INDEX IF NOT EXISTS idx_chunks_vault_item ON chunks(vault_item_id);

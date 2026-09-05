@@ -75,6 +75,7 @@ public class ChatServiceImpl implements ChatService {
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
     private final GlossaryService glossaryService;
+    private final org.xianshen.mumirrorb.tools.ToolOrchestrator toolOrchestrator;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -93,6 +94,20 @@ public class ChatServiceImpl implements ChatService {
             MirrorChatProto.ExtractIntentResponse intent =
                     extractIntentSafely(userId, question, GlossaryProtoMapper.toProtoList(matchedTerms));
             String route = normalizeRoute(intent.getQueryType());
+
+            // 3.5 PlanTools 编排（toolcalling-vault-design.md 第 1 节）：失败/空计划 → 空列表走纯 RAG，零回归
+            List<CommonProto.ToolResult> toolResults =
+                    toolOrchestrator.planAndExecute(userId, session.getId(), question);
+            java.util.List<String> toolsUsed = toolResults.stream()
+                    .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
+                    .map(CommonProto.ToolResult::getSummary)
+                    .toList();
+            if (!toolsUsed.isEmpty()) {
+                sendEvent(emitter, "meta", Map.of(
+                        "sessionId", session.getId().toString(),
+                        "route", route.toUpperCase(),
+                        "tools_used", toolsUsed));
+            }
             sendEvent(emitter, "meta", Map.of(
                     "sessionId", session.getId().toString(),
                     "route", route.toUpperCase()));
@@ -107,8 +122,8 @@ public class ChatServiceImpl implements ChatService {
                 return;
             }
 
-            // 6. 流式 Chat 透传
-            streamAnswer(emitter, userId, session.getId(), route, question, intent, chunks);
+            // 6. 流式 Chat 透传（带工具结果）
+            streamAnswer(emitter, userId, session.getId(), route, question, intent, chunks, toolResults);
         } catch (Exception e) {
             log.error("对话处理失败，用户: {}", userId, e);
             try {
@@ -129,8 +144,9 @@ public class ChatServiceImpl implements ChatService {
      */
     private void streamAnswer(SseEmitter emitter, UUID userId, UUID sessionId, String route,
                               String question, MirrorChatProto.ExtractIntentResponse intent,
-                              List<RetrievedChunkDTO> chunks) {
-        MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, intent, chunks, sessionId);
+                              List<RetrievedChunkDTO> chunks,
+                              List<CommonProto.ToolResult> toolResults) {
+        MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, intent, chunks, sessionId, toolResults);
         StringBuilder answer = new StringBuilder();
         List<Map<String, Object>> sources = null;
         try {
@@ -162,9 +178,91 @@ public class ChatServiceImpl implements ChatService {
         insertMessage(userId, sessionId, "assistant", answer.toString(), sources);
         touchSession(sessionId);
         sendEvent(emitter, "sources", sources);
+        // vault_refs（toolcalling-vault-design.md 4.1）：AI 输出 [n] 引用 vault 工具结果中的文件 →
+        // 解析出被引用文件卡（字段：n/vault_item_id/display_name/file_type/size/digest_status/quote）
+        java.util.List<Map<String, Object>> vaultRefs = extractVaultRefs(answer.toString(), toolResults);
+        if (!vaultRefs.isEmpty()) {
+            sendEvent(emitter, "vault_refs", vaultRefs);
+        }
         sendEvent(emitter, "done", Map.of(
                 "sessionId", sessionId.toString(),
                 "route", route.toUpperCase()));
+    }
+
+    /**
+     * vault_refs 提取（4.1）：扫描 AI 回答中的 [n] 标记，
+     * n 落在 1..vault 文件数 内 → 取 find_item/recall_item 结果对应项组文件卡（同气泡去重）
+     */
+    private java.util.List<Map<String, Object>> extractVaultRefs(String answer,
+                                                                 List<CommonProto.ToolResult> toolResults) {
+        java.util.List<Map<String, Object>> refs = new ArrayList<>();
+        if (answer == null || toolResults == null || toolResults.isEmpty()) {
+            return refs;
+        }
+        // 收集 vault 工具结果的 items（find_item 的 items / recall_item 的 item）
+        java.util.List<Map<String, Object>> vaultItems = new ArrayList<>();
+        for (CommonProto.ToolResult tr : toolResults) {
+            if (!tr.getSuccess() || tr.getPayloadJson().isBlank()) {
+                continue;
+            }
+            try {
+                Map<String, Object> payload = objectMapper.readValue(tr.getPayloadJson(),
+                        new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+                        });
+                Object items = payload.get("items");
+                if (items instanceof List<?> list) {
+                    for (Object o : list) {
+                        if (o instanceof Map<?, ?> m) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> item = (Map<String, Object>) m;
+                            vaultItems.add(item);
+                        }
+                    }
+                } else if (payload.get("item") instanceof Map<?, ?> m) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> item = (Map<String, Object>) m;
+                    vaultItems.add(item);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        if (vaultItems.isEmpty()) {
+            return refs;
+        }
+        // [n] 标记去重收集（1-based，对齐现有 sources 语法）
+        java.util.Set<Integer> marks = new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\\[(\\d{1,2})]").matcher(answer);
+        while (matcher.find()) {
+            try {
+                int n = Integer.parseInt(matcher.group(1));
+                if (n >= 1 && n <= vaultItems.size()) {
+                    marks.add(n);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        java.util.List<Integer> ordered = new ArrayList<>(marks);
+        java.util.Collections.sort(ordered);
+        java.util.Set<Long> seen = new java.util.LinkedHashSet<>();
+        for (int n : ordered) {
+            Map<String, Object> item = vaultItems.get(n - 1);
+            Object idObj = item.get("vault_item_id");
+            Long id = idObj instanceof Number num ? num.longValue() : null;
+            if (id == null || !seen.add(id)) {
+                continue; // 同文件多引用 → 同气泡单卡
+            }
+            Map<String, Object> ref = new LinkedHashMap<>();
+            ref.put("n", n);
+            ref.put("vault_item_id", id);
+            ref.put("display_name", item.getOrDefault("display_name", item.get("original_name")));
+            ref.put("file_type", item.get("file_type"));
+            ref.put("size", item.get("size"));
+            ref.put("digest_status", item.get("digest_status"));
+            ref.put("quote", item.get("quote"));
+            refs.add(ref);
+        }
+        return refs;
     }
 
     /**
@@ -259,9 +357,15 @@ public class ChatServiceImpl implements ChatService {
     private MirrorChatProto.ChatRequest buildChatRequest(UUID userId, String question,
                                                          MirrorChatProto.ExtractIntentResponse intent,
                                                          List<RetrievedChunkDTO> chunks,
-                                                         UUID sessionId) {
+                                                         UUID sessionId,
+                                                         List<CommonProto.ToolResult> toolResults) {
         MirrorChatProto.ChatRequest.Builder builder = MirrorChatProto.ChatRequest.newBuilder()
                 .setQuestion(question);
+
+        // 工具结果注入（toolcalling-vault-design.md 第 6 节 ChatRequest.tool_results）
+        if (toolResults != null && !toolResults.isEmpty()) {
+            builder.addAllToolResults(toolResults);
+        }
 
         // 个人词典注入（lexicon-design.md 第 4 节）：Chat 路由传 confirmed top 30 全量（软约束）
         try {

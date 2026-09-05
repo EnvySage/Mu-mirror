@@ -51,6 +51,25 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                                     @Param("limit") int limit);
 
     /**
+     * vault 三层漏斗 ③ 全文层：消化 chunks 向量检索（只查挂了 vault_item_id 的 chunk）
+     *
+     * <p>与 {@link #searchBySimilarity} 同算法；范围限定 vault 全消化产物（find_item 第③层）。</p>
+     */
+    @Select("""
+            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.vault_item_id, c.created_at,
+                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+            FROM chunks c
+            WHERE c.user_id = #{userId}::uuid
+              AND c.embedding IS NOT NULL
+              AND c.vault_item_id IS NOT NULL
+            ORDER BY c.embedding <=> #{queryVector}::vector
+            LIMIT #{limit}
+            """)
+    List<Chunk> searchVaultBySimilarity(@Param("userId") UUID userId,
+                                        @Param("queryVector") String queryVector,
+                                        @Param("limit") int limit);
+
+    /**
      * 带内容类型过滤的向量相似度检索
      *
      * @param userId      用户ID

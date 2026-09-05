@@ -71,6 +71,7 @@ class ChatRetrievalTest {
         chatService = new ChatServiceImpl(sessionMapper, historyMapper, searchMapper,
                 snapshotMapper, settingsMapper, aiGrpcClient,
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.GlossaryService.class),
+                org.mockito.Mockito.mock(org.xianshen.mumirrorb.tools.ToolOrchestrator.class),
                 new com.fasterxml.jackson.databind.ObjectMapper());
 
         ChatSession session = ChatSession.builder()
