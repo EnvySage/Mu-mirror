@@ -55,6 +55,7 @@ public class ProfileStatsDTO {
         private Long recordId;
         private String title;
         private String summary;
+        private String taskStatus;
         private String createdAt;
     }
 

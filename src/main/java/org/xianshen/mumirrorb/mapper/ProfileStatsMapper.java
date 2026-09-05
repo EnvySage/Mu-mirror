@@ -25,6 +25,7 @@ public interface ProfileStatsMapper {
             SELECT r.id AS recordId,
                    c.metadata->>'title' AS title,
                    c.metadata->>'summary' AS summary,
+                   COALESCE(c.metadata->>'taskStatus', 'not_started') AS taskStatus,
                    TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
             FROM chunks c
             JOIN records r ON r.id = c.record_id
@@ -37,6 +38,24 @@ public interface ProfileStatsMapper {
             LIMIT 50
             """)
     List<ProfileStatsDTO.TodoItemDTO> selectOpenTodos(@Param("userId") java.util.UUID userId);
+
+    /**
+     * 待办/计划按任务状态计数（total = 各状态之和，chunk 粒度，与 selectOpenTodos 口径一致）
+     *
+     * <p>缺 taskStatus 的旧数据 COALESCE 归入 not_started（裁决 #16）。</p>
+     */
+    @Select("""
+            SELECT COALESCE(c.metadata->>'taskStatus', 'not_started') AS status,
+                   COUNT(*) AS count
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND c.metadata->>'contentType' IN ('todo', 'plan')
+            GROUP BY 1
+            """)
+    List<java.util.Map<String, Object>> selectTodoStatusCounts(@Param("userId") java.util.UUID userId);
 
     /**
      * 最近学习条目（contentType = learning）
@@ -81,6 +100,55 @@ public interface ProfileStatsMapper {
             """)
     List<java.util.Map<String, Object>> selectMoodStats(@Param("userId") java.util.UUID userId,
                                                         @Param("since") OffsetDateTime since);
+
+    /**
+     * 按日情绪聚合（镜子统计页堆叠色带数据源）
+     *
+     * <p>日期按 Asia/Shanghai 本地时区切分（全站口径）；只返回有数据的天，
+     * 缺失日期由 Service 层补零。</p>
+     */
+    @Select("""
+            <script>
+            SELECT TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date,
+                   m.value AS mood,
+                   COUNT(*) AS count
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            CROSS JOIN LATERAL jsonb_array_elements_text(c.metadata->'mood') AS m(value)
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND jsonb_exists(c.metadata, 'mood')
+              <if test="since != null">AND r.created_at &gt;= #{since}</if>
+            GROUP BY 1, 2
+            ORDER BY 1
+            </script>
+            """)
+    List<java.util.Map<String, Object>> selectMoodDaily(@Param("userId") java.util.UUID userId,
+                                                        @Param("since") OffsetDateTime since);
+
+    /**
+     * 按日记录数聚合（镜子统计页频率柱状图数据源，含无 chunk 的记录）
+     *
+     * <p>日期按 Asia/Shanghai 本地时区切分；只返回有记录的天，
+     * 缺失日期由 Service 层补零。排除 failed 记录（与日历 countByDay 口径一致）。</p>
+     */
+    @Select("""
+            <script>
+            SELECT TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date,
+                   COUNT(*) AS count
+            FROM records r
+            WHERE r.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status != 'failed'
+              <if test="since != null">AND r.created_at &gt;= #{since}</if>
+            GROUP BY 1
+            ORDER BY 1
+            </script>
+            """)
+    List<java.util.Map<String, Object>> selectRecordDaily(@Param("userId") java.util.UUID userId,
+                                                          @Param("since") OffsetDateTime since);
 
     /**
      * 关键词频次（metadata.keywords 数组展开计数，取 Top N）

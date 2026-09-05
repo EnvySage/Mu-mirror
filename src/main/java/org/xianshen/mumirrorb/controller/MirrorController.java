@@ -17,12 +17,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
+import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.service.ChatService;
 import org.xianshen.mumirrorb.service.MirrorService;
 
@@ -89,6 +91,31 @@ public class MirrorController {
         UUID userId = getCurrentUserId();
         MirrorProfileVO vo = mirrorService.generate(userId);
         return R.ok("画像已生成", vo);
+    }
+
+    /**
+     * 镜子页图表统计数据
+     *
+     * <p>五维统计底层数据：按日情绪（堆叠色带）、按日记录数（频率柱状）、
+     * 活跃时段（0-23）、周节奏（周一=0）、关键词 Top10、待办状态计数。
+     * 窗口内缺失日期/桶由 Service 层补零。</p>
+     */
+    @Operation(
+            summary = "镜子统计数据",
+            description = "按日情绪/按日记录数/小时分布/星期分布(周一=0)/关键词Top10/待办统计，窗口内缺失桶补零。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "查询成功",
+                    content = @Content(schema = @Schema(implementation = MirrorStatsVO.class))),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
+    })
+    @GetMapping("/stats")
+    public R<MirrorStatsVO> stats(
+            @Parameter(description = "统计窗口天数（clamp 到 7~90）", example = "30")
+            @RequestParam(defaultValue = "30") int days) {
+        int clamped = Math.max(7, Math.min(days, 90));
+        UUID userId = getCurrentUserId();
+        return R.ok("查询成功", mirrorService.stats(userId, clamped));
     }
 
     // ==================== 对话（设计文档 6.6，T-B-4） ====================

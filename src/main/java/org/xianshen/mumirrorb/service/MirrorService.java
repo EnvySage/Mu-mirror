@@ -1,6 +1,7 @@
 package org.xianshen.mumirrorb.service;
 
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
+import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 
 import java.util.UUID;
 
@@ -30,4 +31,15 @@ public interface MirrorService {
      * @return 距离（0~2）；无可比对象返回 null
      */
     Double driftDistance(Long snapshotId);
+
+    /**
+     * 镜子页图表统计（GET /api/mirror/stats?days=N）
+     *
+     * <p>五维统计底层数据：按日情绪 / 按日记录数 / 小时分布 / 星期分布（周一=0）/
+     * 关键词 Top10 / 待办状态计数。窗口内缺失日期与桶由 Service 层补零。</p>
+     *
+     * @param userId 用户ID
+     * @param days   统计窗口天数（调用方已 clamp 到 [7,90]）
+     */
+    MirrorStatsVO stats(UUID userId, int days);
 }

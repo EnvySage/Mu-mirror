@@ -15,6 +15,7 @@ import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
+import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.service.MirrorService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -24,6 +25,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,6 +46,9 @@ public class MirrorServiceImpl implements MirrorService {
     private static final int MANUAL_KEEP = 2;
     private static final int MONTHLY_KEEP = 12;
     private static final int RECENT_CHATS_LIMIT = 20;
+    private static final int KEYWORD_TOP = 10;
+    /** 待办明细最多条数（前端协议） */
+    private static final int TODO_ITEMS_LIMIT = 10;
 
     private final ProfileSnapshotMapper snapshotMapper;
     private final ProfileStatsMapper statsMapper;
@@ -116,6 +121,130 @@ public class MirrorServiceImpl implements MirrorService {
 
         log.info("============ 画像生成结束，快照ID: {} ============", snapshot.getId());
         return toVO(snapshot);
+    }
+
+    /**
+     * 镜子页图表统计（五维底层数据 + 按日聚合，Service 层补零）
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public MirrorStatsVO stats(UUID userId, int days) {
+        OffsetDateTime since = LocalDate.now(ZONE).minusDays(days - 1L).atStartOfDay(ZONE).toOffsetDateTime();
+
+        // 按日情绪：SQL 只返回有数据的天，按日期序列补零（moods 空数组）
+        Map<String, List<MirrorStatsVO.MoodCountVO>> moodsByDate = new HashMap<>();
+        for (Map<String, Object> row : statsMapper.selectMoodDaily(userId, since)) {
+            moodsByDate.computeIfAbsent(String.valueOf(row.get("date")), k -> new ArrayList<>())
+                    .add(MirrorStatsVO.MoodCountVO.builder()
+                            .mood((String) row.get("mood"))
+                            .count((int) toLong(row.get("count")))
+                            .build());
+        }
+        List<MirrorStatsVO.MoodDayVO> moodDaily = new ArrayList<>();
+        for (LocalDate d : dateWindow(days)) {
+            moodDaily.add(MirrorStatsVO.MoodDayVO.builder()
+                    .date(d.toString())
+                    .moods(moodsByDate.getOrDefault(d.toString(), List.of()))
+                    .build());
+        }
+
+        // 小时分布补零 0-23
+        Map<Integer, Long> hourByBucket = new HashMap<>();
+        for (Map<String, Object> row : statsMapper.selectHourDistribution(userId, since)) {
+            hourByBucket.put((int) toLong(row.get("bucket")), toLong(row.get("count")));
+        }
+        List<MirrorStatsVO.BucketCountVO> hourDist = new ArrayList<>();
+        for (int h = 0; h < 24; h++) {
+            hourDist.add(MirrorStatsVO.BucketCountVO.builder()
+                    .bucket(h).count(hourByBucket.getOrDefault(h, 0L).intValue()).build());
+        }
+
+        // 星期分布补零 0-6，DOW（周日=0）→ 前端协议（周一=0）
+        Map<Integer, Long> weekdayByBucket = new HashMap<>();
+        for (Map<String, Object> row : statsMapper.selectWeekdayDistribution(userId, since)) {
+            int dow = (int) toLong(row.get("bucket"));
+            weekdayByBucket.put((dow + 6) % 7, toLong(row.get("count")));
+        }
+        List<MirrorStatsVO.BucketCountVO> weekdayDist = new ArrayList<>();
+        for (int w = 0; w < 7; w++) {
+            weekdayDist.add(MirrorStatsVO.BucketCountVO.builder()
+                    .bucket(w).count(weekdayByBucket.getOrDefault(w, 0L).intValue()).build());
+        }
+
+        // 关键词 Top 10（与画像统计同口径，取前 10）
+        List<MirrorStatsVO.KeywordCountVO> keywordTop = new ArrayList<>();
+        for (Map<String, Object> row : statsMapper.selectKeywordStats(userId, since, KEYWORD_TOP)) {
+            keywordTop.add(MirrorStatsVO.KeywordCountVO.builder()
+                    .keyword((String) row.get("keyword"))
+                    .count((int) toLong(row.get("count")))
+                    .build());
+        }
+
+        // 待办：状态计数（COALESCE 归 not_started）+ 未完成明细截 10 条
+        int total = 0;
+        int notStarted = 0;
+        int inProgress = 0;
+        int completed = 0;
+        for (Map<String, Object> row : statsMapper.selectTodoStatusCounts(userId)) {
+            String status = String.valueOf(row.get("status"));
+            int count = (int) toLong(row.get("count"));
+            total += count;
+            switch (status) {
+                case "in_progress" -> inProgress += count;
+                case "completed" -> completed += count;
+                default -> notStarted += count; // not_started 及未知值兜底
+            }
+        }
+        List<MirrorStatsVO.TodoItemVO> openItems = statsMapper.selectOpenTodos(userId).stream()
+                .limit(TODO_ITEMS_LIMIT)
+                .map(t -> MirrorStatsVO.TodoItemVO.builder()
+                        .recordId(t.getRecordId())
+                        .title(t.getTitle())
+                        .summary(t.getSummary())
+                        .taskStatus(t.getTaskStatus())
+                        .build())
+                .toList();
+
+        // 按日记录数：SQL 只返回有记录的天，按日期序列补零
+        Map<String, Long> recordsByDate = new HashMap<>();
+        for (Map<String, Object> row : statsMapper.selectRecordDaily(userId, since)) {
+            recordsByDate.put(String.valueOf(row.get("date")), toLong(row.get("count")));
+        }
+        List<MirrorStatsVO.DayCountVO> recordDaily = new ArrayList<>();
+        for (LocalDate d : dateWindow(days)) {
+            recordDaily.add(MirrorStatsVO.DayCountVO.builder()
+                    .date(d.toString())
+                    .count(recordsByDate.getOrDefault(d.toString(), 0L).intValue())
+                    .build());
+        }
+
+        return MirrorStatsVO.builder()
+                .days(days)
+                .moodDaily(moodDaily)
+                .hourDist(hourDist)
+                .weekdayDist(weekdayDist)
+                .keywordTop(keywordTop)
+                .todo(MirrorStatsVO.TodoStatsVO.builder()
+                        .total(total)
+                        .completed(completed)
+                        .notStarted(notStarted)
+                        .inProgress(inProgress)
+                        .openItems(openItems)
+                        .build())
+                .recordDaily(recordDaily)
+                .build();
+    }
+
+    /**
+     * 统计窗口日期序列（今天往前 days 天，Asia/Shanghai，升序）
+     */
+    private List<LocalDate> dateWindow(int days) {
+        LocalDate today = LocalDate.now(ZONE);
+        List<LocalDate> result = new ArrayList<>(days);
+        for (int i = days - 1; i >= 0; i--) {
+            result.add(today.minusDays(i));
+        }
+        return result;
     }
 
     @Override
