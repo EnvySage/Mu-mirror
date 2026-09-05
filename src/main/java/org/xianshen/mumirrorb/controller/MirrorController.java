@@ -122,6 +122,10 @@ public class MirrorController {
         UUID userId = getCurrentUserId();
         // 长超时：LLM 流式回答最长 60s（7.4），加上检索与网络余量
         SseEmitter emitter = new SseEmitter(120_000L);
+        // 客户端断开/超时时优雅终结，避免 Tomcat 转发 /error 触发安全链异常噪音
+        emitter.onCompletion(() -> { });
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(e -> { });
         chatService.chat(userId, dto, emitter);
         return emitter;
     }

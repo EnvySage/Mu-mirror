@@ -54,6 +54,11 @@ public class SecurityConfig {
 
             // 请求授权规则
             .authorizeHttpRequests(auth -> auth
+                // ERROR/FORWARD/ASYNC dispatch（SSE complete 超时/客户端断开时 Tomcat 转发 /error）
+                // 不过 JWT 过滤器（OncePerRequestFilter 默认跳过 async dispatch），放行避免二次异常噪音
+                .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR,
+                        jakarta.servlet.DispatcherType.FORWARD).permitAll()
+                .requestMatchers("/error").permitAll()
                 // 公开接口（不含 context-path）
                 .requestMatchers("/auth/login", "/auth/register", "/auth/status").permitAll()
                 // Druid 监控页面
