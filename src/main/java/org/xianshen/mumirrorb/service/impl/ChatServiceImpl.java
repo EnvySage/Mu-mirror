@@ -57,7 +57,7 @@ public class ChatServiceImpl implements ChatService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int CONTEXT_CHUNK_LIMIT = 5;      // 日记 ≤5 条
     private static final int SNAPSHOT_LIMIT = 2;           // 快照 ≤2 份
-    private static final int HISTORY_ROUNDS = 3;           // 对话历史最近 3 轮
+    private static final int HISTORY_ROUNDS = 20;          // 对话历史最近 20 轮（单会话≈全程记忆；超长会话截断最旧，防 token 爆炸）
     private static final int TITLE_MAX_LEN = 50;
     private static final int QUOTE_MAX_LEN = 60;
     private static final double DEFAULT_HALF_LIFE = 30.0;
