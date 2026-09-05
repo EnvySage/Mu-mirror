@@ -98,8 +98,10 @@ CREATE TABLE IF NOT EXISTS user_terms (
     last_confirmed_at TIMESTAMPTZ,
     last_seen_at TIMESTAMPTZ,
     source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    source_record_id BIGINT,                -- 佐证 chunk 所在记录（F 契约：跳记录详情直接用）
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     CONSTRAINT uq_user_terms UNIQUE (user_id, term)
 );
 CREATE INDEX IF NOT EXISTS idx_user_terms_user_status ON user_terms(user_id, status);
+ALTER TABLE user_terms ADD COLUMN IF NOT EXISTS source_record_id BIGINT; -- 2026-09-06 存量库补列（F 契约）

@@ -90,6 +90,16 @@ public class ChunkServiceImpl implements ChunkService {
             metadata.put("keywords", dto.getKeywords());
             metadataChanged = true;
         }
+        // taskStatus（F 第八轮欠账）：null = 清空（用户"点已选项取消"），非空 = 覆盖
+        if (dto.getTaskStatus() != null) {
+            String ts = dto.getTaskStatus().trim().toLowerCase();
+            if (ts.isEmpty()) {
+                metadata.remove("taskStatus");
+            } else {
+                metadata.put("taskStatus", ts);
+            }
+            metadataChanged = true;
+        }
 
         // 6. classified_segment 状态机 + userEdited（设计文档 5.3）：
         //    改文本 → classified_segment 置 NULL（confirm 时补分类）；改元数据 → 不影响它

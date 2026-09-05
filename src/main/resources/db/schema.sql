@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS user_terms (
     last_confirmed_at TIMESTAMPTZ,          -- confirmed 卡片"最后确认于x日"
     last_seen_at TIMESTAMPTZ,               -- 最近语料出现（衰减依据）
     source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    source_record_id BIGINT,                -- 佐证 chunk 所在记录（F 契约：跳记录详情直接用；@agent-DB 已在活库补列）
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     CONSTRAINT uq_user_terms UNIQUE (user_id, term)

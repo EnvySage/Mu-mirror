@@ -69,7 +69,9 @@ class ChatRetrievalTest {
     @BeforeEach
     void setUp() {
         chatService = new ChatServiceImpl(sessionMapper, historyMapper, searchMapper,
-                snapshotMapper, settingsMapper, aiGrpcClient, new com.fasterxml.jackson.databind.ObjectMapper());
+                snapshotMapper, settingsMapper, aiGrpcClient,
+                org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.GlossaryService.class),
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         ChatSession session = ChatSession.builder()
                 .id(SESSION_ID).userId(USER_ID).title("测试")
@@ -110,7 +112,7 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("SEMANTIC 路由：无 time_range → 开衰减（halfLife=30）")
     void semantic_appliesDecay() {
-        when(aiGrpcClient.extractIntent(USER_ID, "最近学了什么")).thenReturn(intent("semantic", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), anyInt()))
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
@@ -125,7 +127,7 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("HYBRID 路由：time_range 非空 → 关衰减（用户点名时间不应降权）")
     void hybrid_timeRange_disablesDecay() {
-        when(aiGrpcClient.extractIntent(USER_ID, "上个月在忙什么")).thenReturn(intent("hybrid", "上个月"));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("上个月在忙什么"), any())).thenReturn(intent("hybrid", "上个月"));
         when(searchMapper.searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 eq(false), eq(30.0), anyInt())).thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
@@ -140,7 +142,7 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("STRUCTURED 路由：纯 SQL 过滤，不调 Embed 不走向量")
     void structured_noVectorSearch() {
-        when(aiGrpcClient.extractIntent(USER_ID, "我的待办")).thenReturn(intent("structured", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我的待办"), any())).thenReturn(intent("structured", ""));
         when(searchMapper.searchStructured(eq(USER_ID), any(), any(), any(), any(), any(), anyInt()))
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
@@ -156,10 +158,10 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("PROFILE 路由：有快照查快照；无快照回退 HYBRID")
     void profile_fallsBackToHybrid_whenNoSnapshot() {
-        when(aiGrpcClient.extractIntent(USER_ID, "我是什么样的人")).thenReturn(intent("profile", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我是什么样的人"), any())).thenReturn(intent("profile", ""));
         when(snapshotMapper.selectRecent(USER_ID, "manual", 2)).thenReturn(List.of());
         when(snapshotMapper.selectRecent(USER_ID, "monthly", 2)).thenReturn(List.of());
-        when(aiGrpcClient.extractIntent(USER_ID, "我是什么样的人")).thenReturn(intent("profile", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我是什么样的人"), any())).thenReturn(intent("profile", ""));
         when(searchMapper.searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), eq(30.0), anyInt())).thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
@@ -180,7 +182,7 @@ class ChatRetrievalTest {
                 .id(9L).userId(USER_ID).snapshotType("monthly")
                 .overallSummary("九月总结").createdAt(OffsetDateTime.now())
                 .build();
-        when(aiGrpcClient.extractIntent(USER_ID, "我是什么样的人")).thenReturn(intent("profile", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我是什么样的人"), any())).thenReturn(intent("profile", ""));
         when(snapshotMapper.selectRecent(USER_ID, "manual", 2)).thenReturn(List.of());
         when(snapshotMapper.selectRecent(USER_ID, "monthly", 2)).thenReturn(List.of(monthly));
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
@@ -204,7 +206,7 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("检索为空 → 兜底文案落库 assistant 消息（6.6）")
     void emptyRetrieval_fallbackPersisted() {
-        when(aiGrpcClient.extractIntent(USER_ID, "说了什么")).thenReturn(intent("semantic", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("说了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), anyInt()))
                 .thenReturn(List.of());
 
@@ -218,7 +220,7 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("AI 流失败 → 兜底'暂时无法回答'落库（6.6）")
     void chatStreamFails_fallbackPersisted() {
-        when(aiGrpcClient.extractIntent(USER_ID, "最近学了什么")).thenReturn(intent("semantic", ""));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), anyInt()))
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenThrow(new RuntimeException("gRPC down"));
@@ -232,7 +234,7 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("ExtractIntent 超时回退 HYBRID：fallback 携带原文 rewritten_query，embed 收到非空文本不 NPE")
     void intentTimeout_fallbackCarriesOriginalQuery() {
-        when(aiGrpcClient.extractIntent(USER_ID, "昨天上班我忙了什么"))
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("昨天上班我忙了什么"), any()))
                 .thenThrow(new io.grpc.StatusRuntimeException(io.grpc.Status.DEADLINE_EXCEEDED));
         when(searchMapper.searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), anyDouble(), anyInt())).thenReturn(hit());

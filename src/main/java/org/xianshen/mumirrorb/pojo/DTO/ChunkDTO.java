@@ -51,4 +51,15 @@ public class ChunkDTO {
      */
     @Schema(description = "关键词", example = "[\"Spring\", \"Java\"]")
     private List<String> keywords;
+
+    /**
+     * 任务状态（仅待办/计划类有效）
+     *
+     * <p>F 第八轮欠账：前端审核卡"点已选项清空任务状态"此前只改本地缓存，taskStatus 落不进
+     * metadata（本字段缺失，Jackson 静默忽略）。语义：null = 清空（从 metadata 删除该键），
+     * 非空 = 覆盖（not_started/in_progress/completed）。</p>
+     */
+    @Schema(description = "任务状态（仅待办/计划类）；null=清空", example = "completed",
+            allowableValues = {"not_started", "in_progress", "completed"})
+    private String taskStatus;
 }

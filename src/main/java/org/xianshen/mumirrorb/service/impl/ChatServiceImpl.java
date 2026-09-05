@@ -10,6 +10,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
+import org.xianshen.mumirrorb.grpc.GlossaryProtoMapper;
+import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.MirrorChatProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
@@ -24,7 +26,9 @@ import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
+import org.xianshen.mumirrorb.pojo.VO.GlossaryGroupVO.UserTermVO;
 import org.xianshen.mumirrorb.service.ChatService;
+import org.xianshen.mumirrorb.service.GlossaryService;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -70,6 +74,7 @@ public class ChatServiceImpl implements ChatService {
     private final ProfileSnapshotMapper snapshotMapper;
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
+    private final GlossaryService glossaryService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -83,8 +88,10 @@ public class ChatServiceImpl implements ChatService {
             // 2. user 消息落库（先落，失败重试时历史不丢）
             insertMessage(userId, session.getId(), "user", question, null);
 
-            // 3. 意图抽取（失败兜底 HYBRID）
-            MirrorChatProto.ExtractIntentResponse intent = extractIntentSafely(userId, question);
+            // 3. 意图抽取（失败兜底 HYBRID）；query 侧词表命中随请求注入（第 4 节）
+            List<UserTermVO> matchedTerms = matchQueryTermsSafely(userId, question);
+            MirrorChatProto.ExtractIntentResponse intent =
+                    extractIntentSafely(userId, question, GlossaryProtoMapper.toProtoList(matchedTerms));
             String route = normalizeRoute(intent.getQueryType());
             sendEvent(emitter, "meta", Map.of(
                     "sessionId", session.getId().toString(),
@@ -256,6 +263,13 @@ public class ChatServiceImpl implements ChatService {
         MirrorChatProto.ChatRequest.Builder builder = MirrorChatProto.ChatRequest.newBuilder()
                 .setQuestion(question);
 
+        // 个人词典注入（lexicon-design.md 第 4 节）：Chat 路由传 confirmed top 30 全量（软约束）
+        try {
+            builder.addAllGlossary(GlossaryProtoMapper.toProtoList(glossaryService.confirmedForInjection(userId)));
+        } catch (Exception e) {
+            log.warn("Chat 词表注入失败（按无词表继续），用户: {}, 原因: {}", userId, e.getMessage());
+        }
+
         // 对话历史最近 3 轮（6 条），时间正序
         List<ConversationHistory> recent = historyMapper.selectRecent(sessionId, userId, HISTORY_ROUNDS * 2);
         Collections.reverse(recent);
@@ -388,9 +402,16 @@ public class ChatServiceImpl implements ChatService {
         sessionMapper.updateById(patch);
     }
 
-    private MirrorChatProto.ExtractIntentResponse extractIntentSafely(UUID userId, String question) {
+    private MirrorChatProto.ExtractIntentResponse extractIntentSafely(UUID userId, String question,
+                                                                      List<CommonProto.GlossaryTerm> matchedTerms) {
         try {
-            return aiGrpcClient.extractIntent(userId, question);
+            MirrorChatProto.ExtractIntentResponse resp = aiGrpcClient.extractIntent(userId, question, matchedTerms);
+            // 生产防御：gRPC 正常返回但内容为空（不应发生，Python 契约必有 query_type）——
+            // 按 ExtractIntent 失败处理，走 fallback HYBRID，不让 null 打穿整条对话
+            if (resp == null) {
+                throw new IllegalStateException("ExtractIntent 返回为空");
+            }
+            return resp;
         } catch (Exception e) {
             log.warn("ExtractIntent 失败，回退 HYBRID，用户: {}，原因: {}", userId, e.getMessage());
             // 兜底响应必须带 rewritten_query=原问题（设计 9.2：改写失败兜底原文），
@@ -399,6 +420,19 @@ public class ChatServiceImpl implements ChatService {
                     .setQueryType("hybrid")
                     .setRewrittenQuery(question)
                     .build();
+        }
+    }
+
+    /**
+     * query 侧词表匹配（lexicon-design.md 第 4 节）：term/alias 命中 query → 只把命中的传 Python。
+     * 未命中返回空（AiGrpcClient 会以 top 高频词 grounding 兜底）。失败不阻断对话主流程。
+     */
+    private List<UserTermVO> matchQueryTermsSafely(UUID userId, String question) {
+        try {
+            return glossaryService.matchQueryTerms(userId, question);
+        } catch (Exception e) {
+            log.warn("词表 query 匹配失败（不影响对话），用户: {}, 原因: {}", userId, e.getMessage());
+            return List.of();
         }
     }
 

@@ -69,8 +69,10 @@ public class ClassifyProcessor implements RecordProcessor {
         log.info("ClassifyProcessor 开始处理，记录ID: {}, 内容长度: {}", record.getId(), content.length());
 
         try {
-            // 1. 调用 gRPC 分类服务
-            RecordProcessorProto.ClassifyResponse response = aiGrpcClient.classify(record.getUserId(), content);
+            // 1. 调用 gRPC 分类服务（携带 confirmed 个人词典，lexicon-design.md 第 4 节——
+            //    Classify 是最大增量注入点：错误在分类现场修最便宜）
+            RecordProcessorProto.ClassifyResponse response =
+                    aiGrpcClient.classify(record.getUserId(), content, true);
 
             // 2. 检查是否跳过
             if (response.getSkip()) {

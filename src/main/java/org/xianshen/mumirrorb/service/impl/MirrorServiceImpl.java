@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
+import org.xianshen.mumirrorb.grpc.GlossaryProtoMapper;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
@@ -17,6 +18,7 @@ import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
+import org.xianshen.mumirrorb.service.GlossaryService;
 import org.xianshen.mumirrorb.service.MirrorService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -59,6 +61,7 @@ public class MirrorServiceImpl implements MirrorService {
     private final ProfileStatsMapper statsMapper;
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
+    private final GlossaryService glossaryService;
 
     @Override
     @Transactional(readOnly = true)
@@ -144,7 +147,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 2. gRPC GenerateProfile（AiGrpcClient 内部补 llm_config）
         MirrorProfileProto.GenerateProfileResponse response =
-                aiGrpcClient.generateProfile(userId, buildRequest(stats, recentChats));
+                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats));
 
         // 3. 存快照
         ProfileSnapshot snapshot = ProfileSnapshot.builder()
@@ -312,6 +315,11 @@ public class MirrorServiceImpl implements MirrorService {
 
     /**
      * 定时生成 monthly 快照 + 清理（每月 1 号 02:00 Asia/Shanghai，设计文档 6.5）
+     *
+     * <p>顺路任务（lexicon-design.md 第 3 节）：月度画像后做个人词典维护——
+     * ① 词条合并（重复/矛盾词 aliases 合并建议 → pending 复核）
+     * ② 漂移审计（confirmed 解释 vs 近 30 天语料，不一致打回 pending + 新解释建议）。
+     * 维护失败只打日志，不影响月度画像主流程。</p>
      */
     @org.springframework.scheduling.annotation.Scheduled(cron = "0 0 2 1 * ?", zone = "Asia/Shanghai")
     public void monthlySnapshot() {
@@ -326,6 +334,8 @@ public class MirrorServiceImpl implements MirrorService {
                 // 单用户失败不影响其他用户
                 log.error("用户 {} 月度画像生成失败", userId, e);
             }
+            // 顺路：个人词典月度维护（合并建议 + 漂移审计，内部全量 try-catch）
+            glossaryService.monthlyMaintenance(userId);
         }
         log.info("============ 月度画像定时任务结束 ============");
     }
@@ -345,7 +355,7 @@ public class MirrorServiceImpl implements MirrorService {
         ProfileStatsDTO stats = collectStats(userId);
         List<Map<String, Object>> recentChats = statsMapper.selectRecentChats(userId, RECENT_CHATS_LIMIT);
         MirrorProfileProto.GenerateProfileResponse response =
-                aiGrpcClient.generateProfile(userId, buildRequest(stats, recentChats));
+                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats));
 
         ProfileSnapshot snapshot = ProfileSnapshot.builder()
                 .userId(userId)
@@ -452,6 +462,22 @@ public class MirrorServiceImpl implements MirrorService {
     }
 
     /**
+     * 组装 GenerateProfileRequest（llm_config 由 AiGrpcClient 补齐）+ 个人词典注入（第 4 节 top 30 全量）
+     */
+    private MirrorProfileProto.GenerateProfileRequest buildRequest(
+            UUID userId, ProfileStatsDTO stats, List<Map<String, Object>> recentChats) {
+        MirrorProfileProto.GenerateProfileRequest request = buildRequest(stats, recentChats);
+        try {
+            return request.toBuilder()
+                    .addAllGlossary(GlossaryProtoMapper.toProtoList(glossaryService.confirmedForInjection(userId)))
+                    .build();
+        } catch (Exception e) {
+            log.warn("GenerateProfile 词表注入失败（按无词表继续），用户: {}, 原因: {}", userId, e.getMessage());
+            return request;
+        }
+    }
+
+    /**
      * 组装 GenerateProfileRequest（llm_config 由 AiGrpcClient 补齐）
      */
     private MirrorProfileProto.GenerateProfileRequest buildRequest(
@@ -462,6 +488,9 @@ public class MirrorServiceImpl implements MirrorService {
                         .setTotalRecords(stats.getTotalRecords() == null ? 0 : stats.getTotalRecords())
                         .setTimeRange(stats.getTimeRange() == null ? "" : stats.getTimeRange());
 
+        // 个人词典注入（lexicon-design.md 第 4 节）：GenerateProfile 传 confirmed top 30 全量（软约束）
+        // userId 在 generate/generateMonthly 调用链上无法直接传入（stats 不含），经 ThreadLocal 上下文省略——
+        // 改为在 generate()/generateMonthly() 组装后补齐（见 buildRequest(userId, stats, recentChats) 重载）
         for (ProfileStatsDTO.TodoItemDTO t : stats.getTodos()) {
             builder.addTodos(MirrorProfileProto.TodoItem.newBuilder()
                     .setRecordId(t.getRecordId() == null ? 0 : t.getRecordId())
