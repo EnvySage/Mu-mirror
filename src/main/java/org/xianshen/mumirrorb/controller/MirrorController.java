@@ -25,6 +25,7 @@ import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
 import org.xianshen.mumirrorb.service.ChatService;
 import org.xianshen.mumirrorb.service.MirrorService;
 
@@ -116,6 +117,52 @@ public class MirrorController {
         int clamped = Math.max(7, Math.min(days, 90));
         UUID userId = getCurrentUserId();
         return R.ok("查询成功", mirrorService.stats(userId, clamped));
+    }
+
+    /**
+     * 快照历史列表（manual + monthly 合并全量，时间倒序，上限 14 = 2 + 12）
+     *
+     * <p>轻量 VO：id / snapshotType / createdAt / driftDistance / overallSummary（前 50 字截断）。
+     * driftDistance 仅 monthly 快照有值，manual 为 null（无对比基线）。</p>
+     */
+    @Operation(
+            summary = "快照历史列表",
+            description = "当前用户全量快照（manual+monthly 合并），按生成时间倒序，上限 14 份。" +
+                    "overallSummary 截断 50 字；driftDistance 仅 monthly 有值。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "查询成功",
+                    content = @Content(schema = @Schema(implementation = SnapshotListVO.class))),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
+    })
+    @GetMapping("/snapshots")
+    public R<List<SnapshotListVO>> snapshots() {
+        UUID userId = getCurrentUserId();
+        return R.ok("查询成功", mirrorService.listSnapshots(userId));
+    }
+
+    /**
+     * 单份完整快照（结构同 GET /api/mirror 的 MirrorProfileVO，含漂移信息）
+     *
+     * <p>归属校验：不存在或不属于当前用户一律返回 RECORD_NOT_FOUND（4041），
+     * 不区分两种情况以避免暴露他人快照存在性。</p>
+     */
+    @Operation(
+            summary = "快照详情",
+            description = "返回指定快照的完整画像（与最新画像同结构），含漂移信息。仅本人快照可查。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "查询成功",
+                    content = @Content(schema = @Schema(implementation = MirrorProfileVO.class))),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效"),
+            @ApiResponse(responseCode = "404", description = "快照不存在（含非本人快照）")
+    })
+    @GetMapping("/snapshots/{id}")
+    public R<MirrorProfileVO> snapshotDetail(
+            @Parameter(description = "快照ID", required = true, example = "5")
+            @PathVariable Long id) {
+        UUID userId = getCurrentUserId();
+        return R.ok("查询成功", mirrorService.getSnapshot(id, userId));
     }
 
     // ==================== 对话（设计文档 6.6，T-B-4） ====================

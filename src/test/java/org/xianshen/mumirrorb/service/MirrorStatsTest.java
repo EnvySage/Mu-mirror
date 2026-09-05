@@ -6,10 +6,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
+import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
+import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
 import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
 
 import java.time.LocalDate;
@@ -259,5 +263,117 @@ class MirrorStatsTest {
         LocalDate today = LocalDate.now(ZONE);
         OffsetDateTime expected = today.minusDays(29).atStartOfDay(ZONE).toOffsetDateTime();
         assertEquals(expected.toInstant(), captor.getValue().toInstant());
+    }
+
+    // ==================== 快照历史（GET /api/mirror/snapshots[/{id}]） ====================
+
+    private ProfileSnapshot snapshot(long id, String type, OffsetDateTime createdAt, String summary) {
+        return ProfileSnapshot.builder()
+                .id(id)
+                .userId(USER_ID)
+                .snapshotType(type)
+                .overallSummary(summary)
+                .createdAt(createdAt)
+                .build();
+    }
+
+    @Test
+    @DisplayName("快照列表：manual+monthly 合并倒序透传，monthly 算漂移、manual 漂移为 null")
+    void snapshots_list_mergedOrderAndDrift() {
+        OffsetDateTime now = OffsetDateTime.now(ZONE);
+        when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of(
+                snapshot(5, "manual", now, "最近的手动画像总结"),
+                snapshot(4, "monthly", now.minusDays(1), "月度画像总结"),
+                snapshot(3, "manual", now.minusDays(2), null)
+        ));
+        when(snapshotMapper.selectDriftDistance(4L)).thenReturn(0.12);
+
+        List<SnapshotListVO> list = mirrorService.listSnapshots(USER_ID);
+
+        assertEquals(3, list.size());
+        assertEquals(5L, list.get(0).getId());
+        assertEquals("manual", list.get(0).getSnapshotType());
+        assertEquals(now.toInstant(), list.get(0).getCreatedAt().toInstant());
+        assertEquals("最近的手动画像总结", list.get(0).getOverallSummary());
+        assertNull(list.get(0).getDriftDistance());
+
+        assertEquals(4L, list.get(1).getId());
+        assertEquals("monthly", list.get(1).getSnapshotType());
+        assertEquals(0.12, list.get(1).getDriftDistance());
+
+        assertNull(list.get(2).getOverallSummary()); // null summary 不截断不拼 ...
+        // manual 快照不触发漂移计算
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never()).selectDriftDistance(5L);
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never()).selectDriftDistance(3L);
+    }
+
+    @Test
+    @DisplayName("快照列表：overallSummary 超 50 字截断并追加 ...")
+    void snapshots_list_summaryTruncatedTo50() {
+        String longSummary = "字".repeat(80);
+        when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of(
+                snapshot(1, "manual", OffsetDateTime.now(ZONE), longSummary)
+        ));
+
+        SnapshotListVO vo = mirrorService.listSnapshots(USER_ID).get(0);
+
+        assertEquals(53, vo.getOverallSummary().length()); // 50 字 + "..."（3 个字符）
+        assertTrue(vo.getOverallSummary().endsWith("..."));
+        assertEquals("字".repeat(50) + "...", vo.getOverallSummary());
+    }
+
+    @Test
+    @DisplayName("快照列表：空数据返回空数组")
+    void snapshots_list_empty() {
+        when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of());
+
+        assertTrue(mirrorService.listSnapshots(USER_ID).isEmpty());
+    }
+
+    @Test
+    @DisplayName("快照详情：存在且属于本人 → 返回完整 VO（含漂移信息）")
+    void snapshot_detail_owned() {
+        ProfileSnapshot snap = snapshot(4, "monthly",
+                OffsetDateTime.now(ZONE), "月度画像");
+        snap.setUserTags(List.of("技术学习"));
+        when(snapshotMapper.selectById(4L)).thenReturn(snap);
+        when(snapshotMapper.selectDriftDistance(4L)).thenReturn(0.34);
+        when(snapshotMapper.selectList(any())).thenReturn(List.of()); // 无上一份 monthly
+
+        MirrorProfileVO vo = mirrorService.getSnapshot(4L, USER_ID);
+
+        assertEquals(4L, vo.getId());
+        assertEquals("monthly", vo.getSnapshotType());
+        assertEquals("月度画像", vo.getOverallSummary());
+        assertEquals(List.of("技术学习"), vo.getUserTags());
+        assertEquals(0.34, vo.getDriftDistance());
+        assertNull(vo.getDriftBaselineAt());
+    }
+
+    @Test
+    @DisplayName("快照详情：不存在 → RECORD_NOT_FOUND")
+    void snapshot_detail_missing() {
+        when(snapshotMapper.selectById(99L)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> mirrorService.getSnapshot(99L, USER_ID));
+        assertEquals(4041, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("快照详情：他人快照 → RECORD_NOT_FOUND（不区分存在性）")
+    void snapshot_detail_otherUser() {
+        UUID other = UUID.randomUUID();
+        when(snapshotMapper.selectById(7L)).thenReturn(ProfileSnapshot.builder()
+                .id(7L)
+                .userId(other)
+                .snapshotType("manual")
+                .overallSummary("别人的画像")
+                .createdAt(OffsetDateTime.now(ZONE))
+                .build());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> mirrorService.getSnapshot(7L, USER_ID));
+        assertEquals(4041, ex.getCode());
     }
 }

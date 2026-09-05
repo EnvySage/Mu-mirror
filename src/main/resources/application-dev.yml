@@ -44,4 +44,4 @@ grpc:
   client:
     ai-service:
       address: localhost:50051       # Python AI 服务地址
-      deadline-seconds: 30           # 默认超时（秒）
+      deadline-seconds: 60           # 默认超时（秒）

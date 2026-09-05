@@ -16,6 +16,7 @@ import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
 import org.xianshen.mumirrorb.service.MirrorService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -49,6 +50,10 @@ public class MirrorServiceImpl implements MirrorService {
     private static final int KEYWORD_TOP = 10;
     /** 待办明细最多条数（前端协议） */
     private static final int TODO_ITEMS_LIMIT = 10;
+    /** 快照历史列表条数上限（manual 保 2 + monthly 保 12，分层保留后全量） */
+    private static final int SNAPSHOT_HISTORY_LIMIT = 14;
+    /** 列表 overallSummary 截断长度（前端协议：前 50 字） */
+    private static final int SUMMARY_PREVIEW_LENGTH = 50;
 
     private final ProfileSnapshotMapper snapshotMapper;
     private final ProfileStatsMapper statsMapper;
@@ -67,6 +72,58 @@ public class MirrorServiceImpl implements MirrorService {
             return MirrorProfileVO.builder().build(); // 从未生成：空 VO，前端引导生成
         }
         return toVO(snapshot);
+    }
+
+    /**
+     * 快照历史列表（manual + monthly 合并全量，时间倒序，上限 14）
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<SnapshotListVO> listSnapshots(UUID userId) {
+        List<ProfileSnapshot> snapshots = snapshotMapper.selectAllByUser(userId);
+        List<SnapshotListVO> result = new ArrayList<>(snapshots.size());
+        for (ProfileSnapshot snapshot : snapshots) {
+            // driftDistance 仅 monthly 快照计算（与 toVO 口径一致），manual 无对比基线为 null
+            Double drift = "monthly".equals(snapshot.getSnapshotType())
+                    ? snapshotMapper.selectDriftDistance(snapshot.getId())
+                    : null;
+            result.add(SnapshotListVO.builder()
+                    .id(snapshot.getId())
+                    .snapshotType(snapshot.getSnapshotType())
+                    .createdAt(snapshot.getCreatedAt())
+                    .driftDistance(drift)
+                    .overallSummary(truncateSummary(snapshot.getOverallSummary()))
+                    .build());
+        }
+        log.debug("快照历史列表：用户 {} 返回 {} 份", userId, result.size());
+        return result;
+    }
+
+    /**
+     * 单份完整快照（归属校验 + 复用 toVO 组装，结构与 GET /api/mirror 一致）
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public MirrorProfileVO getSnapshot(Long snapshotId, UUID userId) {
+        ProfileSnapshot snapshot = snapshotMapper.selectById(snapshotId);
+        // 归属校验：不存在或不属于当前用户一律按 RECORD_NOT_FOUND 处理（不暴露他人快照存在性）
+        if (snapshot == null || !snapshot.getUserId().equals(userId)) {
+            log.warn("快照查询被拒：ID {}，用户 {}（不存在或非本人）", snapshotId, userId);
+            throw new BusinessException(ResultCode.RECORD_NOT_FOUND);
+        }
+        return toVO(snapshot);
+    }
+
+    /**
+     * overallSummary 前 50 字截断（超出追加 ...）
+     */
+    private static String truncateSummary(String summary) {
+        if (summary == null) {
+            return null;
+        }
+        return summary.length() <= SUMMARY_PREVIEW_LENGTH
+                ? summary
+                : summary.substring(0, SUMMARY_PREVIEW_LENGTH) + "...";
     }
 
     @Override

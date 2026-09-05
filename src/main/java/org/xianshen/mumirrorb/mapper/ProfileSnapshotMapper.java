@@ -49,6 +49,18 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
     }
 
     /**
+     * 指定用户全量快照（快照历史列表用，manual + monthly 合并，时间倒序）
+     *
+     * <p>上限 14 = manual 保 2 + monthly 保 12（分层保留后总量），无需分页。</p>
+     */
+    default List<ProfileSnapshot> selectAllByUser(java.util.UUID userId) {
+        return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .orderByDesc(ProfileSnapshot::getCreatedAt)
+                .last("LIMIT 14"));
+    }
+
+    /**
      * 漂移检测：本月快照 vs 上一份 monthly 快照的余弦距离（pgvector <=>）
      *
      * @return distance（0=完全相同，2=完全相反）；任一方 embedding 为 NULL 时返回 NULL

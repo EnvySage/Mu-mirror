@@ -1,5 +1,6 @@
 package org.xianshen.mumirrorb.pojo.VO;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
@@ -57,9 +58,11 @@ public class MirrorProfileVO {
      * 漂移参照：上一份 monthly 快照的创建时间
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "漂移参照快照时间")
     private OffsetDateTime driftBaselineAt;
 
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "快照生成时间")
     private OffsetDateTime createdAt;
 }
