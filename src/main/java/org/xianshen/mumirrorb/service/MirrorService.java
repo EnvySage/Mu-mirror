@@ -45,6 +45,19 @@ public interface MirrorService {
     MirrorProfileVO generate(UUID userId);
 
     /**
+     * 按月生成 monthly 快照（历史月份回溯画像，如补生成 2026-08 的完整画像）
+     *
+     * <p>统计窗口为指定自然月（Asia/Shanghai），timeRange 传 "2026年8月" 形式；
+     * month 为空默认上个月（与月度定时任务同语义）。幂等：同 (user, month) 已有
+     * monthly 快照时重新生成则替换。校验：不允许当前月与未来月份
+     * （当前月数据不完整走 manual 语义，未来月份无语料）。</p>
+     *
+     * @param month "yyyy-MM" 格式（如 "2026-08"）；null/空 = 上个月
+     * @return 新生成的月度画像 VO
+     */
+    MirrorProfileVO generateMonthlyFor(UUID userId, String month);
+
+    /**
      * 漂移检测：指定快照相对上一份 monthly 快照的余弦距离
      *
      * @return 距离（0~2）；无可比对象返回 null

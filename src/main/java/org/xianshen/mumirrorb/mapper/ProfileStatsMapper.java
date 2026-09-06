@@ -80,7 +80,11 @@ public interface ProfileStatsMapper {
     /**
      * 情绪分布（metadata.mood 数组展开计数）
      *
-     * @param since 起始时间（如最近 30 天）；可空表示不限
+     * <p>窗口 [since, until)：until 为开区间上界（按月统计截断用，如统计 8 月则 until=9/1 0 点）；
+     * 传 null 表示不限。manually 生成只传 since（until=null 等价于无上界）。</p>
+     *
+     * @param since 起始时间（含）；可空表示不限
+     * @param until 截止时间（不含）；可空表示不限
      */
     @Select("""
             <script>
@@ -94,18 +98,20 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY m.value
             ORDER BY count DESC
             </script>
             """)
     List<java.util.Map<String, Object>> selectMoodStats(@Param("userId") java.util.UUID userId,
-                                                        @Param("since") OffsetDateTime since);
+                                                        @Param("since") OffsetDateTime since,
+                                                        @Param("until") OffsetDateTime until);
 
     /**
      * 按日情绪聚合（镜子统计页堆叠色带数据源）
      *
      * <p>日期按 Asia/Shanghai 本地时区切分（全站口径）；只返回有数据的天，
-     * 缺失日期由 Service 层补零。</p>
+     * 缺失日期由 Service 层补零。窗口 [since, until)（until 可空=不限）。</p>
      */
     @Select("""
             <script>
@@ -120,18 +126,21 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1, 2
             ORDER BY 1
             </script>
             """)
     List<java.util.Map<String, Object>> selectMoodDaily(@Param("userId") java.util.UUID userId,
-                                                        @Param("since") OffsetDateTime since);
+                                                        @Param("since") OffsetDateTime since,
+                                                        @Param("until") OffsetDateTime until);
 
     /**
      * 按日记录数聚合（镜子统计页频率柱状图数据源，含无 chunk 的记录）
      *
      * <p>日期按 Asia/Shanghai 本地时区切分；只返回有记录的天，
-     * 缺失日期由 Service 层补零。排除 failed 记录（与日历 countByDay 口径一致）。</p>
+     * 缺失日期由 Service 层补零。排除 failed 记录（与日历 countByDay 口径一致）。
+     * 窗口 [since, until)（until 可空=不限）。</p>
      */
     @Select("""
             <script>
@@ -143,15 +152,17 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND r.status != 'failed'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
             ORDER BY 1
             </script>
             """)
     List<java.util.Map<String, Object>> selectRecordDaily(@Param("userId") java.util.UUID userId,
-                                                          @Param("since") OffsetDateTime since);
+                                                          @Param("since") OffsetDateTime since,
+                                                          @Param("until") OffsetDateTime until);
 
     /**
-     * 关键词频次（metadata.keywords 数组展开计数，取 Top N）
+     * 关键词频次（metadata.keywords 数组展开计数，取 Top N）。窗口 [since, until)（until 可空=不限）。
      */
     @Select("""
             <script>
@@ -165,6 +176,7 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY k.value
             ORDER BY count DESC
             LIMIT #{limit}
@@ -172,10 +184,11 @@ public interface ProfileStatsMapper {
             """)
     List<java.util.Map<String, Object>> selectKeywordStats(@Param("userId") java.util.UUID userId,
                                                            @Param("since") OffsetDateTime since,
+                                                           @Param("until") OffsetDateTime until,
                                                            @Param("limit") int limit);
 
     /**
-     * 活跃时段：小时分布（按 Asia/Shanghai 本地时间），供 rhythm 维度
+     * 活跃时段：小时分布（按 Asia/Shanghai 本地时间），供 rhythm 维度。窗口 [since, until)（until 可空=不限）。
      */
     @Select("""
             <script>
@@ -186,15 +199,17 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
             ORDER BY 1
             </script>
             """)
     List<java.util.Map<String, Object>> selectHourDistribution(@Param("userId") java.util.UUID userId,
-                                                               @Param("since") OffsetDateTime since);
+                                                               @Param("since") OffsetDateTime since,
+                                                               @Param("until") OffsetDateTime until);
 
     /**
-     * 活跃时段：星期分布（0=周日 … 6=周六，Asia/Shanghai）
+     * 活跃时段：星期分布（0=周日 … 6=周六，Asia/Shanghai）。窗口 [since, until)（until 可空=不限）。
      */
     @Select("""
             <script>
@@ -205,15 +220,17 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
             ORDER BY 1
             </script>
             """)
     List<java.util.Map<String, Object>> selectWeekdayDistribution(@Param("userId") java.util.UUID userId,
-                                                                  @Param("since") OffsetDateTime since);
+                                                                  @Param("since") OffsetDateTime since,
+                                                                  @Param("until") OffsetDateTime until);
 
     /**
-     * 统计范围内用户记录总数（含无 chunk 的记录）
+     * 统计范围内用户记录总数（含无 chunk 的记录）。窗口 [since, until)（until 可空=不限）。
      */
     @Select("""
             <script>
@@ -222,10 +239,12 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
             </script>
             """)
     long countUserRecords(@Param("userId") java.util.UUID userId,
-                          @Param("since") OffsetDateTime since);
+                          @Param("since") OffsetDateTime since,
+                          @Param("until") OffsetDateTime until);
 
     /**
      * 最近会话的对话（画像生成用 recent_chats：优先近 7 天，不足则前补，设计文档 6.5）

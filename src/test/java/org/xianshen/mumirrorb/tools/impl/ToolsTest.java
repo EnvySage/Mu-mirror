@@ -103,8 +103,8 @@ class ToolsTest {
     @Test
     @DisplayName("get_stats：记录数/情绪分布/待办剩余聚合")
     void getStats_aggregates() {
-        when(statsMapper.countUserRecords(any(), any())).thenReturn(12L);
-        when(statsMapper.selectMoodStats(any(), any())).thenReturn(List.of(
+        when(statsMapper.countUserRecords(any(), any(), any())).thenReturn(12L);
+        when(statsMapper.selectMoodStats(any(), any(), any())).thenReturn(List.of(
                 Map.of("mood", "satisfied", "count", 8),
                 Map.of("mood", "anxious", "count", 4)));
         when(statsMapper.selectTodoStatusCounts(USER_ID)).thenReturn(List.of(

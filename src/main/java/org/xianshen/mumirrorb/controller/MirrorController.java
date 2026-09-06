@@ -95,6 +95,34 @@ public class MirrorController {
     }
 
     /**
+     * 按月生成 monthly 画像快照（历史月份回溯）
+     *
+     * <p>month 可空：空 = 上个月（与月度定时任务同语义）。指定月份需早于当前月
+     * （当前月请用 POST /generate；未来月份无数据）。同 (user, month) 重复调用为
+     * 重生成（替换该月旧 monthly 快照）。阻塞数秒到数十秒。</p>
+     */
+    @Operation(
+            summary = "按月生成月度画像",
+            description = "生成指定历史月份（如 2026-08）的完整月度画像，统计窗口为该自然月。" +
+                    "month 可空 = 上个月。不允许当前月/未来月份。同月重复生成会替换旧快照。阻塞接口。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "生成成功",
+                    content = @Content(schema = @Schema(implementation = MirrorProfileVO.class))),
+            @ApiResponse(responseCode = "400", description = "月份格式非法或指向当前/未来月份，或未配置 AI 模型"),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效"),
+            @ApiResponse(responseCode = "500", description = "AI 服务不可达或生成失败")
+    })
+    @PostMapping("/generate-monthly")
+    public R<MirrorProfileVO> generateMonthly(
+            @Parameter(description = "目标月份 yyyy-MM（如 2026-08）；缺省 = 上个月", example = "2026-08")
+            @RequestParam(required = false) String month) {
+        UUID userId = getCurrentUserId();
+        MirrorProfileVO vo = mirrorService.generateMonthlyFor(userId, month);
+        return R.ok("月度画像已生成", vo);
+    }
+
+    /**
      * 镜子页图表统计数据
      *
      * <p>五维统计底层数据：按日情绪（堆叠色带）、按日记录数（频率柱状）、

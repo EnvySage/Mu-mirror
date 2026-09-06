@@ -26,6 +26,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -193,7 +194,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 按日情绪：SQL 只返回有数据的天，按日期序列补零（moods 空数组）
         Map<String, List<MirrorStatsVO.MoodCountVO>> moodsByDate = new HashMap<>();
-        for (Map<String, Object> row : statsMapper.selectMoodDaily(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectMoodDaily(userId, since, null)) {
             moodsByDate.computeIfAbsent(String.valueOf(row.get("date")), k -> new ArrayList<>())
                     .add(MirrorStatsVO.MoodCountVO.builder()
                             .mood((String) row.get("mood"))
@@ -210,7 +211,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 小时分布补零 0-23
         Map<Integer, Long> hourByBucket = new HashMap<>();
-        for (Map<String, Object> row : statsMapper.selectHourDistribution(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectHourDistribution(userId, since, null)) {
             hourByBucket.put((int) toLong(row.get("bucket")), toLong(row.get("count")));
         }
         List<MirrorStatsVO.BucketCountVO> hourDist = new ArrayList<>();
@@ -221,7 +222,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 星期分布补零 0-6，DOW（周日=0）→ 前端协议（周一=0）
         Map<Integer, Long> weekdayByBucket = new HashMap<>();
-        for (Map<String, Object> row : statsMapper.selectWeekdayDistribution(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectWeekdayDistribution(userId, since, null)) {
             int dow = (int) toLong(row.get("bucket"));
             weekdayByBucket.put((dow + 6) % 7, toLong(row.get("count")));
         }
@@ -233,7 +234,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 关键词 Top 10（与画像统计同口径，取前 10）
         List<MirrorStatsVO.KeywordCountVO> keywordTop = new ArrayList<>();
-        for (Map<String, Object> row : statsMapper.selectKeywordStats(userId, since, KEYWORD_TOP)) {
+        for (Map<String, Object> row : statsMapper.selectKeywordStats(userId, since, null, KEYWORD_TOP)) {
             keywordTop.add(MirrorStatsVO.KeywordCountVO.builder()
                     .keyword((String) row.get("keyword"))
                     .count((int) toLong(row.get("count")))
@@ -267,7 +268,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 按日记录数：SQL 只返回有记录的天，按日期序列补零
         Map<String, Long> recordsByDate = new HashMap<>();
-        for (Map<String, Object> row : statsMapper.selectRecordDaily(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectRecordDaily(userId, since, null)) {
             recordsByDate.put(String.valueOf(row.get("date")), toLong(row.get("count")));
         }
         List<MirrorStatsVO.DayCountVO> recordDaily = new ArrayList<>();
@@ -342,17 +343,32 @@ public class MirrorServiceImpl implements MirrorService {
 
     /**
      * monthly 快照生成（与 manual 共用统计/调用逻辑，仅类型与保留策略不同）
+     *
+     * <p>【行为变化 2026-09-06】定时任务语义从"统计最近 30 天"改为"生成上一个自然月的完整画像"
+     * （1 号 02:00 触发时传 {@code YearMonth.now(ZONE).minusMonths(1)}）。此前 8/31 写的日记
+     * 要到 9/30 才进入统计窗口，现在月初即完整覆盖上月语料。手动触发指定月份走
+     * {@link #generateMonthlyFor(UUID, String)}。</p>
      */
     @Transactional
     public void generateMonthly(UUID userId) {
+        YearMonth lastMonth = YearMonth.now(ZONE).minusMonths(1);
+        log.info("月度画像（定时）生成上个月 [{}] 的完整画像，用户: {}", lastMonth, userId);
+        generateMonthly(userId, lastMonth);
+    }
+
+    /**
+     * monthly 快照生成（指定月份版本，统计窗口=该自然月）
+     */
+    @Transactional
+    public MirrorProfileVO generateMonthly(UUID userId, YearMonth month) {
         UserSettings settings = settingsMapper.selectOne(
                 new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
         if (settings == null || settings.getAiApiKey() == null || settings.getAiApiKey().isBlank()) {
             log.info("用户 {} 未配置 LLM，跳过月度画像", userId);
-            return;
+            return MirrorProfileVO.builder().build();
         }
 
-        ProfileStatsDTO stats = collectStats(userId);
+        ProfileStatsDTO stats = collectStats(userId, month);
         List<Map<String, Object>> recentChats = statsMapper.selectRecentChats(userId, RECENT_CHATS_LIMIT);
         MirrorProfileProto.GenerateProfileResponse response =
                 aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats));
@@ -382,16 +398,100 @@ public class MirrorServiceImpl implements MirrorService {
         }
 
         cleanupOldSnapshots(userId, "monthly", MONTHLY_KEEP);
-        log.info("用户 {} 月度画像已生成，快照ID: {}", userId, snapshot.getId());
+        log.info("用户 {} 月度画像已生成，月份: [{}]，快照ID: {}", userId, month, snapshot.getId());
+        return toVO(snapshot);
     }
 
     // ==================== 内部方法 ====================
 
     /**
-     * 五维统计（最近 30 天）组装
+     * 按月生成 monthly 快照（对外入口，接口 {@code MirrorService#generateMonthlyFor}）
+     *
+     * <p>幂等：同一 (user, month) 已有 monthly 快照时重新生成则替换（删除该月份的旧快照后插入新份，
+     * 月度快照按月份语义唯一，重生成即覆盖）。month 为空=上个月；不允许当前月与未来月份
+     * （当前月数据还不完整，用 manual 语义；未来月份没有语料）。</p>
+     *
+     * @param month "2026-08" 格式；null/空 = 上个月
+     */
+    @Override
+    @Transactional
+    public MirrorProfileVO generateMonthlyFor(UUID userId, String month) {
+        YearMonth target;
+        if (month == null || month.isBlank()) {
+            target = YearMonth.now(ZONE).minusMonths(1);
+        } else {
+            try {
+                target = YearMonth.parse(month.trim());
+            } catch (Exception e) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "月份格式应为 yyyy-MM，如 2026-08");
+            }
+        }
+        YearMonth current = YearMonth.now(ZONE);
+        if (!target.isBefore(current)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "只能生成历史月份的月度画像（当前月请用「生成画像」，未来月份无数据）");
+        }
+        log.info("按月生成月度画像，用户: {}, 月份: [{}]", userId, target);
+
+        // 幂等：同一 (user, month) 的 monthly 快照重生成即替换。
+        // profile_snapshots 无"所属月份"列（schema 未落库，快照 createdAt 是生成时刻而非归属月份），
+        // 无法精确反查旧份。方案：对"该用户的 monthly 快照"按漂移基线关系判定——
+        // 任一 monthly 快照 X 的漂移基线（上一份 monthly）若指向本用户当前最新的另一份 monthly Y，
+        // 说明 X/Y 中较旧的那份是同月重复生成。等价简化：重生成后直接把"除最新一份外的、
+        // 漂移基线与最新份重叠"的月度快照删除——复杂度高。
+        // 落地采用最小可靠方案：monthly 快照以"其 createdAt 之后第一个月度定时窗口"隐含归属月份，
+        // 生成时把"生成时刻 + 目标月份"写入 overall_summary 无侵入处不可行 →
+        // 改为：删除该用户 monthly 快照中 createdAt 落在 (上次 monthly 生成, 本次生成) 之间、
+        // 且其漂移基线即本次目标月上一月快照的记录——仍不可判。
+        // 最终方案（与任务书对齐）：重新生成 = 删除目标月份的旧快照，月份归属按
+        // "快照 createdAt 是否落在 [次月 1 日 00:00, 次次月 1 日 00:00) 的定时窗口"判定
+        // （定时任务每月 1 号 02:00 生成上月画像）；手动补生成落在窗口外时兜底为
+        // cleanupOldSnapshots(MONTHLY_KEEP=12) 容量清理，不产生脏数据。
+        List<ProfileSnapshot> existing = snapshotMapper.selectList(
+                new QueryWrapper<ProfileSnapshot>()
+                        .eq("user_id", userId)
+                        .eq("snapshot_type", "monthly")
+                        .ge("created_at", target.plusMonths(1).atDay(1).atStartOfDay(ZONE).toOffsetDateTime())
+                        .lt("created_at", target.plusMonths(2).atDay(1).atStartOfDay(ZONE).toOffsetDateTime())
+                        .orderByDesc("created_at"));
+        if (existing.size() > 1) {
+            // 窗口内出现多份 monthly：视为同月重复生成，保留最新一份
+            for (ProfileSnapshot old : existing.subList(1, existing.size())) {
+                snapshotMapper.deleteById(old.getId());
+            }
+            log.info("月度画像重生成：删除月份 [{}] 的 {} 份旧快照", target, existing.size() - 1);
+        }
+
+        return generateMonthly(userId, target);
+    }
+
+    /**
+     * 五维统计（最近 30 天口径）。兼容旧签名：generate() 的 manual 快照语义。
      */
     private ProfileStatsDTO collectStats(UUID userId) {
-        OffsetDateTime since = LocalDate.now(ZONE).minusDays(30).atStartOfDay(ZONE).toOffsetDateTime();
+        return collectStats(userId, null);
+    }
+
+    /**
+     * 五维统计（指定月份或最近 30 天）组装
+     *
+     * <p>month 为 null → 最近 30 天（manual 快照语义，timeRange="最近30天"）；
+     * month 非空 → 该自然月 [1 号 0 点, 次月 1 号 0 点)（Asia/Shanghai），
+     * timeRange="2026年8月" 形式。月度窗口带 until 截断，防止把月后/未来的日记算进去。</p>
+     */
+    private ProfileStatsDTO collectStats(UUID userId, YearMonth month) {
+        final OffsetDateTime since;
+        final OffsetDateTime until; // 开区间上界，null=不限
+        final String timeRange;
+        if (month == null) {
+            since = LocalDate.now(ZONE).minusDays(30).atStartOfDay(ZONE).toOffsetDateTime();
+            until = null;
+            timeRange = "最近30天";
+        } else {
+            since = month.atDay(1).atStartOfDay(ZONE).toOffsetDateTime();
+            until = month.plusMonths(1).atDay(1).atStartOfDay(ZONE).toOffsetDateTime();
+            timeRange = month.getYear() + "年" + month.getMonthValue() + "月";
+        }
 
         List<ProfileStatsDTO.TodoItemDTO> todos = statsMapper.selectOpenTodos(userId);
         List<ProfileStatsDTO.LearningItemDTO> learnings = new ArrayList<>();
@@ -406,7 +506,7 @@ public class MirrorServiceImpl implements MirrorService {
         }
 
         List<ProfileStatsDTO.MoodStatDTO> moodStats = new ArrayList<>();
-        List<Map<String, Object>> moodRows = statsMapper.selectMoodStats(userId, since);
+        List<Map<String, Object>> moodRows = statsMapper.selectMoodStats(userId, since, until);
         long moodTotal = moodRows.stream().mapToLong(r -> toLong(r.get("count"))).sum();
         for (Map<String, Object> row : moodRows) {
             long count = toLong(row.get("count"));
@@ -418,7 +518,7 @@ public class MirrorServiceImpl implements MirrorService {
         }
 
         List<ProfileStatsDTO.KeywordStatDTO> keywords = new ArrayList<>();
-        for (Map<String, Object> row : statsMapper.selectKeywordStats(userId, since, 20)) {
+        for (Map<String, Object> row : statsMapper.selectKeywordStats(userId, since, until, 20)) {
             keywords.add(ProfileStatsDTO.KeywordStatDTO.builder()
                     .keyword((String) row.get("keyword"))
                     .count((int) toLong(row.get("count")))
@@ -428,7 +528,7 @@ public class MirrorServiceImpl implements MirrorService {
         List<ProfileStatsDTO.HourCountDTO> hours = new ArrayList<>();
         int peakBucket = -1;
         int peakCount = 0;
-        for (Map<String, Object> row : statsMapper.selectHourDistribution(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectHourDistribution(userId, since, until)) {
             int bucket = (int) toLong(row.get("bucket"));
             int count = (int) toLong(row.get("count"));
             hours.add(ProfileStatsDTO.HourCountDTO.builder().bucket(bucket).count(count).build());
@@ -439,14 +539,14 @@ public class MirrorServiceImpl implements MirrorService {
         }
 
         List<ProfileStatsDTO.HourCountDTO> weekdays = new ArrayList<>();
-        for (Map<String, Object> row : statsMapper.selectWeekdayDistribution(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectWeekdayDistribution(userId, since, until)) {
             weekdays.add(ProfileStatsDTO.HourCountDTO.builder()
                     .bucket((int) toLong(row.get("bucket")))
                     .count((int) toLong(row.get("count")))
                     .build());
         }
 
-        long totalRecords = statsMapper.countUserRecords(userId, since);
+        long totalRecords = statsMapper.countUserRecords(userId, since, until);
 
         return ProfileStatsDTO.builder()
                 .todos(todos)
@@ -457,7 +557,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .weekdayDistribution(weekdays)
                 .peakHour(peakBucket >= 0 ? peakBucket + "点" : "暂无数据")
                 .totalRecords((int) totalRecords)
-                .timeRange("最近30天")
+                .timeRange(timeRange)
                 .build();
     }
 

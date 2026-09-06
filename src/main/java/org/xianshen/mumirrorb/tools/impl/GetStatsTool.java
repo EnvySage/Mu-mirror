@@ -42,9 +42,9 @@ public class GetStatsTool implements ToolExecutor {
         int days = SearchRecordsTool.intOf(args.get("days"), 30);
         OffsetDateTime since = LocalDate.now(ZONE).minusDays(days).atStartOfDay(ZONE).toOffsetDateTime();
 
-        long recordCount = statsMapper.countUserRecords(userId, since);
+        long recordCount = statsMapper.countUserRecords(userId, since, null);
         Map<String, Long> moods = new LinkedHashMap<>();
-        for (Map<String, Object> row : statsMapper.selectMoodStats(userId, since)) {
+        for (Map<String, Object> row : statsMapper.selectMoodStats(userId, since, null)) {
             moods.put(String.valueOf(row.get("mood")), (long) SearchRecordsTool.intOf(row.get("count"), 0));
         }
         int totalTodos = 0;

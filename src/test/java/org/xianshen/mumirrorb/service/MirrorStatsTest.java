@@ -18,6 +18,7 @@ import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -72,11 +73,11 @@ class MirrorStatsTest {
 
     /** 打桩：所有统计 SQL 返回空（默认全零窗口） */
     private void stubEmpty() {
-        lenient().when(statsMapper.selectMoodDaily(eq(USER_ID), any())).thenReturn(List.of());
-        lenient().when(statsMapper.selectRecordDaily(eq(USER_ID), any())).thenReturn(List.of());
-        lenient().when(statsMapper.selectHourDistribution(eq(USER_ID), any())).thenReturn(List.of());
-        lenient().when(statsMapper.selectWeekdayDistribution(eq(USER_ID), any())).thenReturn(List.of());
-        lenient().when(statsMapper.selectKeywordStats(eq(USER_ID), any(), eq(10))).thenReturn(List.of());
+        lenient().when(statsMapper.selectMoodDaily(eq(USER_ID), any(), any())).thenReturn(List.of());
+        lenient().when(statsMapper.selectRecordDaily(eq(USER_ID), any(), any())).thenReturn(List.of());
+        lenient().when(statsMapper.selectHourDistribution(eq(USER_ID), any(), any())).thenReturn(List.of());
+        lenient().when(statsMapper.selectWeekdayDistribution(eq(USER_ID), any(), any())).thenReturn(List.of());
+        lenient().when(statsMapper.selectKeywordStats(eq(USER_ID), any(), any(), eq(10))).thenReturn(List.of());
         lenient().when(statsMapper.selectTodoStatusCounts(USER_ID)).thenReturn(List.of());
         lenient().when(statsMapper.selectOpenTodos(USER_ID)).thenReturn(List.of());
     }
@@ -123,7 +124,7 @@ class MirrorStatsTest {
     void stats_weekday_dowToMondayZero() {
         stubEmpty();
         // DOW: 周一=1 count 5；周日=0 count 2；周六=6 count 3
-        when(statsMapper.selectWeekdayDistribution(eq(USER_ID), any())).thenReturn(List.of(
+        when(statsMapper.selectWeekdayDistribution(eq(USER_ID), any(), any())).thenReturn(List.of(
                 row("bucket", 1, "count", 5L),
                 row("bucket", 0, "count", 2L),
                 row("bucket", 6, "count", 3L)
@@ -147,7 +148,7 @@ class MirrorStatsTest {
     @DisplayName("hourDist 补零：SQL 只回 3 个桶时仍出全 24 格，命中桶计数正确")
     void stats_hourDist_zeroFilled24() {
         stubEmpty();
-        when(statsMapper.selectHourDistribution(eq(USER_ID), any())).thenReturn(List.of(
+        when(statsMapper.selectHourDistribution(eq(USER_ID), any(), any())).thenReturn(List.of(
                 row("bucket", 2, "count", 65L),
                 row("bucket", 4, "count", 2L),
                 row("bucket", 23, "count", 1L)
@@ -170,7 +171,7 @@ class MirrorStatsTest {
         LocalDate today = LocalDate.now(ZONE);
         String todayStr = today.toString();
         String yesterdayStr = today.minusDays(1).toString();
-        when(statsMapper.selectMoodDaily(eq(USER_ID), any())).thenReturn(List.of(
+        when(statsMapper.selectMoodDaily(eq(USER_ID), any(), any())).thenReturn(List.of(
                 row("date", todayStr, "mood", "satisfied", "count", 3L),
                 row("date", todayStr, "mood", "anxious", "count", 1L),
                 row("date", yesterdayStr, "mood", "calm", "count", 2L)
@@ -192,7 +193,7 @@ class MirrorStatsTest {
     void stats_recordDaily_byDate() {
         stubEmpty();
         LocalDate today = LocalDate.now(ZONE);
-        when(statsMapper.selectRecordDaily(eq(USER_ID), any())).thenReturn(List.of(
+        when(statsMapper.selectRecordDaily(eq(USER_ID), any(), any())).thenReturn(List.of(
                 row("date", today.minusDays(1).toString(), "count", 4L),
                 row("date", today.toString(), "count", 2L)
         ));
@@ -239,7 +240,7 @@ class MirrorStatsTest {
     @DisplayName("keywordTop：SQL limit 10，透传 keyword/count")
     void stats_keywordTop() {
         stubEmpty();
-        when(statsMapper.selectKeywordStats(eq(USER_ID), any(), eq(10))).thenReturn(List.of(
+        when(statsMapper.selectKeywordStats(eq(USER_ID), any(), any(), eq(10))).thenReturn(List.of(
                 row("keyword", "Three.js", "count", 12L),
                 row("keyword", "Spring Boot", "count", 8L)
         ));
@@ -258,11 +259,74 @@ class MirrorStatsTest {
 
         org.mockito.ArgumentCaptor<OffsetDateTime> captor =
                 org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
-        org.mockito.Mockito.verify(statsMapper).selectMoodDaily(eq(USER_ID), captor.capture());
+        org.mockito.Mockito.verify(statsMapper).selectMoodDaily(eq(USER_ID), captor.capture(), eq(null));
 
         LocalDate today = LocalDate.now(ZONE);
         OffsetDateTime expected = today.minusDays(29).atStartOfDay(ZONE).toOffsetDateTime();
         assertEquals(expected.toInstant(), captor.getValue().toInstant());
+    }
+
+    // ==================== 按月统计窗口（generateMonthlyFor，T-DB-9 任务 2） ====================
+
+    /**
+     * 打桩：8 月窗口用例（selectOpenTodos/selectRecentLearningsRaw/selectRecentChats 无时间参数）
+     */
+    private void stubMonthlyWindow() {
+        stubEmpty();
+        lenient().when(statsMapper.selectRecentLearningsRaw(USER_ID)).thenReturn(List.of());
+        lenient().when(statsMapper.selectRecentChats(eq(USER_ID), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(List.of());
+        lenient().when(settingsMapper.selectOne(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new org.xianshen.mumirrorb.pojo.DO.UserSettings());
+    }
+
+    @Test
+    @DisplayName("按月窗口：8 月统计只带 8/1 0 点 ~ 9/1 0 点（Asia/Shanghai）的 since/until")
+    void collectStats_monthWindow_sinceUntil() {
+        stubMonthlyWindow();
+
+        // 经 generateMonthlyFor 的私有链路不可直接调用，这里用反射调 collectStats(userId, month)
+        YearMonth aug = YearMonth.of(2026, 8);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                mirrorService, "collectStats", USER_ID, aug);
+
+        OffsetDateTime expectSince = LocalDate.of(2026, 8, 1).atStartOfDay(ZONE).toOffsetDateTime();
+        OffsetDateTime expectUntil = LocalDate.of(2026, 9, 1).atStartOfDay(ZONE).toOffsetDateTime();
+
+        org.mockito.ArgumentCaptor<OffsetDateTime> sinceCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.ArgumentCaptor<OffsetDateTime> untilCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.Mockito.verify(statsMapper).selectMoodStats(eq(USER_ID), sinceCap.capture(), untilCap.capture());
+        assertEquals(expectSince.toInstant(), sinceCap.getValue().toInstant());
+        assertEquals(expectUntil.toInstant(), untilCap.getValue().toInstant());
+
+        org.mockito.Mockito.verify(statsMapper).selectKeywordStats(eq(USER_ID),
+                org.mockito.ArgumentMatchers.<OffsetDateTime>argThat(a -> a.toInstant().equals(expectSince.toInstant())),
+                org.mockito.ArgumentMatchers.<OffsetDateTime>argThat(b -> b.toInstant().equals(expectUntil.toInstant())),
+                eq(20));
+        org.mockito.Mockito.verify(statsMapper).countUserRecords(eq(USER_ID),
+                org.mockito.ArgumentMatchers.<OffsetDateTime>argThat(a -> a.toInstant().equals(expectSince.toInstant())),
+                org.mockito.ArgumentMatchers.<OffsetDateTime>argThat(b -> b.toInstant().equals(expectUntil.toInstant())));
+    }
+
+    @Test
+    @DisplayName("默认窗口（manual 语义）：since=30 天前 0 点，until 不限（null）")
+    void collectStats_defaultWindow_noUntil() {
+        stubMonthlyWindow();
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                mirrorService, "collectStats", USER_ID, YearMonth.class.cast(null));
+
+        LocalDate today = LocalDate.now(ZONE);
+        OffsetDateTime expectSince = today.minusDays(30).atStartOfDay(ZONE).toOffsetDateTime();
+        org.mockito.ArgumentCaptor<OffsetDateTime> sinceCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.ArgumentCaptor<OffsetDateTime> untilCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.Mockito.verify(statsMapper).selectMoodStats(eq(USER_ID), sinceCap.capture(), untilCap.capture());
+        assertEquals(expectSince.toInstant(), sinceCap.getValue().toInstant());
+        assertNull(untilCap.getValue());
     }
 
     // ==================== 快照历史（GET /api/mirror/snapshots[/{id}]） ====================
