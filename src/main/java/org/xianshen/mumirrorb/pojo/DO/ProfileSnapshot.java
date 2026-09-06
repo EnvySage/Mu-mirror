@@ -46,6 +46,12 @@ public class ProfileSnapshot {
     @Schema(description = "快照类型", example = "manual", allowableValues = {"manual", "monthly"})
     private String snapshotType;
 
+    /**
+     * monthly 快照归属月份 yyyy-MM（rolling-mirror-design.md §4-B；幂等判断精确列，manual 为 NULL）
+     */
+    @Schema(description = "monthly 归属月份", example = "2026-08")
+    private String periodMonth;
+
     @Schema(description = "情绪维度分析")
     private String moodAnalysis;
 

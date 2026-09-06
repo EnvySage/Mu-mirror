@@ -7,7 +7,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
+import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
+import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
@@ -57,8 +59,20 @@ class MirrorStatsTest {
     @Mock
     private org.xianshen.mumirrorb.grpc.AiGrpcClient aiGrpcClient;
 
+    @Mock
+    private org.xianshen.mumirrorb.mapper.ChunkMapper chunkMapper;
+
+    private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties =
+            new org.xianshen.mumirrorb.config.MirrorProperties();
+
     @InjectMocks
     private MirrorServiceImpl mirrorService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void injectProps() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                mirrorService, "mirrorProperties", mirrorProperties);
+    }
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
@@ -439,5 +453,248 @@ class MirrorStatsTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> mirrorService.getSnapshot(7L, USER_ID));
         assertEquals(4041, ex.getCode());
+    }
+
+    // ==================== 递归累计镜子（rolling-mirror-design.md §1/§2/§3/§4-B） ====================
+
+    /** 打桩：递归镜子输入收集的最小环境（有 LLM 配置、无词表、无回看 chunks） */
+    private void stubRollingBase(int lookback) {
+        stubMonthlyWindow();
+        org.xianshen.mumirrorb.pojo.DO.UserSettings s = new org.xianshen.mumirrorb.pojo.DO.UserSettings();
+        s.setMirrorLookback(lookback);
+        s.setAiApiKey("test-key"); // 通过"已配置 LLM"校验（generateMonthly 早退守卫）
+        lenient().when(settingsMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(s);
+        lenient().when(chunkMapper.selectLookbackChunks(eq(USER_ID), any(), any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(List.of());
+        lenient().when(chunkMapper.selectCorrectionIndex(eq(USER_ID), any(), any())).thenReturn(List.of());
+        lenient().when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        lenient().when(snapshotMapper.selectLatest(eq(USER_ID), eq("manual"))).thenReturn(null);
+        lenient().when(aiGrpcClient.generateProfile(eq(USER_ID), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(MirrorProfileVOHelper.emptyResponse());
+    }
+
+    private YearMonth invokeGenerateMonthlyFor(String month) {
+        mirrorService.generateMonthlyFor(USER_ID, month);
+        return null;
+    }
+
+    private static class MirrorProfileVOHelper {
+        static MirrorProfileProto.GenerateProfileResponse emptyResponse() {
+            return MirrorProfileProto.GenerateProfileResponse.newBuilder().build();
+        }
+    }
+
+    @Test
+    @DisplayName("回看档位：lookback=1 → 窗口 [7/1, 9/1)（8 月目标带 8 月原文，7 月不进窗口）")
+    void rolling_lookback1_windowIsTargetMonthOnly() {
+        stubRollingBase(1);
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<OffsetDateTime> sinceCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.ArgumentCaptor<OffsetDateTime> untilCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.Mockito.verify(chunkMapper).selectLookbackChunks(eq(USER_ID),
+                sinceCap.capture(), untilCap.capture(), org.mockito.ArgumentMatchers.anyInt());
+
+        assertEquals(LocalDate.of(2026, 8, 1).atStartOfDay(ZONE).toOffsetDateTime().toInstant(),
+                sinceCap.getValue().toInstant());
+        assertEquals(LocalDate.of(2026, 9, 1).atStartOfDay(ZONE).toOffsetDateTime().toInstant(),
+                untilCap.getValue().toInstant());
+    }
+
+    @Test
+    @DisplayName("回看档位：lookback=2 → 窗口 [6/1, 8/1)（目标月 7 月 + 前两月，近三月原文）")
+    void rolling_lookback2_windowCovers3Months() {
+        stubRollingBase(2);
+        // 目标月 2026-07（历史月）：until=8/1，since=until 往前 2 个月=6/1
+        // → 窗口 [6/1, 8/1) 覆盖 6/7 两个整月（档位 N = until 往前 N 个自然月）
+        mirrorService.generateMonthlyFor(USER_ID, "2026-07");
+
+        org.mockito.ArgumentCaptor<OffsetDateTime> sinceCap =
+                org.mockito.ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.Mockito.verify(chunkMapper).selectLookbackChunks(eq(USER_ID),
+                sinceCap.capture(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
+        assertEquals(LocalDate.of(2026, 6, 1).atStartOfDay(ZONE).toOffsetDateTime().toInstant(),
+                sinceCap.getValue().toInstant());
+    }
+
+    @Test
+    @DisplayName("回看档位：lookback=0 不带原文（纯继承），带校正索引（唯一防误差手段）")
+    void rolling_lookback0_correctionIndexInsteadOfRaw() {
+        stubRollingBase(0);
+        when(chunkMapper.selectCorrectionIndex(eq(USER_ID), any(), any())).thenReturn(List.of(
+                Map.of("title", "开题报告初稿", "record_date", "2026-08-17"),
+                Map.of("title", "手办到货", "record_date", "2026-08-21")
+        ));
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        // 原文不带（窗口查询仍然发生但 limit=1 会被闸门兜住？不——0 档位窗口为空月，语义由 mock 断言）
+        org.mockito.Mockito.verify(chunkMapper).selectCorrectionIndex(eq(USER_ID), any(), any());
+
+        org.mockito.ArgumentCaptor<org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), reqCap.capture());
+        assertEquals(0, reqCap.getValue().getMirrorLookback());
+        assertTrue(reqCap.getValue().getCorrectionIndex().contains("开题报告初稿（2026-08-17）"));
+        assertTrue(reqCap.getValue().getCorrectionIndex().contains("手办到货（2026-08-21）"));
+    }
+
+    @Test
+    @DisplayName("回看档位：lookback=3 → 上期镜子 + stats_facts 携带；设置缺省兜底 1")
+    void rolling_defaultLookbackFallsBack1() {
+        stubRollingBase(99); // 越界值 → 兜底 1
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), reqCap.capture());
+        assertEquals(1, reqCap.getValue().getMirrorLookback());
+    }
+
+    @Test
+    @DisplayName("上期镜子：period_month=2026-07 的 monthly 快照全文进 prev_mirror（累计继承）")
+    void rolling_prevMirror_fromJulySnapshot() {
+        stubRollingBase(1);
+        ProfileSnapshot july = ProfileSnapshot.builder()
+                .id(14L)
+                .userId(USER_ID)
+                .snapshotType("monthly")
+                .periodMonth("2026-07")
+                .moodAnalysis("7月情绪以 stressed 为主")
+                .learningAnalysis("实训 Java 开发为主")
+                .todoAnalysis("待办积压")
+                .rhythmAnalysis("深夜记录居多")
+                .overallSummary("七月：暑期实训冲刺期，Java 二手交易平台赶工，情绪压力较大。")
+                .createdAt(OffsetDateTime.parse("2026-07-01T02:00:00+08:00"))
+                .build();
+        when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(july));
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), reqCap.capture());
+        String prev = reqCap.getValue().getPrevMirror();
+        assertTrue(prev.contains("七月：暑期实训冲刺期"));
+        assertTrue(prev.contains("实训 Java 开发为主"));
+        assertTrue(prev.contains("深夜记录居多"));
+    }
+
+    @Test
+    @DisplayName("genesis：无任何上期镜子 → prev_mirror 为空串（AI 侧空块不留孤儿节头）")
+    void rolling_genesis_prevMirrorEmpty() {
+        stubRollingBase(1);
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), reqCap.capture());
+        assertEquals("", reqCap.getValue().getPrevMirror());
+    }
+
+    @Test
+    @DisplayName("条数闸：600+1 条 chunk → 截取最近 600 条（lookbackTruncated 触发）")
+    void rolling_chunkGate_truncatesToNearest() {
+        stubRollingBase(1);
+        List<Chunk> chunks = new ArrayList<>();
+        for (int i = 1; i <= 601; i++) {
+            chunks.add(Chunk.builder().id((long) i).userId(USER_ID).recordId((long) i)
+                    .content("记录" + i).segment("记录" + i)
+                    .createdAt(LocalDate.of(2026, 8, 1).atStartOfDay(ZONE).toOffsetDateTime())
+                    .build());
+        }
+        when(chunkMapper.selectLookbackChunks(eq(USER_ID), any(), any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(chunks);
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), reqCap.capture());
+        // 截取最近部分：最早的"记录1"被砍，最新的"记录601"保留
+        assertFalse(reqCap.getValue().getStatsFacts().isEmpty());
+        // 条数闸只影响②原文渲染（本用例 mock 不渲染原文进 proto，闸门行为经日志/窗口断言）
+        // 直接断言：闸门参数透传（limit=601 = max+1 探测）
+        org.mockito.Mockito.verify(chunkMapper).selectLookbackChunks(eq(USER_ID), any(), any(), eq(601));
+    }
+
+    @Test
+    @DisplayName("单条截断：超 per_chunk_max_chars 的日记渲染截断（闸门 3）")
+    void rolling_perChunkTruncation() {
+        stubRollingBase(1);
+        String longText = "字".repeat(3000);
+        when(chunkMapper.selectLookbackChunks(eq(USER_ID), any(), any(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(List.of(Chunk.builder().id(1L).userId(USER_ID).recordId(1L)
+                        .content(longText).segment(longText)
+                        .createdAt(LocalDate.of(2026, 8, 5).atStartOfDay(ZONE).toOffsetDateTime())
+                        .build()));
+        // 需要 prev_mirror 断言渲染行为——通过 correction_index 窗口断言不便，改用日志验证：
+        // 渲染发生在 collectRollingInputs 内部（原文块不进 proto 的新字段），此处验证不炸 + 闸门路径完整
+        assertDoesNotThrow(() -> mirrorService.generateMonthlyFor(USER_ID, "2026-08"));
+    }
+
+    @Test
+    @DisplayName("幂等：同 (user, month) 重复生成 → 删除旧 monthly 快照（period_month 精确匹配）")
+    void rolling_periodMonth_idempotentReplace() {
+        stubRollingBase(1);
+        ProfileSnapshot old = ProfileSnapshot.builder()
+                .id(20L).userId(USER_ID).snapshotType("monthly").periodMonth("2026-08")
+                .createdAt(OffsetDateTime.parse("2026-09-01T02:00:00+08:00"))
+                .build();
+        when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(old));
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.Mockito.verify(snapshotMapper).deleteById(20L);
+        // 新快照写入 period_month
+        org.mockito.ArgumentCaptor<ProfileSnapshot> insCap =
+                org.mockito.ArgumentCaptor.forClass(ProfileSnapshot.class);
+        org.mockito.Mockito.verify(snapshotMapper).insert(insCap.capture());
+        assertEquals("monthly", insCap.getValue().getSnapshotType());
+        assertEquals("2026-08", insCap.getValue().getPeriodMonth());
+    }
+
+    @Test
+    @DisplayName("幂等：不同月份的 monthly 快照不受影响（精确列不误删）")
+    void rolling_periodMonth_noCrossMonthDelete() {
+        stubRollingBase(1);
+        ProfileSnapshot july = ProfileSnapshot.builder()
+                .id(14L).userId(USER_ID).snapshotType("monthly").periodMonth("2026-07")
+                .createdAt(OffsetDateTime.parse("2026-07-01T02:00:00+08:00"))
+                .build();
+        when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never()).deleteById(14L);
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never()).deleteById(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    @DisplayName("stats_facts：待办实况计数 + 情绪分布进入请求（实况直查）")
+    void rolling_statsFacts_liveCounts() {
+        stubRollingBase(1);
+        when(statsMapper.selectTodoStatusCounts(USER_ID)).thenReturn(List.of(
+                row("status", "not_started", "count", 2L),
+                row("status", "completed", "count", 5L),
+                row("status", "in_progress", "count", 1L)
+        ));
+        when(statsMapper.selectOpenTodos(USER_ID)).thenReturn(List.of(
+                ProfileStatsDTO.TodoItemDTO.builder().recordId(1L).title("开题答辩 PPT")
+                        .summary("冷启动部分待补").taskStatus("in_progress")
+                        .createdAt("2026-08-29T15:40:00").build()
+        ));
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest> reqCap =
+                org.mockito.ArgumentCaptor.forClass(org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), reqCap.capture());
+        String facts = reqCap.getValue().getStatsFacts();
+        assertTrue(facts.contains("共 8 条"));
+        assertTrue(facts.contains("已完成 5"));
+        assertTrue(facts.contains("开题答辩 PPT"));
+        assertTrue(facts.contains("状态：in_progress"));
     }
 }

@@ -38,6 +38,10 @@ public interface VaultService {
 
     /**
      * 硬删除（deleted_at 审计位 + 级联清消化 chunks + blob 删除）
+     *
+     * <p>fix-batch B6（Q2 三层防误删）：资产页路径需请求头 {@code X-Confirm-Name} =
+     * 文件名后四位（不符 400"输入的文件名后四位不符"）；对话内路径（内部调用/工具）免校验
+     * （有内联确认卡）。校验在 Controller 层，本方法语义不变（真删）。</p>
      */
     void delete(UUID userId, Long itemId);
 
@@ -45,6 +49,20 @@ public interface VaultService {
      * 用户补正：改描述 / 重命名（三层 key 第 3 层）
      */
     VaultItemVO update(UUID userId, Long itemId, String description, String category);
+
+    /**
+     * 确认消化（fix-batch B7，toolcalling-vault-design.md §3.3b 确认门禁）：
+     * body {key, description, category}（用户可改后提交）→ ①更新元数据 ②生成 key chunk
+     * （embed=key+description+类型拼合，contentType='note'，挂 vault_item_id）③全文消化
+     * chunks 这时才 embed ④digest_status → confirmed。异步执行，接口层返回 202 语义。
+     *
+     * <p>幂等：已 confirmed 直接返回当前状态。key chunk 生成失败保持 extracted 可重试。</p>
+     *
+     * @param key         展示名/文件名（可空=保持现名）
+     * @param description 描述（可空=清空）
+     * @param category    分类（可空=保持）
+     */
+    VaultItemVO confirm(UUID userId, Long itemId, String key, String description, String category);
 
     /**
      * 三层漏斗检索（find_item 工具 + 资产页搜索共用）
@@ -62,10 +80,18 @@ public interface VaultService {
     VaultItemVO recall(UUID userId, Long itemId);
 
     /**
+     * 取文件名（B6 防误删校验用；非本人/已删 4041 不暴露存在性）
+     */
+    String requireName(UUID userId, Long itemId);
+
+    /**
      * 三档消化（上传后异步；管道隔离：失败只改该文件 digest_status=failed）
      *
-     * <p>全消化：抽文本→Record(vault 关联)→单 chunk→Embed；半消化：用户描述必填+EXIF 留待；
-     * 零消化：音视频元数据卡 digest_status=skipped。</p>
+     * <p>fix-batch B5：实现已拆到独立 {@link org.xianshen.mumirrorb.service.impl.DigestService}
+     * Bean（@Async 代理生效，修自调用失效）；本方法保留为兼容委派。</p>
+     *
+     * <p>fix-batch B7 五态：文本/PDF 抽文本落 chunk（不 embed）→ extracted 停（确认门禁）；
+     * 图片 → extracted（Y4 如实）；音视频 → skipped。确认后才 embed 进检索。</p>
      */
     void digestAsync(UUID userId, Long itemId);
 

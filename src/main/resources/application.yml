@@ -99,3 +99,10 @@ vault:
   max-tool-calls: 2                    # 单次对话最多工具步数
   find-item-limit: 10
   search-records-limit: 20
+
+# 递归累计镜子（rolling-mirror-design.md §2/§3：四道防洪闸全配置化）
+mirror:
+  lookback-max-chunks: 600             # 条数闸，超限取最近的
+  lookback-max-chars: 150000           # 总字符闸（与条数闸先触发者生效），旧→新裁剪直到塞下
+  per-chunk-max-chars: 2000            # 单条日记渲染截断
+  mirror-summary-after-months: 12      # 递归链超 N 个月，更早镜子只带一行摘要

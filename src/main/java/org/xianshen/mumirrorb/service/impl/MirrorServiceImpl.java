@@ -6,12 +6,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
+import org.xianshen.mumirrorb.config.MirrorProperties;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.GlossaryProtoMapper;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
+import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
+import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
@@ -28,9 +31,11 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -61,8 +66,10 @@ public class MirrorServiceImpl implements MirrorService {
     private final ProfileSnapshotMapper snapshotMapper;
     private final ProfileStatsMapper statsMapper;
     private final SettingsMapper settingsMapper;
+    private final ChunkMapper chunkMapper;
     private final AiGrpcClient aiGrpcClient;
     private final GlossaryService glossaryService;
+    private final MirrorProperties mirrorProperties;
 
     @Override
     @Transactional(readOnly = true)
@@ -147,8 +154,10 @@ public class MirrorServiceImpl implements MirrorService {
         List<Map<String, Object>> recentChats = statsMapper.selectRecentChats(userId, RECENT_CHATS_LIMIT);
 
         // 2. gRPC GenerateProfile（AiGrpcClient 内部补 llm_config）
+        // manual 快照语义为"截至现在的累计画像"：rolling mirror 四块输入同样生效
+        // （上期镜子=最新 monthly 或 manual，回看窗口=近 30 天）
         MirrorProfileProto.GenerateProfileResponse response =
-                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats));
+                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats, null));
 
         // 3. 存快照
         ProfileSnapshot snapshot = ProfileSnapshot.builder()
@@ -358,6 +367,15 @@ public class MirrorServiceImpl implements MirrorService {
 
     /**
      * monthly 快照生成（指定月份版本，统计窗口=该自然月）
+     *
+     * <p>【行为变化 2026-09-06 递归累计镜子】语义从"当月切片"升级为"截至 N 月的累计画像"
+     * （rolling-mirror-design.md §0/§1）：生成时携带四块输入——
+     * ① 上期镜子全文（period_month = N-1 的 monthly 快照五维+总结拼接，递归链超
+     * {@code mirror.mirror-summary-after-months} 个月的更早镜子只带一行压缩摘要）；
+     * ② 按 mirror_lookback 档位带原始记录（四道防洪闸限流）；
+     * ③ 校正索引（仅 lookback=0 时带，防误差累积）；
+     * ④ 待办/统计实况直查（数据库实时值，LLM 只叙事不记账）。
+     * 快照落库写 period_month；幂等判断走精确列。</p>
      */
     @Transactional
     public MirrorProfileVO generateMonthly(UUID userId, YearMonth month) {
@@ -371,11 +389,12 @@ public class MirrorServiceImpl implements MirrorService {
         ProfileStatsDTO stats = collectStats(userId, month);
         List<Map<String, Object>> recentChats = statsMapper.selectRecentChats(userId, RECENT_CHATS_LIMIT);
         MirrorProfileProto.GenerateProfileResponse response =
-                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats));
+                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats, month));
 
         ProfileSnapshot snapshot = ProfileSnapshot.builder()
                 .userId(userId)
                 .snapshotType("monthly")
+                .periodMonth(month.toString())
                 .moodAnalysis(response.getMoodAnalysis())
                 .learningAnalysis(response.getLearningAnalysis())
                 .todoAnalysis(response.getTodoAnalysis())
@@ -434,32 +453,21 @@ public class MirrorServiceImpl implements MirrorService {
         log.info("按月生成月度画像，用户: {}, 月份: [{}]", userId, target);
 
         // 幂等：同一 (user, month) 的 monthly 快照重生成即替换。
-        // profile_snapshots 无"所属月份"列（schema 未落库，快照 createdAt 是生成时刻而非归属月份），
-        // 无法精确反查旧份。方案：对"该用户的 monthly 快照"按漂移基线关系判定——
-        // 任一 monthly 快照 X 的漂移基线（上一份 monthly）若指向本用户当前最新的另一份 monthly Y，
-        // 说明 X/Y 中较旧的那份是同月重复生成。等价简化：重生成后直接把"除最新一份外的、
-        // 漂移基线与最新份重叠"的月度快照删除——复杂度高。
-        // 落地采用最小可靠方案：monthly 快照以"其 createdAt 之后第一个月度定时窗口"隐含归属月份，
-        // 生成时把"生成时刻 + 目标月份"写入 overall_summary 无侵入处不可行 →
-        // 改为：删除该用户 monthly 快照中 createdAt 落在 (上次 monthly 生成, 本次生成) 之间、
-        // 且其漂移基线即本次目标月上一月快照的记录——仍不可判。
-        // 最终方案（与任务书对齐）：重新生成 = 删除目标月份的旧快照，月份归属按
-        // "快照 createdAt 是否落在 [次月 1 日 00:00, 次次月 1 日 00:00) 的定时窗口"判定
-        // （定时任务每月 1 号 02:00 生成上月画像）；手动补生成落在窗口外时兜底为
-        // cleanupOldSnapshots(MONTHLY_KEEP=12) 容量清理，不产生脏数据。
+        // 【2026-09-06 递归累计镜子】profile_snapshots 新增 period_month 精确列（生成时写入归属月份），
+        // 幂等判断从旧"createdAt 落入定时窗口"近似方案切换为精确列匹配；uq_snapshots_user_period
+        // 部分唯一索引兜底（user_id + period_month，仅 monthly 非空行）。
         List<ProfileSnapshot> existing = snapshotMapper.selectList(
                 new QueryWrapper<ProfileSnapshot>()
                         .eq("user_id", userId)
                         .eq("snapshot_type", "monthly")
-                        .ge("created_at", target.plusMonths(1).atDay(1).atStartOfDay(ZONE).toOffsetDateTime())
-                        .lt("created_at", target.plusMonths(2).atDay(1).atStartOfDay(ZONE).toOffsetDateTime())
+                        .eq("period_month", target.toString())
                         .orderByDesc("created_at"));
-        if (existing.size() > 1) {
-            // 窗口内出现多份 monthly：视为同月重复生成，保留最新一份
-            for (ProfileSnapshot old : existing.subList(1, existing.size())) {
+        if (!existing.isEmpty()) {
+            for (ProfileSnapshot old : existing) {
                 snapshotMapper.deleteById(old.getId());
             }
-            log.info("月度画像重生成：删除月份 [{}] 的 {} 份旧快照", target, existing.size() - 1);
+            log.info("月度画像重生成：删除月份 [{}] 的 {} 份旧快照（period_month 精确匹配）",
+                    target, existing.size());
         }
 
         return generateMonthly(userId, target);
@@ -563,22 +571,302 @@ public class MirrorServiceImpl implements MirrorService {
 
     /**
      * 组装 GenerateProfileRequest（llm_config 由 AiGrpcClient 补齐）+ 个人词典注入（第 4 节 top 30 全量）
+     *
+     * <p>递归累计镜子（rolling-mirror-design.md §1）：month 非空（monthly 快照）时携带四块输入；
+     * month 为 null（manual 快照）时同样按"截至现在的累计画像"组装——
+     * 上期镜子取最新 monthly（无则最新 manual），回看窗口取近 30 天。</p>
      */
     private MirrorProfileProto.GenerateProfileRequest buildRequest(
-            UUID userId, ProfileStatsDTO stats, List<Map<String, Object>> recentChats) {
-        MirrorProfileProto.GenerateProfileRequest request = buildRequest(stats, recentChats);
+            UUID userId, ProfileStatsDTO stats, List<Map<String, Object>> recentChats, YearMonth month) {
+        MirrorProfileProto.GenerateProfileRequest.Builder request = buildRequest(stats, recentChats).toBuilder();
+
+        RollingContext rolling = collectRollingInputs(userId, month, stats);
+        // mirror_lookback 为 proto3 optional（shared-protocol 2026-09-06 修正）：显式 set 区分
+        // "未传=AI 侧缺省 1 档"与"显式 0=纯继承档"；B 侧解析后总是显式传（兜底 1 档也 set）
+        request.setPrevMirror(rolling.prevMirror())
+                .setCorrectionIndex(rolling.correctionIndex())
+                .setMirrorLookback(rolling.lookback())
+                .setStatsFacts(rolling.statsFacts());
+
+        log.info("递归累计镜子输入组装：lookback={}, prevMirror={} 字符, correctionIndex={} 条, statsFacts={} 字符, lookbackTruncated={}",
+                rolling.lookback(), rolling.prevMirror().length(),
+                rolling.correctionIndex().isEmpty() ? 0 : rolling.correctionIndex().split("\n").length,
+                rolling.statsFacts().length(), rolling.lookbackTruncated());
+
+        MirrorProfileProto.GenerateProfileRequest base = request.build();
         try {
-            return request.toBuilder()
+            return base.toBuilder()
                     .addAllGlossary(GlossaryProtoMapper.toProtoList(glossaryService.confirmedForInjection(userId)))
                     .build();
         } catch (Exception e) {
             log.warn("GenerateProfile 词表注入失败（按无词表继续），用户: {}, 原因: {}", userId, e.getMessage());
-            return request;
+            return base;
         }
     }
 
     /**
-     * 组装 GenerateProfileRequest（llm_config 由 AiGrpcClient 补齐）
+     * 递归累计镜子四块输入（① prev_mirror / ③ correction_index / ② lookback 档位 / ④ stats_facts）
+     *
+     * <p>闸门（MirrorProperties，全配置化）：条数闸与总字符闸先触发者生效，旧→新裁剪；
+     * 触发时打 WARN 日志（F 侧 meta toast 透出待联调接线）。</p>
+     */
+    private record RollingContext(String prevMirror, String correctionIndex, int lookback,
+                                  String statsFacts, boolean lookbackTruncated) {
+    }
+
+    private RollingContext collectRollingInputs(UUID userId, YearMonth month, ProfileStatsDTO stats) {
+        // ---- 档位：设置透传（0-3，缺省/越界兜底 1）----
+        UserSettings settings = settingsMapper.selectOne(
+                new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
+        int lookback = 1;
+        if (settings != null && settings.getMirrorLookback() != null
+                && settings.getMirrorLookback() >= 0 && settings.getMirrorLookback() <= 3) {
+            lookback = settings.getMirrorLookback();
+        }
+
+        // ---- 回看窗口：monthly=按档位回看 N 个自然月；manual=近 30 天 ----
+        OffsetDateTime windowSince;
+        OffsetDateTime windowUntil;
+        if (month != null) {
+            // 档位 N → [until - N 个月, until)，until = 目标月次月 1 号 0 点。
+            // N=0（纯继承）时窗口退化为空区间 [9/1, 9/1)——原文不带、校正索引也不带
+            // （设计稿 §2：0 档"无原文"，防误差靠镜子链本身的继承）。genesis 低档窗口无数据自然为空。
+            windowUntil = month.plusMonths(1).atDay(1).atStartOfDay(ZONE).toOffsetDateTime();
+            windowSince = month.plusMonths(1).minusMonths(lookback).atDay(1)
+                    .atStartOfDay(ZONE).toOffsetDateTime();
+        } else {
+            windowUntil = LocalDate.now(ZONE).plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
+            windowSince = LocalDate.now(ZONE).minusDays(30).atStartOfDay(ZONE).toOffsetDateTime();
+        }
+
+        // ---- ① 上期镜子全文（递归链）----
+        String prevMirror = buildPrevMirror(userId, month);
+
+        // ---- ③ 校正索引：仅 lookback=0 时带（低档用户防误差累积的补偿）----
+        // 覆盖上期镜子涉及的记录窗口（上月整月）：0 档不带原文，靠这份 title+日期清单对账
+        String correctionIndex = "";
+        if (lookback == 0) {
+            OffsetDateTime idxSince = month != null
+                    ? month.atDay(1).atStartOfDay(ZONE).toOffsetDateTime()
+                    : LocalDate.now(ZONE).minusDays(30).atStartOfDay(ZONE).toOffsetDateTime();
+            OffsetDateTime idxUntil = month != null
+                    ? month.plusMonths(1).atDay(1).atStartOfDay(ZONE).toOffsetDateTime()
+                    : LocalDate.now(ZONE).plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
+            List<Map<String, Object>> rows = chunkMapper.selectCorrectionIndex(userId, idxSince, idxUntil);
+            StringBuilder sb = new StringBuilder();
+            for (Map<String, Object> row : rows) {
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append("- ").append(row.get("title")).append("（").append(row.get("record_date")).append("）");
+            }
+            correctionIndex = sb.toString();
+        }
+
+        // ---- ② 本月原始记录（四道防洪闸）----
+        boolean truncated = false;
+        List<Chunk> chunks = chunkMapper.selectLookbackChunks(userId, windowSince, windowUntil,
+                mirrorProperties.getLookbackMaxChunks() + 1);
+        if (chunks.size() > mirrorProperties.getLookbackMaxChunks()) {
+            // 条数闸：超限取最近的（SQL 升序，砍头部旧记录）
+            chunks = chunks.subList(chunks.size() - mirrorProperties.getLookbackMaxChunks(), chunks.size());
+            truncated = true;
+            log.warn("回看原文触发条数闸（lookback_max_chunks={}），已截取最近部分，用户: {}",
+                    mirrorProperties.getLookbackMaxChunks(), userId);
+        }
+        StringBuilder records = new StringBuilder();
+        int perChunkMax = mirrorProperties.getPerChunkMaxChars();
+        DateTimeFormatter dayFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
+        for (Chunk c : chunks) {
+            OffsetDateTime at = c.getCreatedAt() == null ? null : c.getCreatedAt().atZoneSameInstant(ZONE).toOffsetDateTime();
+            String day = at == null ? "" : at.format(dayFmt);
+            String body = c.getSegment() == null || c.getSegment().isBlank() ? c.getContent() : c.getSegment();
+            if (body == null) {
+                body = "";
+            }
+            if (body.length() > perChunkMax) {
+                body = body.substring(0, perChunkMax) + "…（已截取最近部分）";
+            }
+            records.append("[").append(day).append("] ").append(body).append('\n');
+        }
+        // 总字符闸：与条数闸先触发者生效，旧→新裁剪直到塞下（保尾部新记录）
+        int maxChars = mirrorProperties.getLookbackMaxChars();
+        if (records.length() > maxChars) {
+            truncated = true;
+            String all = records.toString();
+            String tail = all.substring(all.length() - maxChars);
+            int nl = tail.indexOf('\n');
+            if (nl >= 0 && nl + 1 < tail.length()) {
+                tail = tail.substring(nl + 1); // 从下一条完整记录起
+            }
+            records = new StringBuilder(tail);
+            log.warn("回看原文触发总字符闸（lookback_max_chars={}），已按旧→新裁剪到 {} 字符，用户: {}",
+                    maxChars, records.length(), userId);
+        }
+
+        // ---- ④ 待办/统计实况直查（数据库实时值；LLM 只叙事不记账）----
+        StringBuilder facts = new StringBuilder();
+        int total = 0;
+        int completed = 0;
+        int notStarted = 0;
+        int inProgress = 0;
+        for (Map<String, Object> row : statsMapper.selectTodoStatusCounts(userId)) {
+            int count = (int) toLong(row.get("count"));
+            total += count;
+            switch (String.valueOf(row.get("status"))) {
+                case "in_progress" -> inProgress += count;
+                case "completed" -> completed += count;
+                default -> notStarted += count;
+            }
+        }
+        facts.append("待办实况（数据库实时值，以此为准，不要继承上文镜子的旧说法）：")
+                .append("共 ").append(total)
+                .append(" 条，已完成 ").append(completed)
+                .append("，进行中 ").append(inProgress)
+                .append("，未开始 ").append(notStarted).append("。\n");
+        List<ProfileStatsDTO.TodoItemDTO> openTodos = statsMapper.selectOpenTodos(userId);
+        facts.append("当前未完成待办（").append(openTodos.size()).append(" 条）：\n");
+        for (ProfileStatsDTO.TodoItemDTO t : openTodos) {
+            facts.append("- [").append(t.getCreatedAt() == null ? "" : t.getCreatedAt()).append("] ")
+                    .append(nullToEmpty(t.getTitle()))
+                    .append("：").append(nullToEmpty(t.getSummary()))
+                    .append("（状态：").append(nullToEmpty(t.getTaskStatus())).append("）\n");
+        }
+        facts.append("本月记录数：").append(stats.getTotalRecords() == null ? 0 : stats.getTotalRecords())
+                .append("（").append(stats.getTimeRange() == null ? "" : stats.getTimeRange()).append("）\n");
+        facts.append("情绪分布计数：");
+        if (stats.getMoodStats() == null || stats.getMoodStats().isEmpty()) {
+            facts.append("（无情绪数据）");
+        } else {
+            boolean first = true;
+            for (ProfileStatsDTO.MoodStatDTO m : stats.getMoodStats()) {
+                if (!first) {
+                    facts.append("、");
+                }
+                facts.append(m.getMood()).append(" ").append(m.getCount());
+                first = false;
+            }
+        }
+
+        return new RollingContext(prevMirror, correctionIndex, lookback, facts.toString(), truncated);
+    }
+
+    /**
+     * ① 上期镜子全文（递归链压缩）：
+     * 上一个月（N-1）快照全文（五维+总结拼接）；距目标月超过 mirror_summary_after_months 的
+     * 更早镜子只带一行压缩摘要。genesis 月（无任何更早镜子）返回提示文案（AI 侧空块不留孤儿节头）。
+     */
+    private String buildPrevMirror(UUID userId, YearMonth month) {
+        List<ProfileSnapshot> monthly = snapshotMapper.selectList(
+                new QueryWrapper<ProfileSnapshot>()
+                        .eq("user_id", userId)
+                        .eq("snapshot_type", "monthly")
+                        .orderByAsc("period_month"));
+        if (monthly.isEmpty()) {
+            // 无 monthly 时回退最新 manual（首月 genesis 的常见形态：只有手动画像）
+            ProfileSnapshot latestManual = snapshotMapper.selectLatest(userId, "manual");
+            return latestManual == null ? "" : fullMirrorText(latestManual);
+        }
+
+        String targetKey = month == null ? LocalDate.now(ZONE).toString().substring(0, 7) : month.toString();
+        // 归属月份严格小于目标月的最近一份 = 上期镜子
+        ProfileSnapshot prev = null;
+        for (int i = monthly.size() - 1; i >= 0; i--) {
+            ProfileSnapshot s = monthly.get(i);
+            if (s.getPeriodMonth() != null && s.getPeriodMonth().compareTo(targetKey) < 0) {
+                prev = s;
+                break;
+            }
+            // period_month 为 NULL 的历史行按 createdAt 推断归属（补值前的兜底）
+            if (s.getPeriodMonth() == null) {
+                String inferred = inferPeriodMonth(s);
+                if (inferred != null && inferred.compareTo(targetKey) < 0) {
+                    prev = s;
+                    break;
+                }
+            }
+        }
+        if (prev == null) {
+            return ""; // genesis：无上月镜子（AI 侧 {prev_mirror} 空块不留孤儿节头）
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(fullMirrorText(prev));
+        // 递归链：更早的镜子只带一行压缩摘要（超 mirror_summary_after_months 个月的也不省略摘要行——
+        // 设计稿 §1 "超 12 个月的更早镜子只带一行压缩摘要"，即链上全部更早镜子都只保留一行）
+        int summaryMonths = mirrorProperties.getMirrorSummaryAfterMonths();
+        for (int i = monthly.size() - 1; i >= 0; i--) {
+            ProfileSnapshot s = monthly.get(i);
+            if (s.getId().equals(prev.getId())) {
+                break;
+            }
+            String key = s.getPeriodMonth() != null ? s.getPeriodMonth() : inferPeriodMonth(s);
+            if (key == null) {
+                continue;
+            }
+            long monthsAgo = java.time.temporal.ChronoUnit.MONTHS.between(YearMonth.parse(key),
+                    month == null ? YearMonth.now(ZONE) : month);
+            if (monthsAgo <= 0) {
+                continue;
+            }
+            String line = oneLineSummary(key, s);
+            // 压缩行仍受"超过 N 个月才压缩"约束（N 以内更早镜子已有全文链则跳过重复——
+            // 设计稿语义：N-1 全文，其余一行；这里统一为一行摘要，链路清晰）
+            if (monthsAgo > summaryMonths) {
+                line = "【" + key + "】" + line;
+            }
+            sb.insert(0, line + '\n');
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 快照五维+总结拼接（① 上期镜子全文的标准拼法）
+     */
+    private static String fullMirrorText(ProfileSnapshot s) {
+        StringBuilder sb = new StringBuilder();
+        appendSection(sb, "情绪", s.getMoodAnalysis());
+        appendSection(sb, "学习", s.getLearningAnalysis());
+        appendSection(sb, "待办", s.getTodoAnalysis());
+        appendSection(sb, "节奏", s.getRhythmAnalysis());
+        if (s.getOverallSummary() != null && !s.getOverallSummary().isBlank()) {
+            sb.append("总体总结：").append(s.getOverallSummary());
+        }
+        return sb.toString().trim();
+    }
+
+    private static void appendSection(StringBuilder sb, String label, String text) {
+        if (text != null && !text.isBlank()) {
+            sb.append(label).append("：").append(text).append('\n');
+        }
+    }
+
+    /**
+     * 更早镜子的一行压缩摘要（【月份】总结前 60 字）
+     */
+    private static String oneLineSummary(String key, ProfileSnapshot s) {
+        String summary = s.getOverallSummary() == null ? "" : s.getOverallSummary();
+        if (summary.length() > 60) {
+            summary = summary.substring(0, 60) + "…";
+        }
+        return "【" + key + " 镜子摘要】" + summary;
+    }
+
+    /**
+     * 历史 NULL period_month 行按 createdAt 推断归属月份（定时语义：次月生成上月画像）
+     */
+    private static String inferPeriodMonth(ProfileSnapshot s) {
+        if (s.getCreatedAt() == null) {
+            return null;
+        }
+        return s.getCreatedAt().atZoneSameInstant(ZONE).toLocalDate().minusMonths(1).toString().substring(0, 7);
+    }
+
+    /**
+     * 组装 GenerateProfileRequest 基础块（五维统计 + recent_chats；llm_config 由 AiGrpcClient 补齐）
+     *
+     * <p>④ 待办统计实况不在 proto 结构化字段里重复——设计稿 §1 "④用现有统计字段，不加 proto"，
+     * 另以 stats_facts（field 14，B 提案）携带渲染好的实况文本。</p>
      */
     private MirrorProfileProto.GenerateProfileRequest buildRequest(
             ProfileStatsDTO stats, List<Map<String, Object>> recentChats) {

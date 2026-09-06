@@ -47,7 +47,8 @@ public class VaultItemVO {
     @Schema(description = "描述（用户提示 / LLM 命名）", example = "RAG 方向毕设开题报告")
     private String description;
 
-    @Schema(description = "消化状态", example = "done", allowableValues = {"pending", "done", "skipped", "failed"})
+    @Schema(description = "消化状态（五态，B7 确认门禁）", example = "confirmed",
+            allowableValues = {"pending", "extracted", "confirmed", "skipped", "failed"})
     private String digestStatus;
 
     @Schema(description = "配额占用（字节）", example = "134217728")

@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -114,16 +115,72 @@ public class VaultController {
     }
 
     @Operation(
-            summary = "删除文件（硬删除）",
-            description = "物理删除 + 级联清消化 chunks（向量库无孤儿）；deleted_at 留审计位。需前端二次确认。"
+            summary = "删除文件（硬删除，防误删后四位校验）",
+            description = "物理删除 + 级联清消化 chunks（向量库无孤儿）；deleted_at 留审计位。"
+                    + "资产页路径需请求头 X-Confirm-Name = 文件名后四位（不符 400）；"
+                    + "对话内路径带 X-Confirm-Skip: inline（有内联确认卡）免此校验。"
     )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "删除成功"),
+            @ApiResponse(responseCode = "400", description = "文件名后四位不符 / 缺确认"),
+            @ApiResponse(responseCode = "404", description = "资产不存在（含非本人）"),
+            @ApiResponse(responseCode = "401", description = "未登录")
+    })
     @DeleteMapping("/{id}")
     public R<Void> delete(
             @Parameter(description = "资产ID", required = true, example = "1")
-            @PathVariable Long id) {
+            @PathVariable Long id,
+            @Parameter(description = "文件名后四位确认（资产页路径必带）")
+            @RequestHeader(value = "X-Confirm-Name", required = false) String confirmName,
+            @Parameter(description = "对话内路径标记（inline=免后四位校验，有内联确认卡兜底）")
+            @RequestHeader(value = "X-Confirm-Skip", required = false) String confirmSkip) {
         UUID userId = getCurrentUserId();
+        if (!"inline".equalsIgnoreCase(confirmSkip)) {
+            // fix-batch B6（Q2 三层防误删·后端配合）：资产页路径输文件名后四位才能删
+            String name = vaultService.requireName(userId, id);
+            String tail = tail4(name);
+            if (confirmName == null || !tail.equalsIgnoreCase(confirmName.trim())) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "输入的文件名后四位不符");
+            }
+        }
         vaultService.delete(userId, id);
         return R.ok("已删除", null);
+    }
+
+    @Operation(
+            summary = "确认消化（上传后回执卡的「就这样存」）",
+            description = "确认门禁（§3.3b）：确认是 embed 的准入条件。body {key, description, category}"
+                    + "（用户可改后提交）→ 更新元数据 → 生成 key chunk（embed，进通用检索）→ 全文消化"
+                    + " chunks embed → digest_status=confirmed。未确认文件检索不到（保管完整可下载预览）。"
+                    + "幂等：重复确认返回当前状态。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "202", description = "确认已受理（异步 embed；data=最新文件卡）"),
+            @ApiResponse(responseCode = "404", description = "资产不存在（含非本人）"),
+            @ApiResponse(responseCode = "401", description = "未登录")
+    })
+    @PostMapping("/{id}/confirm")
+    public org.springframework.http.ResponseEntity<R<VaultItemVO>> confirm(
+            @Parameter(description = "资产ID", required = true, example = "1")
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        UUID userId = getCurrentUserId();
+        String key = body == null ? null : body.get("key");
+        String description = body == null ? null : body.get("description");
+        String category = body == null ? null : body.get("category");
+        VaultItemVO vo = vaultService.confirm(userId, id, key, description, category);
+        // 202 语义：key chunk/全文 embed 异步进行，回执立即返回（toast「已可检索」由 F 侧渲染）
+        return org.springframework.http.ResponseEntity.accepted().body(R.ok("确认成功，正在建立检索索引", vo));
+    }
+
+    /**
+     * 文件名后四位（B6）：不足四位取全名（"论文.txt" → ".txt" 语义仍可用全名比对）
+     */
+    private static String tail4(String name) {
+        if (name == null || name.isEmpty()) {
+            return "";
+        }
+        return name.length() <= 4 ? name : name.substring(name.length() - 4);
     }
 
     @Operation(

@@ -21,6 +21,13 @@ import java.util.UUID;
  * </ul>
  *
  * <p>全部参数化占位符（安全约定）；过滤条件用 {@code (#{x} IS NULL OR ...)} 可选拼接。</p>
+ *
+ * <p>fix-batch B1（Y1）：删除 {@code r.source='user'} 过滤——系统记录（每日总结 source='system'）
+ * 与 vault 资产进通用检索。vault 侧由白名单谓词收口（Q3 key-embed + 确认门禁）：
+ * 只有 <b>confirmed 资产的 keyChunk</b>（元数据 keyChunk='true'）进通用对话检索——
+ * 全文消化 chunk 不进对话上下文（§3.3c「内容问答走 recall_item」，防全文灌入 prompt），
+ * 未确认资产检索不到（§3.3b 确认门禁）。SEMANTIC/HYBRID 另有 embedding IS NOT NULL
+ * （确认前不 embed，天然挡住）；STRUCTURED 无向量过滤，谓词是唯一防线。</p>
  */
 @Mapper
 public interface ChatSearchMapper {
@@ -45,7 +52,7 @@ public interface ChatSearchMapper {
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
-              AND r.source = 'user'
+              AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
               <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
@@ -90,7 +97,7 @@ public interface ChatSearchMapper {
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
-              AND r.source = 'user'
+              AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
             ORDER BY score ASC
@@ -130,7 +137,7 @@ public interface ChatSearchMapper {
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
-              AND r.source = 'user'
+              AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>

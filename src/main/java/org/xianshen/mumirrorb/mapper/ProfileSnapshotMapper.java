@@ -38,6 +38,43 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
     }
 
     /**
+     * 窗口内最新一份指定类型的快照（get_profile month 参数用，fix-batch B4）
+     *
+     * <p>月度归属口径（B4 任务书"createdAt 窗口近似+注释声明"）：period_month 列已由递归镜子轮
+     * 落地（monthly 幂等精确列），但该列仅对 monthly 快照有值（manual 恒 NULL）——
+     * manual 快照无归属月概念，仍走 created_at 窗口近似；monthly 优先走 period_month 精确归属。
+     * 见 {@link #selectLatestInMonth(java.util.UUID, String, String, java.time.OffsetDateTime, java.time.OffsetDateTime)}。</p>
+     */
+    default ProfileSnapshot selectLatestInWindow(java.util.UUID userId, String snapshotType,
+                                                 java.time.OffsetDateTime start, java.time.OffsetDateTime end) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .ge(ProfileSnapshot::getCreatedAt, start)
+                .lt(ProfileSnapshot::getCreatedAt, end)
+                .orderByDesc(ProfileSnapshot::getCreatedAt)
+                .last("LIMIT 1"));
+    }
+
+    /**
+     * 指定月份快照（get_profile month 参数，fix-batch B4）：
+     * monthly 按 period_month 精确归属；manual 无归属月列，用 created_at 窗口近似（[start, end)）
+     */
+    default ProfileSnapshot selectLatestInMonth(java.util.UUID userId, String snapshotType,
+                                                String periodMonth,
+                                                java.time.OffsetDateTime start, java.time.OffsetDateTime end) {
+        if ("monthly".equals(snapshotType)) {
+            return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                    .eq(ProfileSnapshot::getUserId, userId)
+                    .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                    .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                    .orderByDesc(ProfileSnapshot::getCreatedAt)
+                    .last("LIMIT 1"));
+        }
+        return selectLatestInWindow(userId, snapshotType, start, end);
+    }
+
+    /**
      * 最近 N 份指定类型的快照（对话 PROFILE 路由用 ≤2 份；漂移对比用）
      */
     default List<ProfileSnapshot> selectRecent(java.util.UUID userId, String snapshotType, int limit) {
@@ -46,6 +83,20 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT " + limit));
+    }
+
+    /**
+     * 指定归属月份的 monthly 快照（rolling-mirror-design.md §4-B：幂等判断精确列）
+     *
+     * <p>period_month 为生成时写入的归属月份，替代旧"createdAt 落入定时窗口"的近似推断。</p>
+     */
+    default ProfileSnapshot selectByPeriodMonth(java.util.UUID userId, String periodMonth) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getSnapshotType, "monthly")
+                .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                .orderByDesc(ProfileSnapshot::getCreatedAt)
+                .last("LIMIT 1"));
     }
 
     /**

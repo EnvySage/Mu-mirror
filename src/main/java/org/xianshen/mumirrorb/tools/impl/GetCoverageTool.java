@@ -3,6 +3,7 @@ package org.xianshen.mumirrorb.tools.impl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
+import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.tools.ToolDefinition;
 import org.xianshen.mumirrorb.tools.ToolExecutionResult;
@@ -30,6 +31,7 @@ public class GetCoverageTool implements ToolExecutor {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ChunkMapper chunkMapper;
+    private final RecordMapper recordMapper;
 
     @Override
     public String name() {
@@ -55,8 +57,27 @@ public class GetCoverageTool implements ToolExecutor {
         }
         String q = query.trim();
         // 全量 chunk 扫描（单用户规模 ≤ 千级，ILIKE 语义可控；不走向量——覆盖度是事实问题）
+        // fix-batch B2（Y2）：语料收口——JOIN 不出 SQL（MP wrapper 无 join），按 record 白名单
+        // 预过滤：只统计真实用户日记（status='done' AND source='user'，未删）的 chunks
+        List<Long> userRecordIds = recordMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<org.xianshen.mumirrorb.pojo.DO.Record>()
+                .eq(org.xianshen.mumirrorb.pojo.DO.Record::getUserId, userId)
+                .eq(org.xianshen.mumirrorb.pojo.DO.Record::getSource, "user")
+                .eq(org.xianshen.mumirrorb.pojo.DO.Record::getStatus,
+                        org.xianshen.mumirrorb.common.enums.RecordStatus.DONE)
+                .isNull(org.xianshen.mumirrorb.pojo.DO.Record::getDeletedAt)
+                .select(org.xianshen.mumirrorb.pojo.DO.Record::getId))
+                .stream().map(org.xianshen.mumirrorb.pojo.DO.Record::getId).toList();
+        if (userRecordIds.isEmpty()) {
+            return ToolExecutionResult.builder()
+                    .success(true)
+                    .summary(name() + ":「" + q + "」无记录")
+                    .payload(Map.of("query", q, "covered", false,
+                            "message", "用户的记录中没有出现过该主题"))
+                    .build();
+        }
         List<Chunk> all = chunkMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Chunk>()
                 .eq(Chunk::getUserId, userId)
+                .in(Chunk::getRecordId, userRecordIds)
                 .isNotNull(Chunk::getCreatedAt)
                 .orderByAsc(Chunk::getCreatedAt));
 

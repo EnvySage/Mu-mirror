@@ -5,14 +5,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
+import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.mapper.UserTermMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
+import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DO.UserTerm;
 import org.xianshen.mumirrorb.pojo.DTO.GlossaryCreateDTO;
 import org.xianshen.mumirrorb.pojo.DTO.GlossaryUpdateDTO;
@@ -67,6 +70,8 @@ public class GlossaryServiceImpl implements GlossaryService {
     static final int AUDIT_WINDOW_DAYS = 30;
     /** 抽取语料上限（14 天 confirmed chunks，防止 prompt 爆炸） */
     static final int CORPUS_LIMIT = 200;
+    /** 审计语料 record 扫描上限（先 record 后 chunk 两段式，防止 IN 列表爆炸） */
+    static final int AUDIT_CORPUS_RECORD_LIMIT = 500;
     /** confirmed 卡片"近30天相关记录n条"统计上限（控制 ILIKE 成本） */
     private static final int RECENT_HITS_TERMS_LIMIT = 30;
     /** 降级抽取：语料包含计数达到该次数才生成候选（噪音防线） */
@@ -74,6 +79,7 @@ public class GlossaryServiceImpl implements GlossaryService {
 
     private final UserTermMapper termMapper;
     private final ChunkMapper chunkMapper;
+    private final RecordMapper recordMapper;
     private final AiGrpcClient aiGrpcClient;
 
     /**
@@ -285,16 +291,16 @@ public class GlossaryServiceImpl implements GlossaryService {
 
     @Override
     @Transactional
-    public int extractForUser(UUID userId) {
+    public List<UserTermVO> extractForUser(UUID userId) {
         return doExtract(userId, EXTRACT_WINDOW_DAYS);
     }
 
     @Override
     public void extractScheduled(UUID userId) {
         try {
-            int count = doExtract(userId, EXTRACT_WINDOW_DAYS);
-            if (count > 0) {
-                log.info("词典定时抽取完成，用户: {}, 新增候选 {} 条", userId, count);
+            List<UserTermVO> created = doExtract(userId, EXTRACT_WINDOW_DAYS);
+            if (!created.isEmpty()) {
+                log.info("词典定时抽取完成，用户: {}, 新增候选 {} 条", userId, created.size());
             }
         } catch (Exception e) {
             // 防御（任务书要求）：抽取失败只打日志，绝不影响每日总结主流程
@@ -306,23 +312,36 @@ public class GlossaryServiceImpl implements GlossaryService {
      * 抽取主流程：语料收集 → 去重 → gRPC ExtractTerms（失败降级跳过）→ 候选落 pending
      *
      * @param windowDays 语料窗口（日常 14 天）
-     * @return 新增 pending 候选数
+     * @return 本次新增 pending 候选词条卡（C5 F 契约：{candidates:[...]}；evidence/update 不计入）
      */
-    private int doExtract(UUID userId, int windowDays) {
+    private List<UserTermVO> doExtract(UUID userId, int windowDays) {
         // 0. 未配置 LLM 直接跳过（与每日总结幂等口径一致）
         if (!hasLlmConfig(userId)) {
-            return 0;
+            return List.of();
         }
-        // 1. 语料：近 N 天 confirmed chunks（有向量 = 已审核入库），user_edited 优先（#3）
+        // 1. 语料：近 N 天真实用户日记 chunks——fix-batch B2（Y2）收口：
+        // status='done' AND source='user'（不含系统总结/vault 产物/未确认记录）；
+        // MP wrapper 无 join，按 record 白名单两段式预过滤，user_edited 优先（#3）
         OffsetDateTime since = LocalDate.now(ZONE).minusDays(windowDays).atStartOfDay(ZONE).toOffsetDateTime();
+        List<Long> userRecordIds = recordMapper.selectList(new LambdaQueryWrapper<Record>()
+                .eq(Record::getUserId, userId)
+                .eq(Record::getSource, "user")
+                .eq(Record::getStatus, RecordStatus.DONE)
+                .isNull(Record::getDeletedAt)
+                .ge(Record::getCreatedAt, since)
+                .last("LIMIT " + AUDIT_CORPUS_RECORD_LIMIT))
+                .stream().map(Record::getId).toList();
+        if (userRecordIds.isEmpty()) {
+            return List.of();
+        }
         List<Chunk> corpus = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
                 .eq(Chunk::getUserId, userId)
-                .ge(Chunk::getCreatedAt, since)
+                .in(Chunk::getRecordId, userRecordIds)
                 .orderByDesc(Chunk::getUserEdited)
                 .orderByDesc(Chunk::getCreatedAt)
                 .last("LIMIT " + CORPUS_LIMIT));
         if (corpus.isEmpty()) {
-            return 0;
+            return List.of();
         }
         // 2. 去重：近 30 天已处理（confirmed/dismissed/pending 已存在）的 term 跳过；dismissed 30 天后可重新浮现
         Set<String> known = knownTermNames(userId);
@@ -348,12 +367,12 @@ public class GlossaryServiceImpl implements GlossaryService {
             // 防御：Python 侧未上线/调用失败 → 打日志，本轮跳过（词表错了退化为普通检索，不是灾难 #0.2）
             log.warn("ExtractTerms 调用失败，本轮抽取跳过（Python 侧可能未上线），用户: {}, 原因: {}",
                     userId, e.getMessage());
-            return 0;
+            return List.of();
         }
 
         // 5. 候选落库：new → pending 新行；evidence → 已有 pending 行计数 +1；update → 打回 pending 等确认
         OffsetDateTime now = OffsetDateTime.now(ZONE);
-        int created = 0;
+        List<UserTermVO> created = new ArrayList<>();
         for (RecordProcessorProto.ExtractTermsReply.TermCandidate c : candidates) {
             if (c.getTerm() == null || c.getTerm().isBlank()) {
                 continue;
@@ -362,7 +381,7 @@ public class GlossaryServiceImpl implements GlossaryService {
             if (!"new".equals(c.getKind()) || known.contains(term)) {
                 // evidence/update 只对已有词生效；update 打回 pending（第 3 节分级）
                 if ("update".equals(c.getKind())) {
-                    created += applyUpdateCandidate(userId, term, c, known, now);
+                    applyUpdateCandidate(userId, term, c, known, now);
                 } else if ("evidence".equals(c.getKind())) {
                     applyEvidence(userId, term, c, now);
                 }
@@ -384,29 +403,32 @@ public class GlossaryServiceImpl implements GlossaryService {
                     .build();
             termMapper.insert(entity);
             known.add(term);
-            created++;
+            created.add(toVO(entity, c.getEvidence() == null || c.getEvidence().isBlank()
+                    ? null : c.getEvidence()));
         }
-        if (created > 0) {
+        if (!created.isEmpty()) {
             invalidateCache(userId);
         }
         return created;
     }
 
     /**
-     * update 候选：confirmed 词解释过时 → 打回 pending + 新解释建议（保留原词与别名）
+     * update 候选：confirmed 词解释过时 → 打回 pending + 新解释建议（保留原词与别名）；
+     * fix-batch C7：不再把建议追加进 description（改存 lastSeenAt 供 F 展示合并/更新预填）——
+     * description 保持用户原文语义，候选卡片按 status=pending + 新解释覆盖展示
      */
-    private int applyUpdateCandidate(UUID userId, String term,
+    private void applyUpdateCandidate(UUID userId, String term,
                                      RecordProcessorProto.ExtractTermsReply.TermCandidate c,
                                      Set<String> known, OffsetDateTime now) {
         UserTerm existing = termMapper.selectOne(new LambdaQueryWrapper<UserTerm>()
                 .eq(UserTerm::getUserId, userId)
                 .eq(UserTerm::getTerm, term));
         if (existing == null || !"confirmed".equals(existing.getStatus())) {
-            return 0; // 只对 confirmed 打回；pending 词走 evidence 通道
+            return; // 只对 confirmed 打回；pending 词走 evidence 通道
         }
         existing.setStatus("pending");
         if (c.getDescription() != null && !c.getDescription().isBlank()) {
-            existing.setDescription(c.getDescription()); // 新解释建议，确认时生效
+            existing.setDescription(c.getDescription()); // 新解释建议，确认时生效（覆盖，不追加——C7）
         }
         if (c.getSourceChunkId() > 0) {
             existing.setSourceChunkId(c.getSourceChunkId());
@@ -416,7 +438,6 @@ public class GlossaryServiceImpl implements GlossaryService {
         termMapper.updateById(existing);
         invalidateCache(userId);
         log.info("漂移/update 候选打回 pending，词: {}, 用户: {}", term, userId);
-        return 1;
     }
 
     /**
@@ -481,11 +502,21 @@ public class GlossaryServiceImpl implements GlossaryService {
         }
 
         // ② 漂移审计（确定性兜底）：confirmed 词近 30 天语料 0 命中 → 打回 pending
+        // fix-batch B2（Y2）：审计语料同口径收口（status='done' AND source='user'）
         OffsetDateTime since = LocalDate.now(ZONE).minusDays(AUDIT_WINDOW_DAYS).atStartOfDay(ZONE).toOffsetDateTime();
-        List<Chunk> corpus = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
-                .eq(Chunk::getUserId, userId)
-                .ge(Chunk::getCreatedAt, since)
-                .last("LIMIT " + CORPUS_LIMIT));
+        List<Long> userRecordIds = recordMapper.selectList(new LambdaQueryWrapper<Record>()
+                .eq(Record::getUserId, userId)
+                .eq(Record::getSource, "user")
+                .eq(Record::getStatus, RecordStatus.DONE)
+                .isNull(Record::getDeletedAt)
+                .ge(Record::getCreatedAt, since)
+                .last("LIMIT " + AUDIT_CORPUS_RECORD_LIMIT))
+                .stream().map(Record::getId).toList();
+        List<Chunk> corpus = userRecordIds.isEmpty() ? List.of()
+                : chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                        .eq(Chunk::getUserId, userId)
+                        .in(Chunk::getRecordId, userRecordIds)
+                        .last("LIMIT " + CORPUS_LIMIT));
         int drifted = 0;
         for (UserTerm term : confirmed) {
             if (!corpusMentions(corpus, term)) {
@@ -507,7 +538,8 @@ public class GlossaryServiceImpl implements GlossaryService {
     }
 
     /**
-     * 合并建议：给"被包含的短词"追加 pending 备注（description 追加合并建议，用户确认或忽略）
+     * 合并建议：给"被包含的短词"打 pending + 建议并入的别名预填进 aliases（fix-batch C7：
+     * 不再追加进 description——描述保持用户原文，别名候选由 confirm 的 newAliases 并入语义天然支持）
      *
      * @return 是否新建了建议
      */
@@ -516,14 +548,16 @@ public class GlossaryServiceImpl implements GlossaryService {
         if (!"confirmed".equals(shortTerm.getStatus())) {
             return false;
         }
-        String suggestion = "【合并建议】「" + shortTerm.getTerm() + "」可能是「" + longTerm.getTerm()
-                + "」的别名/同一指代，确认后将并入其别名；不需要则点忽略。";
         shortTerm.setStatus("pending");
-        shortTerm.setDescription(shortTerm.getDescription() + "\n" + suggestion);
+        // C7：合并建议目标词预填进 aliases（用户确认时 confirm 的 newAliases 通道并入；
+        // 忽略则 dismiss，aliases 不留痕）
+        Set<String> prefill = new LinkedHashSet<>(norm(shortTerm.getAliases()));
+        prefill.add(longTerm.getTerm());
+        shortTerm.setAliases(new ArrayList<>(prefill));
         shortTerm.setUpdatedAt(now);
         termMapper.updateById(shortTerm);
-        log.info("词条合并建议已生成：{} → {}（pending 复核），用户: {}",
-                shortTerm.getTerm(), longTerm.getTerm(), userId);
+        log.info("词条合并建议已生成：{} → {}（pending 复核，别名预填 {}），用户: {}",
+                shortTerm.getTerm(), longTerm.getTerm(), longTerm.getTerm(), userId);
         return true;
     }
 

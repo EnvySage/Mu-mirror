@@ -42,6 +42,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding 
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS ai_protocol VARCHAR(20) DEFAULT 'anthropic';
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS embedding_base_url TEXT;
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS rag_half_life INT DEFAULT 30;
+-- 2026-09-06 递归累计镜子（rolling-mirror-design.md §2）：回看深度档位 0-3，默认 1
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS mirror_lookback INT DEFAULT 1;
 
 -- ---------- 7. 规划表（3.3 原样 DDL） ----------
 -- 画像快照（取代 mirror_profiles，6.5；每用户 ~14 份，不建向量索引，裁决 #14）
@@ -142,3 +144,30 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 CREATE INDEX IF NOT EXISTS idx_tool_calls_user ON tool_calls(user_id, created_at);
 ALTER TABLE chunks ADD COLUMN IF NOT EXISTS vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE; -- vault 全消化 chunk 挂链（级联清，无孤儿）
 CREATE INDEX IF NOT EXISTS idx_chunks_vault_item ON chunks(vault_item_id);
+
+-- ---------- 9. 2026-09-06 递归累计镜子（rolling-mirror-design.md §4-B） ----------
+-- monthly 快照归属月份精确列（幂等判断切精确列，替换此前 created_at 窗口近似方案）
+ALTER TABLE profile_snapshots ADD COLUMN IF NOT EXISTS period_month CHAR(7);
+CREATE INDEX IF NOT EXISTS idx_snapshots_period ON profile_snapshots(user_id, snapshot_type, period_month);
+-- 同一 (user, 归属月份) 唯一：幂等重生成即替换（部分唯一索引，NULL 不参与约束）
+CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshots_user_period
+    ON profile_snapshots(user_id, period_month) WHERE snapshot_type = 'monthly' AND period_month IS NOT NULL;
+-- 存量 monthly 快照补值：seed 语义（内容归属月）优先于 created_at 推断——
+-- 自动推断 SQL 供参考（按"定时任务次月生成上月画像"假设，createdAt 所在月-1）：
+--   UPDATE profile_snapshots SET period_month = TO_CHAR((created_at AT TIME ZONE 'Asia/Shanghai')::date - INTERVAL '1 month', 'YYYY-MM')
+--   WHERE snapshot_type='monthly' AND period_month IS NULL;
+-- 本次活库已按内容语义手工校正（14 号 created 6/30 但内容为七月 → period_month='2026-07'）。
+
+-- ---------- 10. 2026-09-06 审查修复批（fix-batch B7：digest_status 五态 + 确认门禁） ----------
+-- 五态（toolcalling-vault-design.md §3.3b 用户定稿）：pending → extracted → confirmed；
+-- skipped / failed 终态独立。应用层枚举迁移（列本身 VARCHAR 无 CHECK 约束，无需 ALTER CHECK）：
+--   ① 旧 done（文本族/PDF/docx 全消化且已 embed）→ confirmed（确认门禁语义上"已可检索"）
+--   ② 旧 done（图片半消化）→ extracted（Y4 如实口径：图片无全文索引，待用户确认）
+-- 判定：join mime 前缀，image/ 开头的 done → extracted，其余 done → confirmed。
+UPDATE vault_items SET digest_status = 'extracted'
+WHERE digest_status = 'done' AND mime LIKE 'image/%';
+UPDATE vault_items SET digest_status = 'confirmed'
+WHERE digest_status = 'done' AND mime NOT LIKE 'image/%';
+-- 注意：旧管道 done 时全文 chunk 已 embed，confirmed 语义成立；其 key chunk 由下次
+-- confirm（幂等入口：confirmed 重复确认直接返回，不重建 key chunk）之外的场景补齐——
+-- 存量已确认资产如需 key chunk，可由用户在资产页"改一改"再确认触发（Accept: extracted 后重复确认）。

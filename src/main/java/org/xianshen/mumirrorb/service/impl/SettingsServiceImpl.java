@@ -78,6 +78,11 @@ public class SettingsServiceImpl implements SettingsService {
         if (dto.getRagHalfLife() != null) {
             settings.setRagHalfLife(dto.getRagHalfLife());
         }
+        if (dto.getMirrorLookback() != null) {
+            // 回看深度档位合法性防御（0-3，rolling-mirror-design.md §2）：越界值归默认 1
+            int v = dto.getMirrorLookback();
+            settings.setMirrorLookback(v >= 0 && v <= 3 ? v : 1);
+        }
 
         settings.setUpdatedAt(OffsetDateTime.now());
         settingsMapper.updateById(settings);
@@ -221,6 +226,7 @@ public class SettingsServiceImpl implements SettingsService {
                 .embeddingModel(settings.getEmbeddingModel())
                 .reviewMode(settings.getReviewMode())
                 .ragHalfLife(settings.getRagHalfLife())
+                .mirrorLookback(settings.getMirrorLookback() == null ? 1 : settings.getMirrorLookback())
                 .createdAt(settings.getCreatedAt())
                 .updatedAt(settings.getUpdatedAt())
                 .build();

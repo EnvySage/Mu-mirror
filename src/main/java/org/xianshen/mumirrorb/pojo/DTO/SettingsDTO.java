@@ -80,4 +80,10 @@ public class SettingsDTO {
      */
     @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")
     private Integer ragHalfLife;
+
+    /**
+     * 镜子回看深度（0-3，默认 1，rolling-mirror-design.md §2）
+     */
+    @Schema(description = "镜子回看深度（0-3，默认 1：0=纯继承 / 1=上月原文 / 2=近三月原文 / 3=全部原文）", example = "1")
+    private Integer mirrorLookback;
 }

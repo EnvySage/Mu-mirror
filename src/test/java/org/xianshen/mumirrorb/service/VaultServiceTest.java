@@ -65,7 +65,8 @@ class VaultServiceTest {
     @BeforeEach
     void setUp() {
         vaultService = new VaultServiceImpl(itemMapper, recordMapper, chunkMapper, termMapper,
-                storage, new VaultProperties(), aiGrpcClient, null);
+                storage, new VaultProperties(), aiGrpcClient,
+                org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.impl.DigestService.class), null);
         doReturn(0L).when(itemMapper).sumAliveBytes(USER_ID);
         doReturn(List.of()).when(itemMapper).selectAliveByUser(USER_ID);
         doReturn(null).when(itemMapper).selectOne(any());

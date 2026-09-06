@@ -30,6 +30,8 @@ jwt:
 logging:
   level:
     root: INFO
+    org.xianshen.mumirrorb.service.impl: INFO   # 画像/对话主链路（递归累计镜子输入组装日志在此）
+    org.xianshen.mumirrorb.grpc: INFO           # gRPC 调用参数观测
     org.xianshen.mumirrorb: WARN
     org.springframework.security: DEBUG
     com.baomidou.mybatisplus: DEBUG

@@ -53,11 +53,14 @@ public class ExportServiceImpl implements ExportService {
         String username = resolveUsername(userId);
 
         // 1. records + chunks（user + system 全量；排除 embedding）
+        // fix-batch C4（fix-batch-design.md B7.8）：排除 source='vault' 虚拟记录——
+        // vault 全文消化借 records 表挂链 chunk，本体属资产库（vault 导出另行裁决），不进数据导出
         List<ExportVO.RecordExportItem> recordItems = new ArrayList<>();
         List<Record> records = recordMapper.selectList(
                 new LambdaQueryWrapper<Record>()
                         .eq(Record::getUserId, userId)
                         .isNull(Record::getDeletedAt)
+                        .ne(Record::getSource, "vault")
                         .orderByAsc(Record::getCreatedAt));
         for (Record record : records) {
             List<Map<String, Object>> chunkItems = new ArrayList<>();

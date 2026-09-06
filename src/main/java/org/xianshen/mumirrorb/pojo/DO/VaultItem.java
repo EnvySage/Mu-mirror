@@ -19,8 +19,10 @@ import java.util.UUID;
  *
  * <p>本体 BYTEA 在 vault_blobs 分表（{@link VaultBlob}），列表查询永不拉 blob。</p>
  *
- * <p>状态机（digest_status）：pending（待消化）→ done（全消化，文本/PDF/docx）/
- * skipped（零消化，音视频元数据卡）→ failed（消化失败，管道隔离不影响主服务）。</p>
+ * <p>状态机（digest_status，fix-batch B7 五态，§3.3b 确认门禁）：
+ * pending（排队）→ extracted（提取完待确认）→ confirmed（已确认+已 embed，可检索）；
+ * skipped（零消化，音视频元数据卡）；failed（消化失败，管道隔离不影响主服务）。
+ * 旧 done 态迁移：文本 done→confirmed，图片 done→extracted（migration-v2.sql B7 段）。</p>
  */
 @Data
 @Builder
@@ -65,8 +67,9 @@ public class VaultItem {
     @Schema(description = "描述", example = "RAG 方向毕设开题报告")
     private String description;
 
-    /** 消化状态：pending/done/skipped/failed */
-    @Schema(description = "消化状态", example = "done", allowableValues = {"pending", "done", "skipped", "failed"})
+    /** 消化状态五态（B7）：pending/extracted/confirmed/skipped/failed（§3.3b 确认门禁） */
+    @Schema(description = "消化状态", example = "confirmed",
+            allowableValues = {"pending", "extracted", "confirmed", "skipped", "failed"})
     private String digestStatus;
 
     /** 全消化的代表 chunk（挂 vault_item_id 管道产物；删除时 SET NULL） */

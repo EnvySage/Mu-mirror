@@ -69,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding 
 -- ============================================================
 -- 用户配置表（AI 模型配置，每个用户一条）
 -- rag_half_life：RAG 时间衰减半衰期（天，7-365），6.4 规划项
+-- mirror_lookback：镜子回看深度档位 0-3（rolling-mirror-design.md §2）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_settings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -84,6 +85,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     embedding_model VARCHAR(100),
     review_mode VARCHAR(20) DEFAULT 'manual',       -- manual / auto
     rag_half_life INT DEFAULT 30,
+    mirror_lookback INT DEFAULT 1,                  -- 回看深度 0=纯继承上月镜子 / 1=上月原文 / 2=近三月原文 / 3=全部原文
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -92,11 +94,13 @@ CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
 -- ============================================================
 -- 画像快照（取代旧 mirror_profiles，6.5）
 -- 每用户仅 ~14 份（手动保 2 + 月度保 12）→ 不建向量索引，顺序扫描更快（裁决 #14）
+-- period_month：monthly 快照归属月份 yyyy-MM（rolling-mirror-design.md §4-B；幂等判断精确列）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS profile_snapshots (
     id BIGSERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
     snapshot_type VARCHAR(20) NOT NULL,   -- manual（用户触发）/ monthly（每月1号定时）
+    period_month CHAR(7),                 -- monthly 归属月份 yyyy-MM（manual 为 NULL）；历史行按内容/created_at 补值
     mood_analysis TEXT,
     learning_analysis TEXT,
     todo_analysis TEXT,
@@ -107,6 +111,10 @@ CREATE TABLE IF NOT EXISTS profile_snapshots (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_user ON profile_snapshots(user_id, snapshot_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_period ON profile_snapshots(user_id, snapshot_type, period_month);
+-- 同一 (user, monthly, 归属月份) 唯一：幂等重生成即替换（部分唯一索引，NULL 不参与约束）
+CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshots_user_period
+    ON profile_snapshots(user_id, period_month) WHERE snapshot_type = 'monthly' AND period_month IS NOT NULL;
 
 -- ============================================================
 -- 会话（6.6；无 last_message_at，统一用 updated_at，裁决 #9）
@@ -173,7 +181,10 @@ CREATE TABLE IF NOT EXISTS vault_items (
     sha256 VARCHAR(64),                      -- 同用户同内容去重
     category VARCHAR(20),                    -- 复用 contentType 枚举
     description VARCHAR(500),                -- 用户一句话提示 / LLM 自动命名（三层渐进）
-    digest_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/done/skipped/failed
+    digest_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    -- 五态（fix-batch B7，§3.3b 确认门禁）：pending（排队）→ extracted（提取完待确认）
+    --   → confirmed（已确认+已 embed，进检索）；skipped（音视频零消化）；failed（消化失败）
+    --   旧 done 态迁移见 migration-v2.sql B7 段（文本 done→confirmed / 图片 done→extracted）
     source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT now(),
     deleted_at TIMESTAMPTZ

@@ -3,7 +3,6 @@ package org.xianshen.mumirrorb.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -65,6 +64,7 @@ public class VaultServiceImpl implements VaultService {
     private final VaultStorage storage;
     private final VaultProperties props;
     private final AiGrpcClient aiGrpcClient;
+    private final DigestService digestService;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // ==================== 上传 ====================
@@ -130,8 +130,8 @@ public class VaultServiceImpl implements VaultService {
         // 8. 本体落分表
         storage.put(storageKey, bytes);
 
-        // 9. 消化异步（管道隔离；失败只改该文件状态）
-        digestAsync(userId, item.getId());
+        // 9. 消化异步（B5：独立 DigestService Bean，@Async 代理生效；自调用失效已修）
+        digestService.digestAsync(userId, item.getId());
 
         log.info("vault 上传成功，用户: {}, id: {}, mime: {}, size: {}",
                 userId, item.getId(), mime, humanSize(bytes.length));
@@ -225,6 +225,12 @@ public class VaultServiceImpl implements VaultService {
         return toVO(item, null, null, quote, chunkCount);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public String requireName(UUID userId, Long itemId) {
+        return requireAlive(itemId, userId).getOriginalName();
+    }
+
     // ==================== 下载 / 预览 ====================
 
     @Override
@@ -283,105 +289,38 @@ public class VaultServiceImpl implements VaultService {
         return toVO(item, null, null);
     }
 
-    // ==================== 三档消化（异步，管道隔离） ====================
-
-    @Override
-    @Async
-    @Transactional
-    public void digestAsync(UUID userId, Long itemId) {
-        try {
-            doDigest(userId, itemId);
-        } catch (Exception e) {
-            // 管道隔离：失败只影响该文件状态，不炸主服务
-            log.warn("vault 消化失败（管道隔离），item: {}, 原因: {}", itemId, e.getMessage());
-            try {
-                VaultItem patch = VaultItem.builder().id(itemId).digestStatus("failed").build();
-                itemMapper.updateById(patch);
-            } catch (Exception ignored) {
-            }
-        }
-    }
+    // ==================== 三档消化（B5/B7：管道在 DigestService 独立 Bean） ====================
 
     /**
-     * 三档分派：文本族/PDF/docx 全消化；图片半消化（用户描述即 key）；音视频零消化 skipped
+     * 消化入口（兼容保留）：委派 {@link DigestService#digestAsync}（B5 拆分后自调用失效修复）
      */
-    private void doDigest(UUID userId, Long itemId) {
-        VaultItem item = itemMapper.selectAliveById(itemId, userId);
-        if (item == null) {
-            return;
-        }
-        if (item.getMime().startsWith("image/") || item.getMime().startsWith("audio/")) {
-            // 半消化/零消化：元数据卡保管；有用户描述即视为可检索（语义层 ② 用 description embedding）
-            String status = item.getMime().startsWith("image/") ? "done" : "skipped";
-            item.setDigestStatus(status);
-            itemMapper.updateById(item);
-            log.info("vault {} 消化完成（{}），item: {}",
-                    item.getMime().startsWith("image/") ? "半" : "零", status, itemId);
-            return;
-        }
-
-        // 全消化：抽文本 → Record(vault) → chunk 挂 vault_item_id → Embed
-        VaultBlob blob = storage.get(item.getStorageKey());
-        if (blob == null || blob.getData() == null) {
-            throw new IllegalStateException("本体缺失");
-        }
-        String text = ContentExtractor.extract(blob.getData(), item.getMime(), props.getDigestMaxChars());
-        if (text == null || text.isBlank()) {
-            item.setDigestStatus("failed");
-            itemMapper.updateById(item);
-            log.warn("vault 全消化无文本产出，item: {}, mime: {}", itemId, item.getMime());
-            return;
-        }
-
-        // 虚拟 Record（vault 内容进时间线？不进——source='vault' 隔离，列表口径 source='user' 不受影响）
-        Record record = Record.builder()
-                .userId(userId)
-                .content(text)
-                .source("vault")
-                .status(org.xianshen.mumirrorb.common.enums.RecordStatus.DONE)
-                .userReviewed(true)
-                .createdAt(item.getCreatedAt())
-                .updatedAt(OffsetDateTime.now(ZONE))
-                .build();
-        recordMapper.insert(record);
-
-        Chunk chunk = Chunk.builder()
-                .userId(userId)
-                .recordId(record.getId())
-                .vaultItemId(itemId)
-                .content(text)
-                .segment(text)
-                .metadata(digestMetadata(item))
-                .classifiedSegment(text)
-                .userEdited(false)
-                .createdAt(OffsetDateTime.now(ZONE))
-                .build();
-        chunkMapper.insert(chunk);
-        item.setSourceChunkId(chunk.getId());
-
-        // Embed（失败不阻断，向量后续可补——与 confirm 口径一致）
-        try {
-            EmbeddingProto.EmbedResponse embed = aiGrpcClient.embed(userId, text);
-            chunk.setEmbedding(embed.getVectorList());
-            chunkMapper.updateById(chunk);
-        } catch (Exception e) {
-            log.warn("vault chunk Embed 失败（不阻断），item: {}, 原因: {}", itemId, e.getMessage());
-        }
-
-        item.setDigestStatus("done");
-        itemMapper.updateById(item);
-        log.info("vault 全消化完成，item: {}, 文本 {} 字符, chunk: {}", itemId, text.length(), chunk.getId());
+    @Override
+    public void digestAsync(UUID userId, Long itemId) {
+        digestService.digestAsync(userId, itemId);
     }
 
-    private Map<String, Object> digestMetadata(VaultItem item) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("title", item.getOriginalName());
-        metadata.put("summary", item.getDescription() == null
-                ? "vault 资产：" + item.getOriginalName() : item.getDescription());
-        metadata.put("contentType", item.getCategory() == null ? "note" : item.getCategory());
-        metadata.put("vaultItemId", item.getId());
-        metadata.put("vaultMime", item.getMime());
-        return metadata;
+    // ==================== 确认门禁（B7：确认是 embed 的准入条件） ====================
+
+    /**
+     * 确认消化（§3.3b 用户定稿）：body {key, description, category}（用户可改后提交）→
+     * ① 更新元数据 ② 生成 key chunk（embed=key+description+类型，contentType='note'，挂 vault_item_id）
+     * ③ 全文消化 chunks 这时才 embed ④ 状态 → confirmed
+     *
+     * <p>幂等：已 confirmed 直接返回；embed 失败保持 extracted 可重试（DigestService 内处理）。
+     * 图片 Y4 如实口径：digest_status=extracted，描述可空但 F 强制输入。</p>
+     */
+    @Override
+    @Transactional
+    public VaultItemVO confirm(UUID userId, Long itemId, String key, String description, String category) {
+        VaultItem item = requireAlive(itemId, userId);
+        if (key != null && key.length() > 255) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "文件名（key）最长 255 字");
+        }
+        if (description != null && description.length() > 500) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "描述最长 500 字");
+        }
+        VaultItem confirmed = digestService.confirmDigest(item, key, description, category);
+        return toVO(confirmed, null, null);
     }
 
     // ==================== 内部工具 ====================

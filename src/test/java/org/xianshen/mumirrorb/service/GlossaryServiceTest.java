@@ -55,6 +55,8 @@ class GlossaryServiceTest {
     @Mock
     private ChunkMapper chunkMapper;
     @Mock
+    private org.xianshen.mumirrorb.mapper.RecordMapper recordMapper;
+    @Mock
     private AiGrpcClient aiGrpcClient;
 
     private GlossaryServiceImpl glossaryService;
@@ -66,11 +68,13 @@ class GlossaryServiceTest {
 
     @BeforeEach
     void setUp() {
-        glossaryService = new GlossaryServiceImpl(termMapper, chunkMapper, aiGrpcClient);
+        glossaryService = new GlossaryServiceImpl(termMapper, chunkMapper, recordMapper, aiGrpcClient);
         org.mockito.Mockito.doReturn(true).when(aiGrpcClient).hasLlmConfig(USER_ID);
         org.mockito.Mockito.doReturn(CommonProto.LlmConfig.newBuilder().setModel("test-model").build()).when(aiGrpcClient).buildLlmConfigFor(USER_ID);
         org.mockito.Mockito.doReturn(List.of()).when(termMapper).selectByUser(USER_ID);
         org.mockito.Mockito.doReturn(List.of()).when(termMapper).selectConfirmedTop(eq(USER_ID), anyInt());
+        // fix-batch B2（Y2）语料收口：抽取/审计语料先经 record 白名单两段式预过滤（done+user+未删除）
+        org.mockito.Mockito.doReturn(List.of()).when(recordMapper).selectList(any());
     }
 
     private UserTerm term(long id, String name, String status, int queryHits, List<String> aliases) {
@@ -97,6 +101,11 @@ class GlossaryServiceTest {
 
     private String nextTerm() {
         return "词" + (++termSeq);
+    }
+
+    /** fix-batch B2（Y2）语料收口：record 白名单预过滤的桩数据（done+user+未删除记录） */
+    private org.xianshen.mumirrorb.pojo.DO.Record recordOf(long id) {
+        return org.xianshen.mumirrorb.pojo.DO.Record.builder().id(id).build();
     }
 
     // ==================== 注入列表：top30 截断 + 缓存 ====================
@@ -297,6 +306,7 @@ class GlossaryServiceTest {
     @DisplayName("抽取：RPC 正常 → new 落 pending；evidence 只加计数；update 打回 pending")
     void extract_candidatesClassified() {
         String newTerm = nextTerm(), evidTerm = nextTerm(), updTerm = nextTerm();
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
         org.mockito.Mockito.doReturn(List.of(Chunk.builder() .id(5L).recordId(7L).userId(USER_ID).segment("语料").content("语料").build())).when(chunkMapper).selectList(any());
         org.mockito.Mockito.doReturn(RecordProcessorProto.ExtractTermsReply.newBuilder() .addCandidates(candidate(newTerm, "new", 5L)) .addCandidates(candidate(evidTerm, "evidence", 5L)) .addCandidates(candidate(updTerm, "update", 5L)) .build()).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
         // evidence 目标 = 已有 pending 词；update 目标 = 已有 confirmed 词
@@ -305,15 +315,21 @@ class GlossaryServiceTest {
         org.mockito.Mockito.doReturn(term(21, updTerm, "confirmed", 0, null)).when(termMapper).selectOne(any());
         org.mockito.Mockito.doReturn(Chunk.builder().id(5L).recordId(7L).build()).when(chunkMapper).selectById(5L);
 
-        int created = glossaryService.extractForUser(USER_ID);
+        List<org.xianshen.mumirrorb.pojo.VO.GlossaryGroupVO.UserTermVO> created = glossaryService.extractForUser(USER_ID);
 
-        // new 落库 1 条 + update 打回 1 条
-        assertEquals(2, created);
+        // fix-batch C5：返回值语义改为"本次新增 pending 候选列表"——new 落库 1 条进列表；
+        // update 打回是已有词条的状态迁移，不产生新候选，不进 candidates
+        assertEquals(1, created.size());
+        assertEquals(newTerm, created.get(0).getTerm());
+        assertEquals("pending", created.get(0).getStatus());
         ArgumentCaptor<UserTerm> insertCaptor = ArgumentCaptor.forClass(UserTerm.class);
         verify(termMapper).insert(insertCaptor.capture());
         assertEquals(newTerm, insertCaptor.getValue().getTerm());
         assertEquals("pending", insertCaptor.getValue().getStatus());
         assertEquals(7L, insertCaptor.getValue().getSourceRecordId()); // F 契约：record id 反查
+        // update 打回仍发生（已有 confirmed 词被迁移 pending）
+        verify(termMapper).updateById(org.mockito.ArgumentMatchers.argThat(t ->
+                t != null && updTerm.equals(t.getTerm()) && "pending".equals(t.getStatus())));
     }
 
     @Test
@@ -322,7 +338,7 @@ class GlossaryServiceTest {
         org.mockito.Mockito.doReturn(List.of(Chunk.builder() .id(5L).userId(USER_ID).segment("语料").content("语料").build())).when(chunkMapper).selectList(any());
         org.mockito.Mockito.doThrow(new io.grpc.StatusRuntimeException(io.grpc.Status.UNAVAILABLE)).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
 
-        assertEquals(0, glossaryService.extractForUser(USER_ID));
+        assertTrue(glossaryService.extractForUser(USER_ID).isEmpty());
         verify(termMapper, never()).insert(any(UserTerm.class));
 
         // 调度入口同样吞掉异常（内层抛业务异常模拟）
@@ -335,7 +351,7 @@ class GlossaryServiceTest {
     void extract_noLlm_skipped() {
         org.mockito.Mockito.doReturn(false).when(aiGrpcClient).hasLlmConfig(USER_ID);
 
-        assertEquals(0, glossaryService.extractForUser(USER_ID));
+        assertTrue(glossaryService.extractForUser(USER_ID).isEmpty());
         verify(aiGrpcClient, never()).extractTerms(any(), any());
         verify(chunkMapper, never()).selectList(any());
     }
@@ -348,7 +364,7 @@ class GlossaryServiceTest {
         org.mockito.Mockito.doReturn(RecordProcessorProto.ExtractTermsReply.newBuilder() .addCandidates(candidate(known, "new", 5L)) .build()).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
         org.mockito.Mockito.doReturn(List.of(term(30, known, "dismissed", 0, null))).when(termMapper).selectByUser(USER_ID); // dismissed 未过 30 天 → 去重
 
-        assertEquals(0, glossaryService.extractForUser(USER_ID));
+        assertTrue(glossaryService.extractForUser(USER_ID).isEmpty());
         verify(termMapper, never()).insert(any(UserTerm.class));
     }
 
@@ -360,6 +376,7 @@ class GlossaryServiceTest {
         UserTerm alive = term(1, "论文", "confirmed", 0, null);
         UserTerm drifted = term(2, "游戏", "confirmed", 0, null);
         org.mockito.Mockito.doReturn(List.of(alive, drifted)).when(termMapper).selectConfirmedTop(eq(USER_ID), anyInt());
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
         org.mockito.Mockito.doReturn(List.of(Chunk.builder() .id(5L).userId(USER_ID).segment("论文又改了一遍").content("论文语料").build())).when(chunkMapper).selectList(any());
 
         glossaryService.monthlyMaintenance(USER_ID);
@@ -378,6 +395,7 @@ class GlossaryServiceTest {
         UserTerm shortTerm = term(2, "词典系统", "confirmed", 0, null);
         org.mockito.Mockito.doReturn(List.of(longTerm, shortTerm)).when(termMapper).selectConfirmedTop(eq(USER_ID), anyInt());
         // 语料两个词都出现：都不算漂移，只触发合并建议
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
         org.mockito.Mockito.doReturn(List.of(Chunk.builder() .id(5L).userId(USER_ID).segment("今天在写个人词典系统， aka 词典系统").content("").build())).when(chunkMapper).selectList(any());
 
         glossaryService.monthlyMaintenance(USER_ID);
@@ -386,8 +404,10 @@ class GlossaryServiceTest {
         verify(termMapper).updateById(captor.capture());
         assertEquals(shortTerm.getId(), captor.getValue().getId());
         assertEquals("pending", captor.getValue().getStatus());
-        assertTrue(captor.getValue().getDescription().contains("合并建议"));
-        assertTrue(captor.getValue().getDescription().contains(longTerm.getTerm()));
+        // fix-batch C7：合并建议不再追加进 description（描述保持用户原文），
+        // 目标词预填进 aliases（确认时经 newAliases 通道并入）
+        assertFalse(captor.getValue().getDescription().contains("合并建议"));
+        assertTrue(captor.getValue().getAliases().contains(longTerm.getTerm()));
     }
 
     @Test

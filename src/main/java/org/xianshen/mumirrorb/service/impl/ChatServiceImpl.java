@@ -178,8 +178,8 @@ public class ChatServiceImpl implements ChatService {
         insertMessage(userId, sessionId, "assistant", answer.toString(), sources);
         touchSession(sessionId);
         sendEvent(emitter, "sources", sources);
-        // vault_refs（toolcalling-vault-design.md 4.1）：AI 输出 [n] 引用 vault 工具结果中的文件 →
-        // 解析出被引用文件卡（字段：n/vault_item_id/display_name/file_type/size/digest_status/quote）
+        // vault_refs（toolcalling-vault-design.md 4.1 + fix-batch B3）：AI 输出 [F编号] 引用 vault
+        // 工具结果中的文件 → 解析出被引用文件卡（字段：n/vault_item_id/display_name/file_type/size/digest_status/quote）
         java.util.List<Map<String, Object>> vaultRefs = extractVaultRefs(answer.toString(), toolResults);
         if (!vaultRefs.isEmpty()) {
             sendEvent(emitter, "vault_refs", vaultRefs);
@@ -190,8 +190,11 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * vault_refs 提取（4.1）：扫描 AI 回答中的 [n] 标记，
-     * n 落在 1..vault 文件数 内 → 取 find_item/recall_item 结果对应项组文件卡（同气泡去重）
+     * vault_refs 提取（4.1）：扫描 AI 回答中的 [F编号] 标记（fix-batch B3/Y3：
+     * 文件引用独立编号空间 [F1][F2]…，与日记资料 sources 的 [n] 不再共用——
+     * 普通 [1] 不再触发文件卡，避免与 sources 引用撞编号）。
+     *
+     * <p>Fn 落在 1..vault 文件数 内 → 取 find_item/recall_item 结果对应项组文件卡（同气泡去重）。</p>
      */
     private java.util.List<Map<String, Object>> extractVaultRefs(String answer,
                                                                  List<CommonProto.ToolResult> toolResults) {
@@ -229,10 +232,10 @@ public class ChatServiceImpl implements ChatService {
         if (vaultItems.isEmpty()) {
             return refs;
         }
-        // [n] 标记去重收集（1-based，对齐现有 sources 语法）
+        // [F编号] 标记去重收集（1-based；只认 [F\d+]，普通 [n] 是日记 sources 引用不触发文件卡——B3/Y3）
         java.util.Set<Integer> marks = new java.util.LinkedHashSet<>();
         java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("\\[(\\d{1,2})]").matcher(answer);
+                .compile("\\[F(\\d{1,2})]").matcher(answer);
         while (matcher.find()) {
             try {
                 int n = Integer.parseInt(matcher.group(1));

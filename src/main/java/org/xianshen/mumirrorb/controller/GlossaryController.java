@@ -174,18 +174,20 @@ public class GlossaryController {
 
     @Operation(
             summary = "手动触发候选抽取",
-            description = "近 14 天 confirmed chunks 语料 → AI 抽取词条候选落 pending（懒人立即出候选）。"
-                    + "Python 侧未上线时返回 0（不报错）。"
+            description = "近 14 天语料（status='done' AND source='user'，fix-batch B2 收口）→ AI 抽取词条候选"
+                    + "落 pending（懒人立即出候选）。Python 侧未上线时返回 0（不报错）。"
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "抽取完成（data=新增候选数）"),
+            @ApiResponse(responseCode = "200", description = "抽取完成（data.candidates=候选列表）"),
             @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
     })
     @PostMapping("/extract")
     public R<Map<String, Object>> extract() {
         UUID userId = getCurrentUserId();
-        int created = glossaryService.extractForUser(userId);
-        return R.ok("抽取完成", Map.of("created", created));
+        // fix-batch C5：响应对齐 F 契约 {candidates:[...]}（原 {created:n} 数字口径废弃；
+        // candidates = 本次新增 pending 候选的完整词条卡，前端直接渲染候选列表）
+        List<UserTermVO> created = glossaryService.extractForUser(userId);
+        return R.ok("抽取完成", Map.of("candidates", created));
     }
 
     private static String strOf(Object o) {

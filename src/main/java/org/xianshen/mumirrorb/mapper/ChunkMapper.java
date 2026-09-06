@@ -94,4 +94,60 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                                               @Param("queryVector") String queryVector,
                                               @Param("contentType") String contentType,
                                               @Param("limit") int limit);
+
+    /**
+     * 回看窗口原文（rolling-mirror-design.md §2：按 lookback 档位带②本月原始记录）
+     *
+     * <p>时间窗 [since, until)：until 开区间；旧→新升序（截断时保留最近 N 条由 Service 层实现，
+     * SQL LIMIT 是条数闸硬上限兜底）。只带 source='user'、未删除、非 failed 记录的 chunk；
+     * segment 优先渲染（用户可编辑的唯一真源，裁决 #2），空则回退 content 由 Service 判。</p>
+     */
+    @Select("""
+            <script>
+            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.created_at
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status != 'failed'
+              AND c.vault_item_id IS NULL
+              <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
+            ORDER BY r.created_at ASC, c.id ASC
+            <if test="limit &gt; 0">LIMIT #{limit}</if>
+            </script>
+            """)
+    List<Chunk> selectLookbackChunks(@Param("userId") UUID userId,
+                                     @Param("since") java.time.OffsetDateTime since,
+                                     @Param("until") java.time.OffsetDateTime until,
+                                     @Param("limit") int limit);
+
+    /**
+     * 校正索引源数据（rolling-mirror-design.md §1③：上期镜子涉及的记录 title+日期清单）
+     *
+     * <p>与 lookback 窗口同口径（user 记录、未删除、非 failed），取窗口内全部 chunk 的
+     * title + 日期；lookback=0 时随请求携带（唯一防误差手段）。</p>
+     */
+    @Select("""
+            <script>
+            SELECT c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS record_date
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status != 'failed'
+              AND c.vault_item_id IS NULL
+              AND c.metadata->>'title' IS NOT NULL
+              AND c.metadata->>'title' != ''
+              <if test="since != null">AND r.created_at &gt;= #{since}</if>
+              <if test="until != null">AND r.created_at &lt; #{until}</if>
+            ORDER BY r.created_at ASC, c.id ASC
+            </script>
+            """)
+    List<java.util.Map<String, Object>> selectCorrectionIndex(@Param("userId") UUID userId,
+                                                              @Param("since") java.time.OffsetDateTime since,
+                                                              @Param("until") java.time.OffsetDateTime until);
 }

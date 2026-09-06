@@ -134,6 +134,15 @@ public class UserSettings {
     private Integer ragHalfLife;
 
     /**
+     * 镜子回看深度档位（0-3，默认 1，rolling-mirror-design.md §2）
+     *
+     * <p>生成镜子时带多少原文回看：0=纯继承上月镜子（带校正索引） / 1=上月原文（默认） /
+     * 2=近三月原文 / 3=全部原文（慢，消耗大）。</p>
+     */
+    @Schema(description = "镜子回看深度（0-3，默认 1）", example = "1")
+    private Integer mirrorLookback;
+
+    /**
      * 创建时间
      */
     @Schema(description = "创建时间")

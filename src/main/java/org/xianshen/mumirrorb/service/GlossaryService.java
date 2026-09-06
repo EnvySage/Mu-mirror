@@ -78,12 +78,12 @@ public interface GlossaryService {
     /**
      * 手动触发候选抽取（5c：POST /api/glossary/extract，懒人立即出候选）
      *
-     * <p>语料=近 14 天 confirmed chunks（user_edited 优先），30 天去重窗。
-     * Python 侧 ExtractTerms 未上线时降级为语料匹配计数（见实现）。</p>
+     * <p>语料=近 14 天用户日记 chunks（fix-batch B2：status='done' AND source='user' 收口），
+     * 30 天去重窗。Python 侧 ExtractTerms 未上线时降级为空（见实现）。</p>
      *
-     * @return 新增 pending 候选数（0 = 无新候选）
+     * @return 本次新增 pending 候选词条卡列表（fix-batch C5 F 契约：响应对齐 {candidates:[...]}）
      */
-    int extractForUser(UUID userId);
+    List<org.xianshen.mumirrorb.pojo.VO.GlossaryGroupVO.UserTermVO> extractForUser(UUID userId);
 
     /**
      * 定时抽取入口（DailySummaryScheduler 01:00 顺路调用）
