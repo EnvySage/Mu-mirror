@@ -1,5 +1,7 @@
 package org.xianshen.mumirrorb.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -59,11 +61,18 @@ public class DigestService {
     // ==================== 消化管道（B7 五态） ====================
 
     /**
-     * 消化入口（@Async 独立 Bean 代理生效——B5 拆分点）
+     * 消化入口（@Async 独立 Bean 代理生效——B5 拆分点；B8 指定专用线程池）
+     *
+     * <p>B8 修复：@Async("vaultDigestExecutor") 显式限定专用 ThreadPoolTaskExecutor。
+     * 背景：项目只有 @EnableAsync 没有显式 TaskExecutor Bean，Boot 默认
+     * applicationTaskExecutor 在类路径存在特殊 Executor（grpc 等）时可能不被用于
+     * @Async 或被替换，表现为 executor 零存活线程但队列有任务——任务静默丢失
+     * （无 task-N 日志、状态永远 pending）。指定 bean 名根治；队列满时
+     * CallerRunsPolicy 让消化回退到调用线程同步执行（慢但不丢）。</p>
      *
      * <p>文本族/PDF/docx 全提取（不 embed）；图片半消化；音视频零消化 skipped。</p>
      */
-    @Async
+    @Async("vaultDigestExecutor")
     @Transactional
     public void digestAsync(UUID userIdIgnored, Long itemId) {
         try {
@@ -72,8 +81,10 @@ public class DigestService {
             // 管道隔离：失败只影响该文件状态，不炸主服务
             log.warn("vault 消化失败（管道隔离），item: {}, 原因: {}", itemId, e.getMessage());
             try {
-                VaultItem patch = VaultItem.builder().id(itemId).digestStatus("failed").build();
-                itemMapper.updateById(patch);
+                // 管道隔离：失败只影响该文件状态，不炸主服务（定向补丁，不整行覆盖）
+                itemMapper.update(null, new LambdaUpdateWrapper<VaultItem>()
+                        .eq(VaultItem::getId, itemId)
+                        .set(VaultItem::getDigestStatus, "failed"));
             } catch (Exception ignored) {
             }
         }
@@ -138,9 +149,15 @@ public class DigestService {
                 .createdAt(OffsetDateTime.now(ZONE))
                 .build();
         chunkMapper.insert(chunk);
+        // 定向更新（B8 竞态审计）：只 SET source_chunk_id + digest_status 两列——
+        // item 是消化开头查出的快照（PDF 抽文本可长达数秒），updateById 全列覆盖会把
+        // 期间并发写入的 description/category/confirmed 状态冲掉
         item.setSourceChunkId(chunk.getId());
         item.setDigestStatus("extracted");
-        itemMapper.updateById(item);
+        itemMapper.update(null, new LambdaUpdateWrapper<VaultItem>()
+                .eq(VaultItem::getId, itemId)
+                .set(VaultItem::getSourceChunkId, chunk.getId())
+                .set(VaultItem::getDigestStatus, "extracted"));
         log.info("vault 全提取完成（extracted，待确认；embed 留给 confirm），item: {}, 文本 {} 字符, chunk: {}",
                 itemId, text.length(), chunk.getId());
     }
@@ -164,6 +181,9 @@ public class DigestService {
             return item; // 幂等：重复确认直接返回
         }
         // ① 元数据更新（用户改后提交的 key/description/category）
+        // B8 竞态审计：定向更新 original_name/description/category 三列。confirm 的实体
+        // 是 VaultServiceImpl.confirm 刚查出的快照，updateById 全列覆盖会把消化线程
+        // 刚写的 source_chunk_id/digest_status 冲回旧值（确认门禁状态丢失）
         if (key != null && !key.isBlank()) {
             item.setOriginalName(key.trim());
         }
@@ -173,7 +193,12 @@ public class DigestService {
         if (category != null && !category.isBlank()) {
             item.setCategory(category.trim().toLowerCase(Locale.ROOT));
         }
-        itemMapper.updateById(item);
+        itemMapper.update(null, new LambdaUpdateWrapper<VaultItem>()
+                .eq(VaultItem::getId, item.getId())
+                .eq(VaultItem::getUserId, item.getUserId())
+                .set(VaultItem::getOriginalName, item.getOriginalName())
+                .set(VaultItem::getDescription, item.getDescription())
+                .set(VaultItem::getCategory, item.getCategory()));
 
         // ② key chunk（§3.3c：embed 文本 = key + description + 类型拼合；contentType='note'；
         //    metadata.keyChunk='true' 是通用检索白名单标记——只有它进对话检索，全文 chunk 不进）
@@ -204,9 +229,12 @@ public class DigestService {
         // ③ 全文消化 chunk 这时才 embed（确认门禁：未确认不进检索）
         embedFullTextChunks(item);
 
-        // ④ 状态 → confirmed
+        // ④ 状态 → confirmed（定向补丁：只 SET digest_status，不覆盖并发写集）
         item.setDigestStatus("confirmed");
-        itemMapper.updateById(item);
+        itemMapper.update(null, new LambdaUpdateWrapper<VaultItem>()
+                .eq(VaultItem::getId, item.getId())
+                .eq(VaultItem::getUserId, item.getUserId())
+                .set(VaultItem::getDigestStatus, "confirmed"));
         log.info("vault 确认完成（confirmed，已可检索），item: {}", item.getId());
         return item;
     }
@@ -329,8 +357,14 @@ public class DigestService {
         return record.getId();
     }
 
+    /**
+     * 状态定向补丁（B8 竞态审计）：只 SET digest_status 一列（WHERE id）——
+     * updateById 全列覆盖在消化线程与 HTTP 线程并发时会互相冲掉对方写集
+     */
     private void patchStatus(VaultItem item, String status) {
         item.setDigestStatus(status);
-        itemMapper.updateById(item);
+        itemMapper.update(null, new LambdaUpdateWrapper<VaultItem>()
+                .eq(VaultItem::getId, item.getId())
+                .set(VaultItem::getDigestStatus, status));
     }
 }

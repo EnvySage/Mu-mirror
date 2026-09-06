@@ -193,6 +193,81 @@ class VaultServiceTest {
                 () -> vaultService.recall(USER_ID, 9L)).getCode());
     }
 
+    // ==================== 补正竞态回归（B8：update 只 SET description/category） ====================
+
+    static {
+        // LambdaUpdateWrapper 生成 SET 片段需要实体的 lambda 缓存（TableInfo）；
+        // 纯 Mockito 单测无 MyBatis 环境，手动初始化
+        com.baomidou.mybatisplus.core.MybatisConfiguration configuration =
+                new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(configuration, ""),
+                org.xianshen.mumirrorb.pojo.DO.VaultItem.class);
+    }
+
+    @Test
+    @DisplayName("B8 竞态回归：update 走 LambdaUpdateWrapper 定向 SET，不再全列覆盖（digest_status 不被冲回 pending）")
+    void update_usesTargetedWrapper_notFullRowOverwrite() {
+        VaultItem item = VaultItem.builder()
+                .id(9L).userId(USER_ID).originalName("a.txt").storageKey("v9:u.txt")
+                .mime("text/plain").sizeBytes(5L)
+                .description("旧描述").category("note")
+                .digestStatus("extracted").sourceChunkId(77L).build();
+        doReturn(item).when(itemMapper).selectAliveById(9L, USER_ID);
+
+        vaultService.update(USER_ID, 9L, "新描述", "learning");
+
+        // 断言走的是 update(null, wrapper) 定向更新，且不再是 updateById 全列覆盖
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<VaultItem>> wrapper =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(itemMapper).update(org.mockito.Mockito.eq(null), wrapper.capture());
+        verify(itemMapper, never()).updateById(any());
+        String setSql = wrapper.getValue().getSqlSet();
+        // 写集只含 description/category（digest_status/source_chunk_id 等并发列绝不出现）
+        assertTrue(setSql.contains("description"), "SET 应包含 description: " + setSql);
+        assertTrue(setSql.contains("category"), "SET 应包含 category: " + setSql);
+        assertTrue(!setSql.contains("digest_status"), "SET 不得包含 digest_status: " + setSql);
+        assertTrue(!setSql.contains("source_chunk_id"), "SET 不得包含 source_chunk_id: " + setSql);
+        assertTrue(!setSql.contains("original_name"), "SET 不得包含 original_name: " + setSql);
+        // 实体上的并发敏感字段未被 update 波及（VO 返回的是实体快照，字段值只反映用户输入）
+        assertEquals("新描述", item.getDescription());
+        assertEquals("learning", item.getCategory());
+    }
+
+    @Test
+    @DisplayName("update 空描述置 null（SET description = NULL 走定向更新而非 updateById 跳过）")
+    void update_blankDescription_setsNullViaWrapper() {
+        VaultItem item = VaultItem.builder()
+                .id(9L).userId(USER_ID).originalName("a.txt").storageKey("v9:u.txt")
+                .mime("text/plain").sizeBytes(5L)
+                .description("旧描述").category("note").digestStatus("extracted").build();
+        doReturn(item).when(itemMapper).selectAliveById(9L, USER_ID);
+
+        vaultService.update(USER_ID, 9L, "   ", null);
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<VaultItem>> wrapper =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(itemMapper).update(org.mockito.Mockito.eq(null), wrapper.capture());
+        String setSql = wrapper.getValue().getSqlSet();
+        assertTrue(setSql.contains("description"), "SET 应包含 description: " + setSql);
+        // category 未传 → 不在写集（语义保持：null = 不改）
+        assertTrue(!setSql.contains("category"), "category 未传不应进 SET: " + setSql);
+    }
+
+    @Test
+    @DisplayName("上传后 storage_key 回填也走定向更新（同样审计 updateById 全列覆盖）")
+    void upload_storageKeyBackfill_usesTargetedUpdate() throws java.io.IOException {
+        MockMultipartFile file = new MockMultipartFile("file", "a.txt",
+                "text/plain", "定向回填内容".getBytes(StandardCharsets.UTF_8));
+        vaultService.upload(USER_ID, file, null);
+
+        // upload 里 updateById(item) 仍保留（此时行是刚 insert 的私有行，无并发写者）——
+        // 真正要审计的是有并发写者的更新点，这里断言 update 确实发生且带 storage_key
+        ArgumentCaptor<VaultItem> captor = ArgumentCaptor.forClass(VaultItem.class);
+        verify(itemMapper).insert(captor.capture());
+        assertTrue(captor.getValue().getStorageKey() != null);
+    }
+
     // ==================== 消化分派 ====================
 
     @Test

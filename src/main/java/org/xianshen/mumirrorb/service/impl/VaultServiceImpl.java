@@ -1,6 +1,7 @@
 package org.xianshen.mumirrorb.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -130,7 +131,9 @@ public class VaultServiceImpl implements VaultService {
         // 8. 本体落分表
         storage.put(storageKey, bytes);
 
-        // 9. 消化异步（B5：独立 DigestService Bean，@Async 代理生效；自调用失效已修）
+        // 9. 消化异步（B5：独立 DigestService Bean，@Async 代理生效；B8：指定专用线程池
+        //    vaultDigestExecutor——Boot 默认 applicationTaskExecutor 在类路径存在特殊 Executor
+        //    时可能不被用于 @Async / 被替换，显式 bean 名限定根治任务静默丢失）
         digestService.digestAsync(userId, item.getId());
 
         log.info("vault 上传成功，用户: {}, id: {}, mime: {}, size: {}",
@@ -272,6 +275,19 @@ public class VaultServiceImpl implements VaultService {
                 userId, itemId, item.getOriginalName(), item.getDeletedAt());
     }
 
+    /**
+     * 补正描述/分类（高危竞态修复：fix-batch B8）
+     *
+     * <p>旧实现拿 requireAlive 查出的实体改两字段后 updateById——MP 对非 null 字段
+     * <b>全列 SET</b>，与消化线程（DigestService @Async 把 digest_status 置
+     * extracted/confirmed/skipped）竞态时会把刚写好的状态覆盖回上传时的旧快照
+     * （pending），确认门禁状态丢失。</p>
+     *
+     * <p>现在改为 LambdaUpdateWrapper 定向更新：只 SET description / category 两列
+     * （WHERE id + user_id + deleted_at IS NULL），不碰其他任何列（vault_items 无
+     * updated_at 审计列，deleted_at 是删除审计位不在此触碰），与消化线程无共享写集，
+     * 竞态窗口归零。</p>
+     */
     @Override
     @Transactional
     public VaultItemVO update(UUID userId, Long itemId, String description, String category) {
@@ -285,7 +301,20 @@ public class VaultServiceImpl implements VaultService {
         if (category != null && !category.isBlank()) {
             item.setCategory(category.trim().toLowerCase(Locale.ROOT));
         }
-        itemMapper.updateById(item);
+        // 定向更新：写集按用户传入参数收敛——description 传了才 SET（可置 null），category
+        // 传了才 SET。不传的列不进写集，连"用旧快照值回写"的窗口也不留
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<VaultItem> wrapper =
+                new LambdaUpdateWrapper<VaultItem>()
+                        .eq(VaultItem::getId, itemId)
+                        .eq(VaultItem::getUserId, userId)
+                        .isNull(VaultItem::getDeletedAt);
+        if (description != null) {
+            wrapper.set(VaultItem::getDescription, item.getDescription());
+        }
+        if (category != null && !category.isBlank()) {
+            wrapper.set(VaultItem::getCategory, item.getCategory());
+        }
+        itemMapper.update(null, wrapper);
         return toVO(item, null, null);
     }
 

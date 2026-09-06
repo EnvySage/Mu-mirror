@@ -264,4 +264,83 @@ class DigestServiceTest {
         verify(chunkMapper, org.mockito.Mockito.atLeastOnce()).insert(captor.capture());
         return captor.getValue();
     }
+
+    // ==================== B8 竞态审计：定向更新（不再全列覆盖） ====================
+
+    static {
+        // LambdaUpdateWrapper 生成 SET 片段需要实体的 lambda 缓存（TableInfo）；
+        // 纯 Mockito 单测无 MyBatis 环境，手动初始化
+        com.baomidou.mybatisplus.core.MybatisConfiguration configuration =
+                new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(configuration, ""),
+                VaultItem.class);
+    }
+
+    @Test
+    @DisplayName("B8 竞态审计：消化完成的 extract 状态回写走定向 SET（source_chunk_id+digest_status），不整行覆盖")
+    void digest_extracted_usesTargetedUpdate() {
+        VaultItem item = textItem();
+        stubBlob("第一章 RAG 检索优化研究……");
+        doReturn(item).when(itemMapper).selectById(ITEM_ID);
+
+        digestService.digestAsync(USER_ID, ITEM_ID);
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<VaultItem>> wrapper =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(itemMapper).update(org.mockito.Mockito.eq(null), wrapper.capture());
+        String setSql = wrapper.getValue().getSqlSet();
+        assertTrue(setSql.contains("source_chunk_id"), "SET 应含 source_chunk_id: " + setSql);
+        assertTrue(setSql.contains("digest_status"), "SET 应含 digest_status: " + setSql);
+        // 并发敏感列绝不进写集（description/category 是 HTTP 线程 update() 的领地）
+        assertTrue(!setSql.contains("description"), "SET 不得含 description: " + setSql);
+        assertTrue(!setSql.contains("category"), "SET 不得含 category: " + setSql);
+        verify(itemMapper, never()).updateById(any());
+    }
+
+    @Test
+    @DisplayName("B8 竞态审计：digestAsync 异常路径 failed 也走定向 SET，只动 digest_status")
+    void digest_failed_usesTargetedStatusPatch() {
+        VaultItem item = textItem();
+        stubBlob("正文");
+        doReturn(item).when(itemMapper).selectById(ITEM_ID);
+        doThrow(new RuntimeException("storage down")).when(storage).get("v42:uuid.txt");
+
+        digestService.digestAsync(USER_ID, ITEM_ID);
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<VaultItem>> wrapper =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(itemMapper).update(org.mockito.Mockito.eq(null), wrapper.capture());
+        String setSql = wrapper.getValue().getSqlSet();
+        assertEquals("digest_status=#{ew.paramNameValuePairs.MPGENVAL1}", setSql);
+        verify(itemMapper, never()).updateById(any());
+    }
+
+    @Test
+    @DisplayName("B8 竞态审计：confirm 元数据更新走定向 SET（original_name/description/category），两处 updateById 已消失")
+    void confirm_metadata_usesTargetedUpdate() {
+        VaultItem item = textItem();
+        item.setDigestStatus("extracted");
+        stubBlob("正文");
+        doReturn(item).when(itemMapper).selectById(ITEM_ID);
+        doReturn(List.of()).when(chunkMapper).selectList(any());
+        doReturn(null).when(chunkMapper).selectOne(any());
+
+        digestService.confirmDigest(item, "新名", "新描述", "work");
+
+        // ① 元数据定向更新（不含 digest_status——confirmed 是最后一步单独 SET）
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<VaultItem>> wrappers =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(itemMapper, org.mockito.Mockito.times(2)).update(org.mockito.Mockito.eq(null), wrappers.capture());
+        String metaSet = wrappers.getAllValues().get(0).getSqlSet();
+        assertTrue(metaSet.contains("original_name"), "SET 应含 original_name: " + metaSet);
+        assertTrue(metaSet.contains("description"), "SET 应含 description: " + metaSet);
+        assertTrue(metaSet.contains("category"), "SET 应含 category: " + metaSet);
+        assertTrue(!metaSet.contains("digest_status"), "元数据 SET 不得含 digest_status: " + metaSet);
+        // ④ confirmed 状态定向 SET
+        String confirmedSet = wrappers.getAllValues().get(1).getSqlSet();
+        assertTrue(confirmedSet.contains("digest_status"), "SET 应含 digest_status: " + confirmedSet);
+        assertTrue(!confirmedSet.contains("original_name"), "状态 SET 不得含 original_name: " + confirmedSet);
+        verify(itemMapper, never()).updateById(any());
+    }
 }
