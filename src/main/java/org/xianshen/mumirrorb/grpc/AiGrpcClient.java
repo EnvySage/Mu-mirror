@@ -346,7 +346,7 @@ public class AiGrpcClient {
                 requestBuilder.addAllGlossary(groundingTerms(userId));
             }
             MirrorChatProto.ExtractIntentResponse response = chatStub
-                    .withDeadlineAfter(15, TimeUnit.SECONDS)
+                    .withDeadlineAfter(35, TimeUnit.SECONDS)
                     .extractIntent(requestBuilder.build());
             log.info("ExtractIntent 返回: queryType={}, rewrittenQuery={}",
                     response.getQueryType(), response.getRewrittenQuery());
