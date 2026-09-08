@@ -99,6 +99,7 @@ public class DigestService {
     private void doDigest(Long itemId) {
         VaultItem item = itemMapper.selectById(itemId);
         if (item == null || item.getDeletedAt() != null) {
+            log.warn("vault 消化跳过（item 不存在或已删除），item: {}，可能是上传事务未提交可见性竞态", itemId);
             return;
         }
         if (item.getMime().startsWith("audio/")) {

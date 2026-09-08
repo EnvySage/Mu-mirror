@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
@@ -131,10 +133,14 @@ public class VaultServiceImpl implements VaultService {
         // 8. 本体落分表
         storage.put(storageKey, bytes);
 
-        // 9. 消化异步（B5：独立 DigestService Bean，@Async 代理生效；B8：指定专用线程池
-        //    vaultDigestExecutor——Boot 默认 applicationTaskExecutor 在类路径存在特殊 Executor
-        //    时可能不被用于 @Async / 被替换，显式 bean 名限定根治任务静默丢失）
-        digestService.digestAsync(userId, item.getId());
+        // 9. 消化异步——等事务提交后再触发，避免 digest 线程读不到未提交行（READ_COMMITTED 可见性竞态）
+        Long itemId = item.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                digestService.digestAsync(userId, itemId);
+            }
+        });
 
         log.info("vault 上传成功，用户: {}, id: {}, mime: {}, size: {}",
                 userId, item.getId(), mime, humanSize(bytes.length));
