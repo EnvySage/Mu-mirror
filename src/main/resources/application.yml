@@ -95,7 +95,7 @@ vault:
   max-file-size-bytes: 20971520        # 单文件 20MB
   quota-bytes: 524288000               # 每用户配额 500MB
   digest-max-chars: 100000             # 全消化文本上限（≈5万 token）
-  plan-tools-timeout-ms: 3000          # PlanTools 规划超时
+  plan-tools-timeout-ms: 35000         # PlanTools 规划超时（原 3s，mimo-v2.5 决策约 20s，3s 必超时降级 RAG）
   max-tool-calls: 2                    # 单次对话最多工具步数
   find-item-limit: 10
   search-records-limit: 20
