@@ -45,13 +45,18 @@ public class AiGrpcClient {
     private final ManagedChannel channel;
     private final SettingsMapper settingsMapper;
     private final GlossaryService glossaryService;
+    private final org.springframework.context.ApplicationContext applicationContext;
+
+    private org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
 
     public AiGrpcClient(ManagedChannel channel,
                         SettingsMapper settingsMapper,
-                        @Lazy GlossaryService glossaryService) {
+                        @Lazy GlossaryService glossaryService,
+                        org.springframework.context.ApplicationContext applicationContext) {
         this.channel = channel;
         this.settingsMapper = settingsMapper;
         this.glossaryService = glossaryService;
+        this.applicationContext = applicationContext;
     }
 
     private RecordProcessorGrpc.RecordProcessorBlockingStub recordStub;
@@ -65,6 +70,10 @@ public class AiGrpcClient {
         embedStub = EmbeddingServiceGrpc.newBlockingStub(channel);
         profileStub = MirrorProfileGrpc.newBlockingStub(channel);
         chatStub = MirrorChatGrpc.newBlockingStub(channel);
+        // TodoRegistryService 懒解析（TodoRegistryServiceImpl 无反向依赖 AiGrpcClient，
+        // 但构造期统一注入更稳——启动期初始化顺序解耦）
+        this.todoRegistryService = applicationContext.getBean(
+                org.xianshen.mumirrorb.service.TodoRegistryService.class);
         log.info("AiGrpcClient 初始化完成");
     }
 
@@ -104,6 +113,9 @@ public class AiGrpcClient {
                 // 词表组装失败按无词表继续（词表错了退化为普通分类，不是灾难 #0.2）
                 requestBuilder.addAllGlossary(groundingTerms(userId));
             }
+            // open_todos 注入（todo-registry-design.md §3.2 判别期）：未完成待办清单（≤20 条，
+            // 最近优先）。组装失败按空清单继续——清单错了退化为 LLM 不知道旧待办，不炸分类。
+            requestBuilder.addAllOpenTodos(todoHintTerms(userId));
 
             RecordProcessorProto.ClassifyRequest request = requestBuilder.build();
 
@@ -118,9 +130,10 @@ public class AiGrpcClient {
             if (!response.getSkip()) {
                 for (int i = 0; i < response.getItemsList().size(); i++) {
                     RecordProcessorProto.ClassifyItem item = response.getItemsList().get(i);
-                    log.info("  ClassifyItem [{}]: title={}, contentType={}, moods={}, keywords={}",
+                    log.info("  ClassifyItem [{}]: title={}, contentType={}, moods={}, keywords={}, refersTodo={}",
                             i + 1, item.getTitle(), item.getContentType(),
-                            item.getMoodsList(), item.getKeywordsList());
+                            item.getMoodsList(), item.getKeywordsList(),
+                            item.hasRefersToTodo() ? item.getRefersToTodo().getTodoId() : 0);
                 }
             } else {
                 log.info("Classify 跳过原因: {}", response.getSkipReason());
@@ -372,6 +385,39 @@ public class AiGrpcClient {
             return GlossaryProtoMapper.toProtoList(glossaryService.confirmedForInjection(userId));
         } catch (Exception e) {
             log.warn("词表 grounding 组装失败（按空处理），用户: {}, 原因: {}", userId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * open_todos 组装（todo-registry-design.md §3.2 判别期）
+     *
+     * <p>查 todo_registry（current_status != 'completed'，最近优先，≤20 条，JOIN chunks 排 orphan），
+     * 每条带 title + 原始片段摘要（100 字符）+ created_at + current_status。
+     * todoRegistryService 依赖 @Lazy（与 RecordServiceImpl 的管道依赖共存，避免启动期初始化顺序纠缠）；
+     * 组装失败按空清单继续（旧待办不注入，分类照常）。</p>
+     */
+    private List<RecordProcessorProto.TodoHint> todoHintTerms(UUID userId) {
+        try {
+            List<org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO.TodoItem> items =
+                    todoRegistryService.openTodosForHint(userId);
+            List<RecordProcessorProto.TodoHint> hints = new java.util.ArrayList<>(items.size());
+            for (org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO.TodoItem item : items) {
+                RecordProcessorProto.TodoHint.Builder builder = RecordProcessorProto.TodoHint.newBuilder()
+                        .setTodoId(item.getTodoId() == null ? 0 : item.getTodoId())
+                        .setTitle(item.getTitle() == null ? "" : item.getTitle())
+                        .setCreatedAt(item.getCreatedAt() == null ? "" : item.getCreatedAt())
+                        .setCurrentStatus(item.getCurrentStatus() == null ? "not_started" : item.getCurrentStatus());
+                String excerpt = item.getSourceExcerpt() != null ? item.getSourceExcerpt()
+                        : item.getSourceSummary();
+                if (excerpt != null && !excerpt.isBlank()) {
+                    builder.setSourceExcerpt(excerpt);
+                }
+                hints.add(builder.build());
+            }
+            return hints;
+        } catch (Exception e) {
+            log.warn("open_todos 组装失败（按空清单继续），用户: {}, 原因: {}", userId, e.getMessage());
             return List.of();
         }
     }

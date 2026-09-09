@@ -48,6 +48,18 @@ public class RecordServiceImpl implements RecordService {
     private final ChunkMapper chunkMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final AiGrpcClient aiGrpcClient;
+    private final org.springframework.context.ApplicationContext applicationContext;
+
+    /**
+     * 待办登记服务（todo-registry-design.md §3.1）
+     *
+     * <p>懒加载（应用上下文查找）：RecordServiceImpl 与 TodoRegistryServiceImpl 无相互依赖，
+     * 不存在环；走构造器注入需要确认 Bean 初始化顺序无副作用，这里按调用期解析最稳。
+     * confirmReview 调用时上下文必然就绪。</p>
+     */
+    private org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService() {
+        return applicationContext.getBean(org.xianshen.mumirrorb.service.TodoRegistryService.class);
+    }
 
     @Override
     @Transactional
@@ -265,6 +277,18 @@ public class RecordServiceImpl implements RecordService {
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
         log.info("记录审查已确认完成，ID: {}, 状态: DONE", recordId);
+
+        // 8. 待办登记钩子（todo-registry-design.md §3.1 登记期，零门禁）：
+        //    记录含 todo/plan 片段 → 幂等登记 todo_registry + origin link。
+        //    登记失败不阻断确认主流程（登记无风险，错了退化为无跨日记跟踪）。
+        try {
+            int registered = todoRegistryService().registerFromRecord(recordId, userId);
+            if (registered > 0) {
+                log.info("confirmReview 待办登记：新增 {} 条，记录ID: {}", registered, recordId);
+            }
+        } catch (Exception e) {
+            log.warn("待办登记失败（不阻断确认主流程），记录ID: {}，原因: {}", recordId, e.getMessage());
+        }
 
         log.info("============ confirmReview 结束 ============");
         return toVO(record);

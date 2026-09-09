@@ -171,3 +171,39 @@ WHERE digest_status = 'done' AND mime NOT LIKE 'image/%';
 -- 注意：旧管道 done 时全文 chunk 已 embed，confirmed 语义成立；其 key chunk 由下次
 -- confirm（幂等入口：confirmed 重复确认直接返回，不重建 key chunk）之外的场景补齐——
 -- 存量已确认资产如需 key chunk，可由用户在资产页"改一改"再确认触发（Accept: extracted 后重复确认）。
+
+-- ---------- 11. 2026-09-09 待办登记表（todo-registry-design.md §2） ----------
+-- 跨日记待办状态跟踪三表。真源唯一（裁决 #33）：chunk.metadata.taskStatus 保持唯一真源，
+-- registry.current_status 是索引（物化），确认时事务内双写；关联是用户背书的产物（裁决 #22）。
+CREATE TABLE IF NOT EXISTS todo_registry (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(100) NOT NULL,              -- 来自 chunk metadata.title
+    current_status VARCHAR(20) NOT NULL DEFAULT 'not_started',  -- not_started/in_progress/completed
+    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,  -- 原始待办片段；被删→orphan 关闭
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    closed_at TIMESTAMPTZ                     -- completed 时刻（追溯）
+);
+CREATE INDEX IF NOT EXISTS idx_todo_reg_user ON todo_registry(user_id, current_status);
+
+CREATE TABLE IF NOT EXISTS todo_registry_links (
+    id BIGSERIAL PRIMARY KEY,
+    todo_id BIGINT NOT NULL REFERENCES todo_registry(id) ON DELETE CASCADE,
+    chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    relation VARCHAR(10) NOT NULL,            -- origin / evidence
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(todo_id, chunk_id)
+);
+
+CREATE TABLE IF NOT EXISTS todo_suggestions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    todo_id BIGINT NOT NULL REFERENCES todo_registry(id) ON DELETE CASCADE,
+    evidence_chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,  -- 触发建议的新日记片段
+    suggested_status VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/confirmed/dismissed
+    created_at TIMESTAMPTZ DEFAULT now(),
+    resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_todo_sug_user ON todo_suggestions(user_id, status);

@@ -210,3 +210,42 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_tool_calls_user ON tool_calls(user_id, created_at);
+
+-- ============================================================
+-- 待办登记表（todo-registry-design.md §2，2026-09-09）
+-- 跨日记待办状态跟踪：新日记提及旧待办 → LLM 判别 → 建议更新 → 用户裁决。
+-- 真源唯一（裁决 #33）：chunk.metadata.taskStatus 保持唯一真源，registry.current_status 是索引（物化）；
+-- 关联是用户背书的产物：origin=登记时原始片段，evidence=确认建议时才落（机器猜的不落库，裁决 #22 一脉）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS todo_registry (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(100) NOT NULL,              -- 来自 chunk metadata.title
+    current_status VARCHAR(20) NOT NULL DEFAULT 'not_started',  -- not_started/in_progress/completed
+    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,  -- 原始待办片段；被删→orphan 关闭
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    closed_at TIMESTAMPTZ                     -- completed 时刻（追溯）
+);
+CREATE INDEX IF NOT EXISTS idx_todo_reg_user ON todo_registry(user_id, current_status);
+
+CREATE TABLE IF NOT EXISTS todo_registry_links (
+    id BIGSERIAL PRIMARY KEY,
+    todo_id BIGINT NOT NULL REFERENCES todo_registry(id) ON DELETE CASCADE,
+    chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    relation VARCHAR(10) NOT NULL,            -- origin / evidence
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(todo_id, chunk_id)
+);
+
+CREATE TABLE IF NOT EXISTS todo_suggestions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    todo_id BIGINT NOT NULL REFERENCES todo_registry(id) ON DELETE CASCADE,
+    evidence_chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,  -- 触发建议的新日记片段
+    suggested_status VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/confirmed/dismissed
+    created_at TIMESTAMPTZ DEFAULT now(),
+    resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_todo_sug_user ON todo_suggestions(user_id, status);

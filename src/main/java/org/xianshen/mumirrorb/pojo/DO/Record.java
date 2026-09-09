@@ -126,4 +126,15 @@ public class Record {
     @TableField(exist = false)
     @Schema(description = "Chunk元数据列表（临时字段，不持久化）")
     private List<Map<String, Object>> chunkMetadataList;
+
+    /**
+     * 管道暂存区（非数据库字段，不持久化）
+     *
+     * <p>Processor 间传递无法展平进 chunkMetadataList 的原始结构，目前只有一项：
+     * {@code classifyItems} = List&lt;ClassifyItem&gt;（todo-registry 判别回传 refers_to_todo 用，
+     * Map 展平会丢 proto 结构）。EventListener 消费后即弃，不落库不序列化。</p>
+     */
+    @TableField(exist = false)
+    @Schema(description = "管道暂存区（内存传递，不持久化）")
+    private Map<String, Object> transientBag;
 }

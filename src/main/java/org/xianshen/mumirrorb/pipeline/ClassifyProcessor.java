@@ -47,6 +47,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ClassifyProcessor implements RecordProcessor {
 
+    /** Record.transientBag 暂存键：ClassifyItem 明细（EventListener 消费 refers_to_todo） */
+    public static final String RecordEventListener_CLASSIFY_ITEMS_KEY = "classifyItems";
+
     private final AiGrpcClient aiGrpcClient;
 
     @Override
@@ -108,6 +111,11 @@ public class ClassifyProcessor implements RecordProcessor {
             // 4. 更新原 Record（不创建新 Record）
             record.setSegment(segments);
             record.setChunkMetadataList(chunkMetadataList);
+            // 管道暂存：ClassifyItem 原始明细（refers_to_todo 判别回传在 EventListener 消费——
+            // Map 展平丢 proto 结构，todo-registry-design.md §3.2）
+            Map<String, Object> bag = new java.util.HashMap<>();
+            bag.put(RecordEventListener_CLASSIFY_ITEMS_KEY, items);
+            record.setTransientBag(bag);
             record.setStatus(RecordStatus.PROCESSING);
             record.setUpdatedAt(OffsetDateTime.now());
 

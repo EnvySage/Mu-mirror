@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pipeline.RecordPipeline;
@@ -39,11 +40,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class RecordEventListener {
 
+    /** 管道暂存键：ClassifyItem 明细（refers_to_todo 判别回传用） */
+    public static final String CLASSIFY_ITEMS_KEY = "classifyItems";
+
     private final RecordPipeline pipeline;
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
     private final RecordService recordService;
     private final SettingsMapper settingsMapper;
+    private final org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
 
     /**
      * 记录创建后，异步执行管道处理
@@ -77,6 +82,8 @@ public class RecordEventListener {
 
             // 3. 取出处理后的 Record（始终只有一条）
             Record processed = results.get(0);
+            // 5.5 待办判别回传用：管道拆分明细（ClassifyItem 含 refers_to_todo）
+            List<RecordProcessorProto.ClassifyItem> items = extractClassifyItems(processed);
 
             // 4. 保存 Record（segment 数组）
             processed.setId(recordId);
@@ -107,6 +114,20 @@ public class RecordEventListener {
                             .build();
                     chunkMapper.insert(chunk);
                     log.info("Chunk 已创建，记录ID: {}, 片段 [{}]: {}", recordId, i + 1, segments.get(i));
+
+                    // 5.5 待办判别回传（todo-registry-design.md §3.2）：ClassifyItem.refers_to_todo
+                    //     有值 → 落 todo_suggestions(pending)。旧 Python 不回填时字段缺省不触发（wire 兼容）。
+                    //     失败不阻断管道（建议错了退化为无建议，账本零污染）。
+                    try {
+                        RecordProcessorProto.ClassifyItem classifyItem = items.get(i);
+                        if (classifyItem.hasRefersToTodo() && classifyItem.getRefersToTodo().getTodoId() > 0) {
+                            todoRegistryService.suggestFromChunk(
+                                    record.getUserId(), chunk, classifyItem.getRefersToTodo());
+                        }
+                    } catch (Exception e) {
+                        log.warn("待办建议落库失败（不阻断管道），记录ID: {}，原因: {}",
+                                recordId, e.getMessage());
+                    }
                 }
             }
 
@@ -140,5 +161,21 @@ public class RecordEventListener {
         return settings != null && settings.getReviewMode() != null
                 ? settings.getReviewMode()
                 : "manual";
+    }
+
+    /**
+     * 从处理后 Record 取回 ClassifyItem 明细（refers_to_todo 判别回传用）
+     *
+     * <p>ClassifyProcessor 把 ClassifyItem 展平进 chunkMetadataList（Map 丢 proto 结构），
+     * 这里从管道暂存区取原始 items；未暂存（旧路径/测试桩）返回空列表，建议环节跳过。</p>
+     */
+    @SuppressWarnings("unchecked")
+    private List<RecordProcessorProto.ClassifyItem> extractClassifyItems(Record processed) {
+        Map<String, Object> transientBag = processed.getTransientBag();
+        if (transientBag == null) {
+            return List.of();
+        }
+        Object items = transientBag.get(CLASSIFY_ITEMS_KEY);
+        return items instanceof List ? (List<RecordProcessorProto.ClassifyItem>) items : List.of();
     }
 }
