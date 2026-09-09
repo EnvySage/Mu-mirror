@@ -34,7 +34,7 @@ public class VaultProperties {
     private int digestMaxChars = 100_000;
 
     /** PlanTools 单次规划超时（毫秒）——原设计 3s，mimo-v2.5 响应慢改 35s */
-    private long planToolsTimeoutMs = 35_000;
+    private long planToolsTimeoutMs = 65_000;
 
     /** PlanTools 单次对话最多工具步数 */
     private int maxToolCalls = 2;
