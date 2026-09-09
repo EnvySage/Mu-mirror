@@ -153,6 +153,12 @@ public class ChatServiceImpl implements ChatService {
             Iterator<MirrorChatProto.ChatChunk> stream = aiGrpcClient.chatStream(userId, request);
             while (stream.hasNext()) {
                 MirrorChatProto.ChatChunk chunk = stream.next();
+                // thinking 透传（与 AI 仓 mirror_chat.proto ChatChunk.thinking=4 对齐）：
+                // Python 捕获 LLM 思考流（Anthropic thinking_delta / OpenAI reasoning_content），
+                // 仅非空才发（不产生空事件）；SSE 事件名 thinking，data {"content": "..."}，与 delta 同构
+                if (chunk.hasThinking() && !chunk.getThinking().isEmpty()) {
+                    sendEvent(emitter, "thinking", Map.of("content", chunk.getThinking()));
+                }
                 if (!chunk.getContent().isEmpty()) {
                     answer.append(chunk.getContent());
                     sendEvent(emitter, "delta", Map.of("content", chunk.getContent()));

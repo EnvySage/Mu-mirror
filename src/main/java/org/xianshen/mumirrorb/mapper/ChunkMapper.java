@@ -70,6 +70,34 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                                         @Param("limit") int limit);
 
     /**
+     * recall_item 内容问答层：某文件的全文 chunks 按与 query 相似度取 top-N
+     *
+     * <p>范围限定单个 vault 文件的消化产物；排除 keyChunk（key chunk 是元数据拼合文本
+     * 非正文，不该作为内容问答的段落返回）。与 {@link #searchBySimilarity} 同算法（pgvector &lt;=&gt;）。</p>
+     *
+     * @param userId      用户ID（隔离不同用户的数据）
+     * @param itemId      vault 资产ID（只取该文件的消化 chunks）
+     * @param queryVector 查询向量（由 Python Embedding 服务生成）
+     * @param limit       返回数量限制
+     * @return 相似的 chunks 列表（按相似度排序，similarity 字段携带余弦相似度）
+     */
+    @Select("""
+            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.vault_item_id, c.created_at,
+                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+            FROM chunks c
+            WHERE c.user_id = #{userId}::uuid
+              AND c.vault_item_id = #{itemId}
+              AND c.embedding IS NOT NULL
+              AND (c.metadata->>'keyChunk' IS NULL OR c.metadata->>'keyChunk' <> 'true')
+            ORDER BY c.embedding <=> #{queryVector}::vector
+            LIMIT #{limit}
+            """)
+    List<Chunk> searchByItemAndSimilarity(@Param("userId") UUID userId,
+                                          @Param("itemId") Long itemId,
+                                          @Param("queryVector") String queryVector,
+                                          @Param("limit") int limit);
+
+    /**
      * 带内容类型过滤的向量相似度检索
      *
      * @param userId      用户ID

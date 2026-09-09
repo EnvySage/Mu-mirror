@@ -81,8 +81,12 @@ class ToolOrchestratorTest {
     @BeforeEach
     void setUp() {
         registry = new ToolRegistry(List.of(new EchoTool()));
+        VaultProperties props = new VaultProperties();
+        // 8dd3dd2 把超时提到 135s（yml 135000 / Java 默认 65000）——测试断言须与生产口径一致，
+        // 否则 verify(planTools(..., 3000L)) 在默认值漂移后必挂
+        props.setPlanToolsTimeoutMs(3000);
         orchestrator = new ToolOrchestrator(aiGrpcClient, registry, auditService,
-                glossaryService, new VaultProperties(),
+                glossaryService, props,
                 new com.fasterxml.jackson.databind.ObjectMapper());
         when(aiGrpcClient.hasLlmConfig(USER_ID)).thenReturn(true);
         when(glossaryService.confirmedForInjection(any())).thenReturn(List.of());

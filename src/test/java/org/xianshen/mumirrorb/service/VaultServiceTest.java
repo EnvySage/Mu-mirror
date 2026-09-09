@@ -1,5 +1,6 @@
 package org.xianshen.mumirrorb.service;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -64,12 +67,22 @@ class VaultServiceTest {
 
     @BeforeEach
     void setUp() {
+        // upload() 内 afterCommit 同步注册需要活跃的事务同步上下文（纯 Mockito 单测无 Spring 事务，
+        // 72b61c9 afterCommit 修复后需手动激活——否则 upload 用例报 Transaction synchronization is not active）
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         vaultService = new VaultServiceImpl(itemMapper, recordMapper, chunkMapper, termMapper,
                 storage, new VaultProperties(), aiGrpcClient,
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.impl.DigestService.class), null);
         doReturn(0L).when(itemMapper).sumAliveBytes(USER_ID);
         doReturn(List.of()).when(itemMapper).selectAliveByUser(USER_ID);
         doReturn(null).when(itemMapper).selectOne(any());
+    }
+
+    @AfterEach
+    void clearSync() {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     // ==================== magic bytes 白名单 ====================
@@ -317,5 +330,83 @@ class VaultServiceTest {
         verify(storage).delete("v9:u.txt");
         verify(chunkMapper).delete(any());
         verify(itemMapper).deleteById(9L);
+    }
+
+    // ==================== recall_item 内容问答（query 参数） ====================
+
+    private VaultItem confirmedItem() {
+        return VaultItem.builder()
+                .id(9L).userId(USER_ID).originalName("论文.pdf").storageKey("v9:u.pdf")
+                .mime("application/pdf").sizeBytes(1024L)
+                .digestStatus("confirmed").sourceChunkId(77L).build();
+    }
+
+    @Test
+    @DisplayName("recall query 为空：走旧摘录逻辑，不做内容检索（回归）")
+    void recall_blankQuery_legacyBehavior() {
+        doReturn(confirmedItem()).when(itemMapper).selectAliveById(9L, USER_ID);
+        doReturn(org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("第一章 绪论").build())
+                .when(chunkMapper).selectById(77L);
+        doReturn(5L).when(chunkMapper).selectCount(any());
+
+        var vo = vaultService.recall(USER_ID, 9L, "   ");
+        var voNull = vaultService.recall(USER_ID, 9L, null);
+
+        assertEquals("第一章 绪论", vo.getQuote());
+        assertEquals(5, vo.getDigestChunkCount());
+        assertEquals(null, vo.getQuotes());
+        assertEquals(null, voNull.getQuotes());
+        // 内容检索 SQL 绝不被触达
+        verify(chunkMapper, never()).searchByItemAndSimilarity(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
+        verify(aiGrpcClient, never()).embed(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("recall query 非空：embed→文件内 top3 段落 quotes（index 1-based/segment 优先/截500/相似度）")
+    void recall_withQuery_contentQuotes() {
+        doReturn(confirmedItem()).when(itemMapper).selectAliveById(9L, USER_ID);
+        doReturn(12L).when(chunkMapper).selectCount(any());
+        doReturn(org.xianshen.mumirrorb.grpc.gen.EmbeddingProto.EmbedResponse.newBuilder()
+                .setDimension(1024).addVector(0.1f).addVector(0.2f).build())
+                .when(aiGrpcClient).embed(USER_ID, "RAG 检索怎么做的");
+        doReturn(List.of(
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder()
+                        .segment("x".repeat(600)).similarity(0.91).build(),
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder()
+                        .segment(null).content("content 兜底段落").similarity(0.72).build(),
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder()
+                        .segment("").content(null).similarity(0.5).build()))
+                .when(chunkMapper).searchByItemAndSimilarity(USER_ID, 9L, "[0.1,0.2]", 3);
+
+        var vo = vaultService.recall(USER_ID, 9L, "RAG 检索怎么做的");
+
+        verify(chunkMapper).searchByItemAndSimilarity(USER_ID, 9L, "[0.1,0.2]", 3);
+        assertEquals(2, vo.getQuotes().size()); // 全空文本段被跳过
+        assertEquals(1, vo.getQuotes().get(0).get("index"));
+        assertEquals("x".repeat(500) + "…", vo.getQuotes().get(0).get("text"));
+        assertEquals(0.91, vo.getQuotes().get(0).get("similarity"));
+        assertEquals(2, vo.getQuotes().get(1).get("index"));
+        assertEquals("content 兜底段落", vo.getQuotes().get(1).get("text"));
+        // 元数据基础不变
+        assertEquals(12, vo.getDigestChunkCount());
+    }
+
+    @Test
+    @DisplayName("recall embed 失败降级：quotes 空列表不抛异常，quote/chunkCount 照常返回（关键用例）")
+    void recall_embedFailure_degrades() {
+        doReturn(confirmedItem()).when(itemMapper).selectAliveById(9L, USER_ID);
+        doReturn(org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("第一章 绪论").build())
+                .when(chunkMapper).selectById(77L);
+        doReturn(12L).when(chunkMapper).selectCount(any());
+        doThrow(new io.grpc.StatusRuntimeException(
+                io.grpc.Status.UNAVAILABLE.withDescription("Python AI 不在线")))
+                .when(aiGrpcClient).embed(USER_ID, "RAG 检索怎么做的");
+
+        var vo = vaultService.recall(USER_ID, 9L, "RAG 检索怎么做的");
+
+        assertTrue(vo.getQuotes().isEmpty());
+        assertEquals("第一章 绪论", vo.getQuote());
+        assertEquals(12, vo.getDigestChunkCount());
+        verify(chunkMapper, never()).searchByItemAndSimilarity(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
     }
 }

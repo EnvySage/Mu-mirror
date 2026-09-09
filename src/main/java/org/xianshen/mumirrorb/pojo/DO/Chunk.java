@@ -130,6 +130,17 @@ public class Chunk {
     private List<Float> embedding;
 
     /**
+     * 相似度（检索 SQL 计算列，非表列）
+     *
+     * <p>只由 {@code searchBySimilarity} 系检索 SQL 的
+     * {@code 1 - (embedding <=> queryVector)} 别名回填（余弦相似度 0~1）；
+     * MyBatis 驼峰映射 {@code similarity → similarity}，普通 select 不带该列即为 null。</p>
+     */
+    @TableField(exist = false)
+    @Schema(description = "相似度（检索SQL计算列，非表列）", example = "0.87")
+    private Double similarity;
+
+    /**
      * 创建时间
      */
     @Schema(description = "创建时间", example = "2026-08-12T14:30:00+08:00")

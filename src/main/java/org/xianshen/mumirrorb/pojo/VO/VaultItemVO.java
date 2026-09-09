@@ -9,6 +9,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 资产视图对象（vault REST + find_item/recall_item 工具共用）
@@ -69,6 +71,10 @@ public class VaultItemVO {
 
     @Schema(description = "引用摘录（recall_item：source_chunk 文本截断）", example = "第一章 绪论……")
     private String quote;
+
+    @Schema(description = "内容问答段落（recall_item 带 query 时：与问题最相关的文件内段落，含相似度）",
+            example = "[{\"index\":1,\"text\":\"第一章 绪论……\",\"similarity\":0.87}]")
+    private List<Map<String, Object>> quotes;
 
     @Schema(description = "记录数（全消化抽出的 chunk 数）", example = "12")
     private Integer digestChunkCount;

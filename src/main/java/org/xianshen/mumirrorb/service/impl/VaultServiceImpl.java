@@ -218,9 +218,14 @@ public class VaultServiceImpl implements VaultService {
     @Override
     @Transactional(readOnly = true)
     public VaultItemVO recall(UUID userId, Long itemId) {
+        return recall(userId, itemId, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public VaultItemVO recall(UUID userId, Long itemId, String query) {
         VaultItem item = requireAlive(itemId, userId);
         String quote = null;
-        int chunkCount = 0;
         if (item.getSourceChunkId() != null) {
             Chunk chunk = chunkMapper.selectById(item.getSourceChunkId());
             if (chunk != null && chunk.getSegment() != null) {
@@ -230,8 +235,44 @@ public class VaultServiceImpl implements VaultService {
         }
         Long chunks = chunkMapper.selectCount(new LambdaQueryWrapper<Chunk>()
                 .eq(Chunk::getVaultItemId, itemId));
-        chunkCount = chunks == null ? 0 : chunks.intValue();
-        return toVO(item, null, null, quote, chunkCount);
+        int chunkCount = chunks == null ? 0 : chunks.intValue();
+        // 内容问答层（query 非空才做；失败降级为空列表，绝不炸对话工具链路）
+        List<Map<String, Object>> quotes = (query == null || query.isBlank())
+                ? null : contentQuotes(userId, itemId, query);
+        return toVO(item, null, null, quote, chunkCount, quotes);
+    }
+
+    /**
+     * recall_item 内容问答：该文件全文 chunks 与 query 的相似度 top3 段落
+     *
+     * <p>embed 失败（Python 服务不在线/配置缺失/超时等任何异常）→ log.warn 返回空列表，
+     * recall 本身照常返回（quote/chunkCount 元数据兜底仍在）。</p>
+     */
+    private List<Map<String, Object>> contentQuotes(UUID userId, Long itemId, String query) {
+        List<Map<String, Object>> quotes = new ArrayList<>();
+        try {
+            String vector = embedVector(userId, query.trim());
+            List<Chunk> hits = chunkMapper.searchByItemAndSimilarity(userId, itemId, vector, 3);
+            for (Chunk c : hits) {
+                String text = c.getSegment() != null && !c.getSegment().isBlank()
+                        ? c.getSegment() : c.getContent();
+                if (text == null || text.isBlank()) {
+                    continue;
+                }
+                if (text.length() > 500) {
+                    text = text.substring(0, 500) + "…";
+                }
+                Map<String, Object> q = new LinkedHashMap<>();
+                q.put("index", quotes.size() + 1);
+                q.put("text", text);
+                q.put("similarity", c.getSimilarity());
+                quotes.add(q);
+            }
+        } catch (Exception e) {
+            log.warn("recall_item 内容检索失败（降级仅元数据/摘录），用户: {}, 文件: {}, 原因: {}",
+                    userId, itemId, e.getMessage());
+        }
+        return quotes;
     }
 
     @Override
@@ -543,10 +584,15 @@ public class VaultServiceImpl implements VaultService {
     }
 
     private VaultItemVO toVO(VaultItem item, Long quotaUsed, String matchLayer) {
-        return toVO(item, quotaUsed, matchLayer, null, null);
+        return toVO(item, quotaUsed, matchLayer, null, null, null);
     }
 
     private VaultItemVO toVO(VaultItem item, Long quotaUsed, String matchLayer, String quote, Integer chunkCount) {
+        return toVO(item, quotaUsed, matchLayer, quote, chunkCount, null);
+    }
+
+    private VaultItemVO toVO(VaultItem item, Long quotaUsed, String matchLayer,
+                             String quote, Integer chunkCount, List<Map<String, Object>> quotes) {
         return VaultItemVO.builder()
                 .id(item.getId())
                 .originalName(item.getOriginalName())
@@ -562,6 +608,7 @@ public class VaultServiceImpl implements VaultService {
                 .createdAt(item.getCreatedAt())
                 .matchLayer(matchLayer)
                 .quote(quote)
+                .quotes(quotes)
                 .digestChunkCount(chunkCount)
                 .build();
     }

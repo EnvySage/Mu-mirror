@@ -17,6 +17,8 @@ import org.xianshen.mumirrorb.mapper.UserTermMapper;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.UserTerm;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
+import org.xianshen.mumirrorb.pojo.VO.VaultItemVO;
+import org.xianshen.mumirrorb.service.VaultService;
 import org.xianshen.mumirrorb.tools.ToolExecutionResult;
 
 import java.time.OffsetDateTime;
@@ -46,6 +48,8 @@ class ToolsTest {
     private ProfileSnapshotMapper snapshotMapper;
     @Mock
     private UserTermMapper termMapper;
+    @Mock
+    private VaultService vaultService;
 
     @InjectMocks
     private SearchRecordsTool searchRecords;
@@ -57,6 +61,8 @@ class ToolsTest {
     private GetGlossaryTool getGlossary;
     @InjectMocks
     private CompareSnapshotsTool compareSnapshots;
+    @InjectMocks
+    private RecallItemTool recallItem;
 
     private static final UUID USER_ID = UUID.randomUUID();
 
@@ -190,5 +196,93 @@ class ToolsTest {
         when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of());
         ToolExecutionResult r = compareSnapshots.execute(USER_ID, Map.of());
         assertEquals("compare_snapshots:快照不足", r.getSummary());
+    }
+
+    // ==================== recall_item（内容问答升级） ====================
+
+    @Test
+    @DisplayName("recall_item：query 透传给 recall；quotes 进 payload；confirmed 态无 note")
+    void recallItem_queryPassthrough() {
+        when(vaultService.recall(USER_ID, 9L, "文件里关于RAG写了什么")).thenReturn(
+                VaultItemVO.builder().id(9L).originalName("论文.pdf").digestStatus("confirmed")
+                        .quote("第一章 绪论")
+                        .quotes(List.of(Map.of("index", 1, "text", "第一章 绪论", "similarity", 0.87)))
+                        .build());
+
+        ToolExecutionResult r = recallItem.execute(USER_ID,
+                Map.of("vault_item_id", 9, "query", "文件里关于RAG写了什么"));
+
+        assertTrue(r.isSuccess());
+        assertEquals("recall_item:论文.pdf", r.getSummary());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) r.getPayload();
+        assertEquals("第一章 绪论", payload.get("quote"));
+        assertEquals("confirmed", payload.get("digest_status"));
+        assertFalse(payload.containsKey("note"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> quotes = (List<Map<String, Object>>) payload.get("quotes");
+        assertEquals(1, quotes.size());
+        assertEquals("第一章 绪论", quotes.get(0).get("text"));
+        assertEquals(0.87, quotes.get(0).get("similarity"));
+    }
+
+    @Test
+    @DisplayName("recall_item：quotes 空列表不进 payload（不渲染误导文案）")
+    void recallItem_emptyQuotesOmitted() {
+        when(vaultService.recall(USER_ID, 9L, "什么都查不到")).thenReturn(
+                VaultItemVO.builder().id(9L).originalName("论文.pdf").digestStatus("confirmed")
+                        .quote("第一章 绪论").quotes(List.of()).build());
+
+        ToolExecutionResult r = recallItem.execute(USER_ID,
+                Map.of("vault_item_id", 9, "query", "什么都查不到"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) r.getPayload();
+        assertFalse(payload.containsKey("quotes"));
+        assertFalse(payload.containsKey("note"));
+    }
+
+    @Test
+    @DisplayName("recall_item：五态口径——extracted/pending/failed 提示未确认；done 历史态不提示")
+    void recallItem_digestStatusNote() {
+        when(vaultService.recall(USER_ID, 9L, null)).thenReturn(
+                VaultItemVO.builder().id(9L).originalName("论文.pdf").digestStatus("extracted").build());
+        ToolExecutionResult extracted = recallItem.execute(USER_ID, Map.of("vault_item_id", 9));
+        assertEquals("文件尚未确认索引，仅元数据可答",
+                ((Map<?, ?>) extracted.getPayload()).get("note"));
+
+        when(vaultService.recall(USER_ID, 8L, null)).thenReturn(
+                VaultItemVO.builder().id(8L).originalName("旧文件.pdf").digestStatus("done").build());
+        ToolExecutionResult done = recallItem.execute(USER_ID, Map.of("vault_item_id", 8));
+        assertFalse(((Map<?, ?>) done.getPayload()).containsKey("note"), "done 历史数据兼容，不应误报");
+
+        when(vaultService.recall(USER_ID, 7L, null)).thenReturn(
+                VaultItemVO.builder().id(7L).originalName("录音.m4a").digestStatus("skipped").build());
+        ToolExecutionResult skipped = recallItem.execute(USER_ID, Map.of("vault_item_id", 7));
+        assertEquals("文件尚未确认索引，仅元数据可答",
+                ((Map<?, ?>) skipped.getPayload()).get("note"));
+    }
+
+    @Test
+    @DisplayName("recall_item：缺 vault_item_id 引导先 find_item；文件不存在降级 false")
+    void recallItem_missingIdAndNotFound() {
+        ToolExecutionResult noId = recallItem.execute(USER_ID, Map.of("query", "随便"));
+        assertFalse(noId.isSuccess());
+        assertEquals("recall_item:缺少 vault_item_id（可先 find_item）", noId.getSummary());
+
+        when(vaultService.recall(USER_ID, 404L, null))
+                .thenThrow(new org.xianshen.mumirrorb.common.exception.BusinessException(
+                        org.xianshen.mumirrorb.common.enums.ResultCode.RECORD_NOT_FOUND, "不存在"));
+        ToolExecutionResult missing = recallItem.execute(USER_ID, Map.of("vault_item_id", 404));
+        assertFalse(missing.isSuccess());
+        assertEquals("recall_item:文件不存在", missing.getSummary());
+    }
+
+    @Test
+    @DisplayName("recall_item definition：args_schema 含 query 可选参数，description 覆盖内容问答场景")
+    void recallItem_definition() {
+        var def = recallItem.definition();
+        assertTrue(def.argsSchema().contains("query"));
+        assertTrue(def.description().contains("文件里关于XX写了什么"));
     }
 }

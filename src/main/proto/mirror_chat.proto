@@ -76,6 +76,9 @@ message ChatChunk {
   string content = 1;
   bool done = 2;
   repeated Source sources = 3;
+  // LLM 思考流（Python 捕获 Anthropic thinking_delta / OpenAI reasoning_content；
+  // 与 AI 仓 mirror_chat.proto 字段号 4 对齐）。仅非空时 B 侧转发 SSE thinking 事件
+  optional string thinking = 4;
 }
 
 message Source {

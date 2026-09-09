@@ -80,6 +80,21 @@ public interface VaultService {
     VaultItemVO recall(UUID userId, Long itemId);
 
     /**
+     * 单文件详情 + 内容问答（recall_item 工具升级，fix-batch 内容问答层）
+     *
+     * <p>{@code query} 为空（null/空白）→ 走旧摘录逻辑（quote + chunkCount），行为不变；
+     * 非空 → 在旧逻辑基础上做文件内内容检索：embed(query) 后取该文件全文 chunks
+     * 相似度 top3（排除 keyChunk），每段截 500 字符带相似度组装为 {@code quotes}
+     * （字段：index 1-based / text / similarity）。</p>
+     *
+     * <p>降级：embed 调用失败（任何异常）只 log.warn 并返回空 quotes，绝不抛出——
+     * recall_item 在对话工具链路内，炸了会把整个对话流打穿。</p>
+     *
+     * @param query 内容问答问题（可空）
+     */
+    VaultItemVO recall(UUID userId, Long itemId, String query);
+
+    /**
      * 取文件名（B6 防误删校验用；非本人/已删 4041 不暴露存在性）
      */
     String requireName(UUID userId, Long itemId);
