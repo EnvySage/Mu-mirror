@@ -116,7 +116,7 @@ public class TodoController {
                     + "每链 = origin（登记原始片段，理论必有）+ evidence[]（用户背书确认的后续证据，"
                     + "按片段时刻升序，confirmedAt=背书时刻）+ pendingSuggestionCount。"
                     + "excerpt 取 COALESCE(segment,content) 截 60 字符；"
-                    + "currentStatus 以 chunk.metadata.taskStatus 实时值为准（真源）。"
+                    + "currentStatus 取 registry.current_status（待办状态类读取统一 registry 口径）。"
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "查询成功"),

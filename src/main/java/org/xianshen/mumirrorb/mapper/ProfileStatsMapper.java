@@ -13,52 +13,67 @@ import java.util.List;
  *
  * <p>数据源：chunks.metadata（JSONB）JOIN records（口径：source='user'、未删除、DONE）。
  * 全部参数化占位符（安全约定）。</p>
+ *
+ * <p><b>例外：待办状态类查询以 todo_registry 为主表</b>（todo-status-removal-design.md §11）——
+ * 镜像统计的两个待办查询（{@link #selectOpenTodos} / {@link #selectTodoStatusCounts}）读
+ * {@code todo_registry.current_status}，chunks 只补展示字段。</p>
  */
 @Mapper
 public interface ProfileStatsMapper {
 
     /**
-     * 未完成待办：contentType in (todo, plan) 且 taskStatus != 'completed'
-     * （taskStatus 由裁决 #16 落 metadata；缺 taskStatus 的旧数据视作未完成，一并纳入）
+     * 未完成待办（<b>registry 口径</b>：todo-status-removal-design.md §11）
+     *
+     * <p>主表 = todo_registry（状态真源），chunks/records 只补展示字段（title/summary/recordId/createdAt）：</p>
+     * <ul>
+     *   <li>状态取 {@code t.current_status != 'completed'}——chunk.metadata.taskStatus 只是"登记时初值"，
+     *       状态变更只更新 registry，chunk 快照会过期（统计不准的根因，2026-09-12 用户实测）</li>
+     *   <li>{@code t.deleted_at IS NULL}：软删待办不可见；删除时同时打的 chunk 标记
+     *       {@code todoRemoved} 无需重复过滤（registry 软删即是权威判据）</li>
+     *   <li>INNER JOIN chunks（source_chunk_id）：天然排除 orphan，与
+     *       {@code TodoRegistryMapper.selectOpenTodos} 同口径；registry 行只由 todo/plan
+     *       片段登记产生（TodoRegistryServiceImpl.registerFromRecord），无需再判 contentType</li>
+     *   <li>records 侧过滤保留（source='user'、status='done'、deleted_at IS NULL）：消费口径收口</li>
+     * </ul>
      */
     @Select("""
             SELECT r.id AS recordId,
-                   c.metadata->>'title' AS title,
+                   COALESCE(c.metadata->>'title', t.title) AS title,
                    c.metadata->>'summary' AS summary,
-                   COALESCE(c.metadata->>'taskStatus', 'not_started') AS taskStatus,
+                   t.current_status AS taskStatus,
                    TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
-            FROM chunks c
+            FROM todo_registry t
+            JOIN chunks c ON c.id = t.source_chunk_id
             JOIN records r ON r.id = c.record_id
-            WHERE c.user_id = #{userId}::uuid
+            WHERE t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
+              AND t.current_status != 'completed'
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.metadata->>'contentType' IN ('todo', 'plan')
-              AND COALESCE(c.metadata->>'taskStatus', 'not_started') != 'completed'
-              -- 已删除待办排除（todoRemoved 标记；todo-status-removal-design.md §6）
-              AND COALESCE(c.metadata->>'todoRemoved', 'false') != 'true'
             ORDER BY r.created_at DESC
             LIMIT 50
             """)
     List<ProfileStatsDTO.TodoItemDTO> selectOpenTodos(@Param("userId") java.util.UUID userId);
 
     /**
-     * 待办/计划按任务状态计数（total = 各状态之和，chunk 粒度，与 selectOpenTodos 口径一致）
+     * 待办状态计数（<b>registry 口径</b>：todo-status-removal-design.md §11）
      *
-     * <p>缺 taskStatus 的旧数据 COALESCE 归入 not_started（裁决 #16）。</p>
+     * <p>状态取 {@code t.current_status}（NOT NULL DEFAULT 'not_started'，无需 COALESCE），
+     * total = 各状态之和（含 completed）；JOIN/filter 口径与 {@link #selectOpenTodos} 完全一致
+     * （仅不排除 completed——计数卡要展示完成数）。</p>
      */
     @Select("""
-            SELECT COALESCE(c.metadata->>'taskStatus', 'not_started') AS status,
+            SELECT t.current_status AS status,
                    COUNT(*) AS count
-            FROM chunks c
+            FROM todo_registry t
+            JOIN chunks c ON c.id = t.source_chunk_id
             JOIN records r ON r.id = c.record_id
-            WHERE c.user_id = #{userId}::uuid
+            WHERE t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.metadata->>'contentType' IN ('todo', 'plan')
-              -- 已删除待办排除（todoRemoved 标记；todo-status-removal-design.md §6）
-              AND COALESCE(c.metadata->>'todoRemoved', 'false') != 'true'
             GROUP BY 1
             """)
     List<java.util.Map<String, Object>> selectTodoStatusCounts(@Param("userId") java.util.UUID userId);

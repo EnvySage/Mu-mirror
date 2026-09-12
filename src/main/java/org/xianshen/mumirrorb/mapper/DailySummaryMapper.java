@@ -101,23 +101,29 @@ public interface DailySummaryMapper {
                                                      @Param("dayEnd") OffsetDateTime dayEnd);
 
     /**
-     * 昨日未完成待办（contentType in todo/plan 且 taskStatus != completed）
+     * 昨日登记的未完成待办（<b>registry 口径</b>：todo-status-removal-design.md §11）
+     *
+     * <p>窗口语义不变（源头记录 {@code r.created_at ∈ [dayStart, dayEnd)}），
+     * "未完成"判据由 chunk 快照 {@code taskStatus} 改为 registry 实时 {@code t.current_status}
+     * ——日报"待办遗留"要的是"昨天记的、现在还没做完的"，chunk 快照过期即失真。</p>
+     *
+     * <p>过滤/排序与 {@code ProfileStatsMapper.selectOpenTodos} 同款（registry 主表 +
+     * INNER JOIN chunks 排 orphan + records 侧 source='user'/status='done'/未删除）。</p>
      */
     @Select("""
-            SELECT c.metadata->>'title' AS title,
+            SELECT COALESCE(c.metadata->>'title', t.title) AS title,
                    c.metadata->>'summary' AS summary
-            FROM chunks c
+            FROM todo_registry t
+            JOIN chunks c ON c.id = t.source_chunk_id
             JOIN records r ON r.id = c.record_id
-            WHERE c.user_id = #{userId}::uuid
+            WHERE t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
+              AND t.current_status != 'completed'
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
-              AND c.metadata->>'contentType' IN ('todo', 'plan')
-              AND COALESCE(c.metadata->>'taskStatus', 'not_started') != 'completed'
-              -- 已删除待办排除（todoRemoved 标记；todo-status-removal-design.md §6）
-              AND COALESCE(c.metadata->>'todoRemoved', 'false') != 'true'
             ORDER BY r.created_at DESC
             LIMIT 20
             """)

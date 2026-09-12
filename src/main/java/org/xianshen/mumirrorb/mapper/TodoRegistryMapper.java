@@ -60,9 +60,10 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
      * <p>口径与 selectOpenTodos 完全一致（current_status != 'completed' + INNER JOIN chunks
      * 天然排除 orphan + created_at DESC, id DESC），仅两点差异：</p>
      * <ul>
-     *   <li>currentStatus 取 <b>chunk.metadata.taskStatus 实时值</b>（真源 #33；COALESCE 缺省
-     *       not_started，与 ProfileStatsMapper 同款）——registry 只是物化索引，读路径以 chunk 为准；
-     *       行过滤仍按 registry.current_status（双写保证一致，chunk 脏值时 Service 回退 registry 值）</li>
+     *   <li>currentStatus 即 <b>registry.current_status</b>（todo-status-removal-design.md §11：
+     *       待办状态类读取统一以 registry 为准，chunk.metadata.taskStatus 只是"登记时初值"，
+     *       状态变更只写 registry，chunk 快照会过期）。原"取 chunk 实时值 + 脏值回退 registry"
+     *       的双源逻辑已移除，Service 侧只对 registry 脏值兜底 not_started。</li>
      *   <li>created_at 输出 yyyy-MM-dd HH:mm:ss（Asia/Shanghai，AT TIME ZONE 口径照 ProfileStatsMapper）</li>
      * </ul>
      */
@@ -70,7 +71,6 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             SELECT t.id AS todoId,
                    t.title AS title,
                    t.current_status AS currentStatus,
-                   COALESCE(c.metadata->>'taskStatus', 'not_started') AS chunkStatus,
                    t.source_chunk_id AS sourceChunkId,
                    TO_CHAR(t.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS createdAt
             FROM todo_registry t

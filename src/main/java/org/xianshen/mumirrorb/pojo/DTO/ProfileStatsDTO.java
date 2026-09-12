@@ -20,7 +20,7 @@ import java.util.List;
 @Schema(description = "画像五维统计（内部载体）")
 public class ProfileStatsDTO {
 
-    @Schema(description = "未完成待办（taskStatus != completed 的 todo/plan）")
+    @Schema(description = "未完成待办（registry 口径：current_status != completed）")
     private List<TodoItemDTO> todos;
 
     @Schema(description = "最近学习条目")

@@ -99,13 +99,13 @@ public class MirrorStatsVO {
     @AllArgsConstructor
     @Schema(description = "待办统计")
     public static class TodoStatsVO {
-        @Schema(description = "待办/计划 chunk 总数", example = "6")
+        @Schema(description = "待办总数（registry 口径，含已完成）", example = "6")
         private Integer total;
 
         @Schema(description = "已完成数", example = "3")
         private Integer completed;
 
-        @Schema(description = "未开始数（含缺 taskStatus 的旧数据）", example = "2")
+        @Schema(description = "未开始数", example = "2")
         private Integer notStarted;
 
         @Schema(description = "进行中数", example = "1")

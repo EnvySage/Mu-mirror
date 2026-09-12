@@ -14,7 +14,8 @@ import java.util.List;
  *
  * <p>一条未完成待办 = 一条链：origin（登记时原始片段，理论必有、代码判空）+
  * evidence[]（用户确认建议时背书的后续证据，按 date ASC）+ pendingSuggestionCount。
- * currentStatus 以 chunk.metadata.taskStatus 实时值为准（真源 #33，registry 是物化索引）。</p>
+ * currentStatus 取 registry.current_status（待办状态类读取统一 registry 口径，
+ * todo-status-removal-design.md §11；chunk.metadata.taskStatus 只是登记时初值）。</p>
  */
 @Data
 @Builder
@@ -30,7 +31,7 @@ public class TodoChainVO {
     @Schema(description = "待办标题", example = "计划补文献综述")
     private String title;
 
-    @Schema(description = "当前状态（chunk.metadata.taskStatus 实时值）", example = "in_progress")
+    @Schema(description = "当前状态（registry.current_status）", example = "in_progress")
     private String currentStatus;
 
     @Schema(description = "登记时间（yyyy-MM-dd HH:mm:ss 上海时区）", example = "2026-09-12 09:15:17")

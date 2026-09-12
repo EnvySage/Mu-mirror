@@ -406,13 +406,12 @@ class TodoRegistryServiceTest {
 
     // ==================== 证据链：listOpenChains（GET /todos/open-chain） ====================
 
-    private Map<String, Object> chainBase(Long todoId, String registryStatus, String chunkStatus,
-                                          String createdAt) {
+    /** 证据链基础行（registry 口径：SQL 只出 currentstatus，不再带 chunk 快照 status） */
+    private Map<String, Object> chainBase(Long todoId, String registryStatus, String createdAt) {
         Map<String, Object> row = new HashMap<>();
         row.put("todoid", todoId);
         row.put("title", "计划补文献综述");
         row.put("currentstatus", registryStatus);
-        row.put("chunkstatus", chunkStatus);
         row.put("sourcechunkid", CHUNK_ID);
         row.put("createdat", createdAt);
         return row;
@@ -436,8 +435,8 @@ class TodoRegistryServiceTest {
     void listOpenChains_assemblesChainAndOrder() {
         // 基础行序 = SQL createdAt DESC：todo 5 新、todo 6 旧
         when(registryMapper.selectOpenChainBase(USER_ID, 200)).thenReturn(List.of(
-                chainBase(5L, "in_progress", "in_progress", "2026-09-12 09:15:17"),
-                chainBase(6L, "not_started", "not_started", "2026-09-10 08:00:00")));
+                chainBase(5L, "in_progress", "2026-09-12 09:15:17"),
+                chainBase(6L, "not_started", "2026-09-10 08:00:00")));
         // links 一次带回（SQL 已按 date ASC）：todo5 = origin29 + evidence17 + evidence18；todo6 只有 origin
         when(linkMapper.selectChainLinks(List.of(5L, 6L))).thenReturn(List.of(
                 chainLink(5L, "origin", 29L, 10301L, "明天开始补文献综述，要肝一波了。", "2026-09-12 09:15", null),
@@ -483,7 +482,7 @@ class TodoRegistryServiceTest {
         // orphan/已完成在 SQL 层被 INNER JOIN chunks + != 'completed' 排除：
         // mock 只回非 orphan 未完成行；todo 99（orphan，chunk 已删）不在结果里 → 无链
         when(registryMapper.selectOpenChainBase(USER_ID, 200)).thenReturn(List.of(
-                chainBase(5L, "in_progress", "in_progress", "2026-09-12 09:15:17")));
+                chainBase(5L, "in_progress", "2026-09-12 09:15:17")));
         when(linkMapper.selectChainLinks(List.of(5L))).thenReturn(List.of(
                 chainLink(5L, "origin", 29L, 10301L, "片段", "2026-09-12 09:15", null)));
         when(suggestionMapper.selectPendingCounts(List.of(5L))).thenReturn(List.of());
@@ -501,20 +500,19 @@ class TodoRegistryServiceTest {
     }
 
     @Test
-    @DisplayName("证据链：currentStatus 以 chunk.metadata.taskStatus 真源为准（registry 不一致时取 chunk；chunk 脏值回退 registry）")
-    void listOpenChains_chunkStatusIsSourceOfTruth() {
-        // registry 物化值落后（not_started），chunk 真源 in_progress → 取 chunk 值；
-        // 第二行 chunk 值脏（SQL COALESCE 理论只出合法值，防御口径）→ 回退 registry 值
+    @DisplayName("证据链：currentStatus 以 registry 为准（chunk 快照过期不再影响展示）；registry 脏值兜底 not_started")
+    void listOpenChains_registryStatusIsSourceOfTruth() {
+        // 状态变更只写 registry：chunk 快照仍停在 not_started 时，链上展示的必须是 registry 的 in_progress
         when(registryMapper.selectOpenChainBase(USER_ID, 200)).thenReturn(List.of(
-                chainBase(5L, "not_started", "in_progress", "2026-09-12 09:15:17"),
-                chainBase(6L, "in_progress", "weird-value", "2026-09-10 08:00:00")));
+                chainBase(5L, "in_progress", "2026-09-12 09:15:17"),
+                chainBase(6L, "weird-value", "2026-09-10 08:00:00"))); // 脏值 → 兜底
         when(linkMapper.selectChainLinks(any())).thenReturn(List.of());
         when(suggestionMapper.selectPendingCounts(any())).thenReturn(List.of());
 
         List<org.xianshen.mumirrorb.pojo.VO.TodoChainVO> chains = service.listOpenChains(USER_ID);
 
         assertEquals("in_progress", chains.get(0).getCurrentStatus());
-        assertEquals("in_progress", chains.get(1).getCurrentStatus()); // 脏值回退 registry
+        assertEquals("not_started", chains.get(1).getCurrentStatus());
         // origin 可空：links 无 origin 行时不报错（理论必有，代码判空）
         assertNull(chains.get(0).getOrigin());
     }
@@ -524,7 +522,7 @@ class TodoRegistryServiceTest {
     void listOpenChains_truncatesExcerpt() {
         String long61 = "一".repeat(61);
         when(registryMapper.selectOpenChainBase(USER_ID, 200)).thenReturn(List.of(
-                chainBase(5L, "in_progress", "in_progress", "2026-09-12 09:15:17")));
+                chainBase(5L, "in_progress", "2026-09-12 09:15:17")));
         when(linkMapper.selectChainLinks(List.of(5L))).thenReturn(List.of(
                 chainLink(5L, "origin", 29L, 10301L, long61, "2026-09-12 09:15", null)));
         when(suggestionMapper.selectPendingCounts(List.of(5L))).thenReturn(List.of());

@@ -79,7 +79,8 @@ public interface TodoRegistryService {
      *
      * <p>口径：selectOpenTodos 同款（!= completed 且非 orphan），按 createdAt DESC；
      * 每链 = origin（可空，代码判空）+ evidence[]（date ASC）+ pendingSuggestionCount。
-     * currentStatus 以 chunk.metadata.taskStatus 实时值为准（真源 #33）。
+     * currentStatus 取 registry.current_status（待办状态类读取统一 registry 口径，
+     * todo-status-removal-design.md §11）。
      * 批量三段查询防 N+1：open 基础行 → links IN JOIN chunks → suggestions count GROUP BY。</p>
      */
     List<TodoChainVO> listOpenChains(UUID userId);

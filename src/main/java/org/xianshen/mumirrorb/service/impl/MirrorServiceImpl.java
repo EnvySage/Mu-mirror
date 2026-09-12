@@ -250,7 +250,7 @@ public class MirrorServiceImpl implements MirrorService {
                     .build());
         }
 
-        // 待办：状态计数（COALESCE 归 not_started）+ 未完成明细截 10 条
+        // 待办：状态计数（registry 口径，见 todo-status-removal-design.md §11）+ 未完成明细截 10 条
         int total = 0;
         int notStarted = 0;
         int inProgress = 0;

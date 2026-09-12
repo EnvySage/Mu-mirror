@@ -329,7 +329,8 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     @Transactional(readOnly = true)
     public List<TodoChainVO> listOpenChains(UUID userId) {
         // ① open registry 基础行（selectOpenTodos 同口径：!= completed + INNER JOIN chunks 排 orphan，
-        //    createdAt DESC；currentStatus 附带 chunk 实时 taskStatus——真源 #33）
+        //    createdAt DESC；currentStatus 取 registry 值——待办状态类读取统一 registry 口径，
+        //    todo-status-removal-design.md §11）
         List<Map<String, Object>> bases = registryMapper.selectOpenChainBase(userId, CHAIN_LIMIT);
         if (bases.isEmpty()) {
             return List.of();
@@ -390,11 +391,12 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
             if (todoId == null) {
                 continue;
             }
-            // currentStatus 真源口径：chunk.metadata.taskStatus 实时值（COALESCE 已缺省 not_started）；
-            // chunk 值是脏数据时回退 registry 物化值（双写正常时两者一致）
-            String status = normalizeStatus(str(row.get("chunkstatus")));
+            // currentStatus 统一 registry 口径（§11）：registry 是持续维护的状态机真源，
+            // chunk.metadata.taskStatus 只是登记时初值，状态变更后即过期。
+            // registry 值脏（写入侧已归一，理论不可能）→ 兜底 not_started，保证前端三态渲染不炸。
+            String status = normalizeStatus(str(row.get("currentstatus")));
             if (status == null) {
-                status = str(row.get("currentstatus"));
+                status = "not_started";
             }
             chains.add(TodoChainVO.builder()
                     .todoId(todoId)
