@@ -618,6 +618,14 @@ class TodoRegistryServiceTest {
         return dto;
     }
 
+    private TodoResolutionDTO mount(Long todoId, String action, String status) {
+        TodoResolutionDTO dto = new TodoResolutionDTO();
+        dto.setTodoId(todoId);
+        dto.setAction(action);
+        dto.setStatus(status);
+        return dto;
+    }
+
     @Test
     @DisplayName("confirm 决议 confirmed：回写源头+证据 chunk taskStatus、registry、evidence link、建议 confirmed")
     void applyResolutions_confirmed() {
@@ -714,6 +722,167 @@ class TodoRegistryServiceTest {
 
         verify(suggestionMapper).update(isNull(), any()); // 建议 9 未处理作废
         verify(registryMapper, never()).update(any(), any());
+    }
+
+    // ==================== 用户主动挂载（todoId 分支） ====================
+
+    @Test
+    @DisplayName("挂载 todoId：回写源头 taskStatus + registry 物化 + 本记录 evidence link + 合并确认该 todo 全部 pending")
+    void applyResolutions_todoIdMount_fullSideEffects() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        Chunk evidence = todoChunk(77L, "今天把作业补了", "not_started");
+        when(chunkMapper.selectList(any())).thenReturn(List.of(evidence));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L))).thenReturn(List.of());
+        TodoRegistry todo = registry(6L, "not_started"); // sourceChunkId = CHUNK_ID
+        when(registryMapper.selectById(6L)).thenReturn(todo);
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(todoChunk(CHUNK_ID, "补作业", "not_started"));
+        when(linkMapper.selectOneByTodoAndChunk(6L, 77L)).thenReturn(null);
+        TodoSuggestion todoPending = suggestion(9L, 6L, 77L, "pending", "in_progress");
+        when(suggestionMapper.selectList(any())).thenReturn(List.of(todoPending));
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(mount(6L, "confirmed", "completed")));
+
+        // ① 源头片段 taskStatus 回写（真源；仅源头一处，evidence 片段不回写）
+        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
+        verify(chunkMapper).updateById(chunkCaptor.capture());
+        assertEquals(CHUNK_ID, chunkCaptor.getValue().getId());
+        assertEquals("completed", chunkCaptor.getValue().getMetadata().get("taskStatus"));
+        // ② registry 物化（closed_at 语义由 applyRegistryStatus 内部处理）
+        verify(registryMapper).update(isNull(), any());
+        // ③ 本记录 chunk 落 evidence link
+        ArgumentCaptor<TodoRegistryLink> linkCaptor = ArgumentCaptor.forClass(TodoRegistryLink.class);
+        verify(linkMapper).insert(linkCaptor.capture());
+        assertEquals("evidence", linkCaptor.getValue().getRelation());
+        assertEquals(6L, linkCaptor.getValue().getTodoId());
+        assertEquals(77L, linkCaptor.getValue().getChunkId());
+        // ④ 该 todo 的 pending 建议合并 confirmed（仅此一次 update）
+        verify(suggestionMapper).update(isNull(), any());
+    }
+
+    @Test
+    @DisplayName("挂载 todoId：状态与当前相同仍幂等写 registry（不因无变化跳过）")
+    void applyResolutions_todoIdMount_sameStatusStillWrites() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "in_progress")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L))).thenReturn(List.of());
+        when(registryMapper.selectById(6L)).thenReturn(registry(6L, "in_progress"));
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(todoChunk(CHUNK_ID, "s", "in_progress"));
+        when(linkMapper.selectOneByTodoAndChunk(6L, 77L)).thenReturn(null);
+        when(suggestionMapper.selectList(any())).thenReturn(List.of());
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(mount(6L, "confirmed", "in_progress")));
+
+        verify(chunkMapper).updateById(any());       // 源头回写仍执行
+        verify(registryMapper).update(isNull(), any()); // registry 同状态也走
+        verify(linkMapper).insert(any(TodoRegistryLink.class));
+    }
+
+    @Test
+    @DisplayName("挂载 todoId：源头 orphan 跳过回写、link 已存在跳过，registry 仍物化")
+    void applyResolutions_todoIdMount_orphanAndLinkDedup() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L))).thenReturn(List.of());
+        when(registryMapper.selectById(6L)).thenReturn(registry(6L, "not_started"));
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(null);           // 源头 orphan
+        when(linkMapper.selectOneByTodoAndChunk(6L, 77L)).thenReturn(new TodoRegistryLink()); // 已存在
+        when(suggestionMapper.selectList(any())).thenReturn(List.of());
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(mount(6L, "confirmed", "in_progress")));
+
+        verify(chunkMapper, never()).updateById(any());
+        verify(linkMapper, never()).insert(any(TodoRegistryLink.class));
+        verify(registryMapper).update(isNull(), any());
+    }
+
+    @Test
+    @DisplayName("挂载 todoId：合并确认的 pending 不被'未处理一律作废'改回 dismissed")
+    void applyResolutions_todoIdMount_mergedPendingNotDismissed() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        // 本记录 evidence 有一条该 todo 的 pending（既在窗口内、也是该 todo 的 pending）
+        TodoSuggestion inWindow = suggestion(9L, 6L, 77L, "pending", "in_progress");
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L))).thenReturn(List.of(inWindow));
+        when(registryMapper.selectById(6L)).thenReturn(registry(6L, "not_started"));
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(todoChunk(CHUNK_ID, "s", "not_started"));
+        when(linkMapper.selectOneByTodoAndChunk(6L, 77L)).thenReturn(null);
+        when(suggestionMapper.selectList(any())).thenReturn(List.of(inWindow));
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(mount(6L, "confirmed", "completed")));
+
+        // 若 handled 未纳入该建议，step ② 会再 dismiss → 2 次 update
+        verify(suggestionMapper, org.mockito.Mockito.times(1)).update(isNull(), any());
+    }
+
+    @Test
+    @DisplayName("挂载 todoId：todo 不存在 / 已删除 / 非本人 → 静默忽略，不写库")
+    void applyResolutions_todoIdMount_missingDeletedForeignIgnored() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L))).thenReturn(List.of());
+        when(registryMapper.selectById(6L)).thenReturn(null); // 不存在
+        TodoRegistry deleted = registry(7L, "not_started");
+        deleted.setDeletedAt(OffsetDateTime.now());
+        when(registryMapper.selectById(7L)).thenReturn(deleted); // 已删除
+        TodoRegistry foreign = registry(8L, "not_started");
+        foreign.setUserId(OTHER_USER_ID);
+        when(registryMapper.selectById(8L)).thenReturn(foreign); // 非本人
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(
+                mount(6L, "confirmed", "completed"),
+                mount(7L, "confirmed", "completed"),
+                mount(8L, "confirmed", "completed")));
+
+        verify(registryMapper, never()).update(any(), any());
+        verify(chunkMapper, never()).updateById(any());
+        verify(linkMapper, never()).insert(any(TodoRegistryLink.class));
+        verify(suggestionMapper, never()).update(any(), any());
+    }
+
+    @Test
+    @DisplayName("决议校验：suggestionId / todoId 都无或都有 → 400（防歧义）")
+    void applyResolutions_requiresExactlyOneId() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+
+        TodoResolutionDTO neither = new TodoResolutionDTO();
+        neither.setAction("confirmed");
+        neither.setStatus("completed");
+        assertThrows(BusinessException.class,
+                () -> service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(neither)));
+
+        TodoResolutionDTO both = new TodoResolutionDTO();
+        both.setSuggestionId(9L);
+        both.setTodoId(6L);
+        both.setAction("confirmed");
+        both.setStatus("completed");
+        assertThrows(BusinessException.class,
+                () -> service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(both)));
+
+        verify(registryMapper, never()).update(any(), any());
+        verify(chunkMapper, never()).updateById(any());
+    }
+
+    @Test
+    @DisplayName("挂载 todoId：status 缺失 → 400；action=dismissed → 400（无忽略语义）")
+    void applyResolutions_todoIdRequiresConfirmedAndStatus() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L))).thenReturn(List.of());
+
+        assertThrows(BusinessException.class, () -> service.applyRecordResolutions(RECORD_ID, USER_ID,
+                List.of(mount(6L, "confirmed", null))));
+        assertThrows(BusinessException.class, () -> service.applyRecordResolutions(RECORD_ID, USER_ID,
+                List.of(mount(6L, "dismissed", "completed"))));
+
+        verify(registryMapper, never()).update(any(), any());
+        verify(chunkMapper, never()).updateById(any());
     }
 
     // ==================== 审核页数据接口 ====================
