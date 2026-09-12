@@ -59,13 +59,17 @@ public interface ProfileStatsMapper {
 
     /**
      * 最近学习条目（contentType = learning）
+     *
+     * <p>驼峰别名必须保留双引号（"recordId"/"keywordsJson"/"createdAt"）：PG 对未加引号的标识符
+     * 折叠为小写（recordId→recordid），而 MyBatis 对 Map 返回值按列名原样做 key，
+     * 去掉引号会导致消费侧 row.get("recordId") 静默取不到值。</p>
      */
     @Select("""
-            SELECT r.id AS recordId,
+            SELECT r.id AS "recordId",
                    c.metadata->>'title' AS title,
                    c.metadata->>'summary' AS summary,
-                   c.metadata->'keywords' AS keywordsJson,
-                   TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
+                   c.metadata->'keywords' AS "keywordsJson",
+                   TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS "createdAt"
             FROM chunks c
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
@@ -249,12 +253,15 @@ public interface ProfileStatsMapper {
     /**
      * 最近会话的对话（画像生成用 recent_chats：优先近 7 天，不足则前补，设计文档 6.5）
      *
-     * @return Map keys: role / content / created_at(ISO 字符串)
+     * <p>"createdAt" 别名必须保留双引号（原因同 selectRecentLearningsRaw：防 PG 折叠小写导致
+     * Map key 与消费侧读取失配）。</p>
+     *
+     * @return Map keys: role / content / createdAt(ISO 字符串)
      */
     @Select("""
             SELECT h.role,
                    h.content,
-                   TO_CHAR(h.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
+                   TO_CHAR(h.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS "createdAt"
             FROM conversation_history h
             WHERE h.user_id = #{userId}::uuid
             ORDER BY h.created_at DESC
