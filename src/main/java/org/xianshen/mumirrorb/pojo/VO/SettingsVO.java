@@ -63,7 +63,8 @@ public class SettingsVO {
     @Schema(description = "Embedding 模型名称", example = "BAAI/bge-m3")
     private String embeddingModel;
 
-    @Schema(description = "审核模式", example = "manual")
+    @Schema(description = "审核模式（实际生效值：总闸 review.auto-enabled=false 时恒为 manual，"
+            + "不回显存量 auto；总闸开启时为用户偏好值）", example = "manual")
     private String reviewMode;
 
     /**

@@ -237,7 +237,9 @@ public class SettingsServiceImpl implements SettingsService {
                 .embeddingBaseUrl(settings.getEmbeddingBaseUrl())
                 .embeddingApiKey(settings.getEmbeddingApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getEmbeddingApiKey())) : null)
                 .embeddingModel(settings.getEmbeddingModel())
-                .reviewMode(settings.getReviewMode())
+                // GET 回显归一化：总闸关闭时 reviewMode 回显实际生效值 "manual"（只归一化响应，
+                // 不改写 user_settings 存量值——总闸重新打开后用户原偏好自动恢复）
+                .reviewMode(reviewProperties.isAutoEnabled() ? settings.getReviewMode() : "manual")
                 .autoReviewAvailable(reviewProperties.isAutoEnabled())
                 .ragHalfLife(settings.getRagHalfLife())
                 .mirrorLookback(settings.getMirrorLookback() == null ? 1 : settings.getMirrorLookback())
