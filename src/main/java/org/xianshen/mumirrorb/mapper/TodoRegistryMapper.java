@@ -47,6 +47,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.user_id = #{userId}::uuid
               AND t.current_status != 'completed'
+              AND t.deleted_at IS NULL
             ORDER BY t.created_at DESC, t.id DESC
             LIMIT #{limit}
             """)
@@ -76,6 +77,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.user_id = #{userId}::uuid
               AND t.current_status != 'completed'
+              AND t.deleted_at IS NULL
             ORDER BY t.created_at DESC, t.id DESC
             LIMIT #{limit}
             """)
@@ -99,6 +101,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             LEFT JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.id = #{todoId}
               AND t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
             """)
     TodoRegistryDTO.TodoItem selectOneByUser(@Param("todoId") Long todoId,
                                              @Param("userId") UUID userId);
@@ -126,6 +129,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             FROM todo_registry t
             LEFT JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
             ORDER BY t.created_at DESC, t.id DESC
             """)
     List<Map<String, Object>> selectAllByUserRaw(@Param("userId") UUID userId);

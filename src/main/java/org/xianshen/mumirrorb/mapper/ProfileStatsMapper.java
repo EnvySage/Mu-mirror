@@ -35,6 +35,8 @@ public interface ProfileStatsMapper {
               AND r.status = 'done'
               AND c.metadata->>'contentType' IN ('todo', 'plan')
               AND COALESCE(c.metadata->>'taskStatus', 'not_started') != 'completed'
+              -- 已删除待办排除（todoRemoved 标记；todo-status-removal-design.md §6）
+              AND COALESCE(c.metadata->>'todoRemoved', 'false') != 'true'
             ORDER BY r.created_at DESC
             LIMIT 50
             """)
@@ -55,6 +57,8 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.metadata->>'contentType' IN ('todo', 'plan')
+              -- 已删除待办排除（todoRemoved 标记；todo-status-removal-design.md §6）
+              AND COALESCE(c.metadata->>'todoRemoved', 'false') != 'true'
             GROUP BY 1
             """)
     List<java.util.Map<String, Object>> selectTodoStatusCounts(@Param("userId") java.util.UUID userId);
