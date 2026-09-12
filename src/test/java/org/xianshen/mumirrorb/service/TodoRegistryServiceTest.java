@@ -24,6 +24,8 @@ import org.xianshen.mumirrorb.pojo.DO.TodoRegistry;
 import org.xianshen.mumirrorb.pojo.DO.TodoRegistryLink;
 import org.xianshen.mumirrorb.pojo.DO.TodoSuggestion;
 import org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO;
+import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
+import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
 import org.xianshen.mumirrorb.service.impl.TodoRegistryServiceImpl;
 
 import java.time.OffsetDateTime;
@@ -579,6 +581,210 @@ class TodoRegistryServiceTest {
         assertEquals(61, excerpt.length()); // 截到 60 字符 + 省略号 1 字符（既有 trunc 口径）
         assertTrue(excerpt.startsWith("一".repeat(60)));
         assertTrue(excerpt.endsWith("…"));
+    }
+
+    // ==================== 删除（特例：侧栏直删；软删 + 源头标记 + 建议作废） ====================
+
+    @Test
+    @DisplayName("删除：软删 registry + 源头加 todoRemoved 标记 + pending 建议全部作废")
+    void delete_softDeleteMarkAndInvalidate() {
+        when(registryMapper.selectById(1L)).thenReturn(registry(1L, "not_started")); // sourceChunkId=CHUNK_ID
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(todoChunk(CHUNK_ID, "补作业", "not_started"));
+
+        service.deleteTodo(1L, USER_ID);
+
+        verify(registryMapper).update(isNull(), any()); // deleted_at 落值（软删）
+        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
+        verify(chunkMapper).updateById(chunkCaptor.capture());
+        assertEquals(Boolean.TRUE, chunkCaptor.getValue().getMetadata().get("todoRemoved"));
+        verify(suggestionMapper).update(isNull(), any()); // pending 建议作废
+    }
+
+    @Test
+    @DisplayName("删除幂等：已删除直接返回成功，不再写库")
+    void delete_idempotent() {
+        TodoRegistry deleted = registry(1L, "not_started");
+        deleted.setDeletedAt(OffsetDateTime.now());
+        when(registryMapper.selectById(1L)).thenReturn(deleted);
+
+        service.deleteTodo(1L, USER_ID);
+
+        verify(registryMapper, never()).update(any(), any());
+        verify(chunkMapper, never()).updateById(any());
+        verify(suggestionMapper, never()).update(any(), any());
+    }
+
+    @Test
+    @DisplayName("删除：源头 chunk 缺失（orphan）跳过标记，registry 软删与建议作废仍执行")
+    void delete_sourceChunkMissing() {
+        when(registryMapper.selectById(1L)).thenReturn(registry(1L, "not_started"));
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(null);
+
+        service.deleteTodo(1L, USER_ID);
+
+        verify(chunkMapper, never()).updateById(any());
+        verify(registryMapper).update(isNull(), any());
+        verify(suggestionMapper).update(isNull(), any());
+    }
+
+    @Test
+    @DisplayName("删除：他人待办 404，不写库")
+    void delete_guards() {
+        TodoRegistry others = registry(1L, "not_started");
+        others.setUserId(OTHER_USER_ID);
+        when(registryMapper.selectById(1L)).thenReturn(others);
+
+        assertThrows(BusinessException.class, () -> service.deleteTodo(1L, USER_ID));
+        verify(registryMapper, never()).update(any(), any());
+        verify(chunkMapper, never()).updateById(any());
+    }
+
+    // ==================== 建议产生：已删除 todo 跳过 ====================
+
+    @Test
+    @DisplayName("判别回传：已删除 todo 不再产生新建议")
+    void suggest_skipsDeletedTodo() {
+        TodoRegistry deleted = registry(1L, "not_started");
+        deleted.setDeletedAt(OffsetDateTime.now());
+        when(registryMapper.selectById(1L)).thenReturn(deleted);
+
+        service.suggestFromChunk(USER_ID, todoChunk(77L, "x", null),
+                RecordProcessorProto.TodoRef.newBuilder().setTodoId(1L).setSuggestedStatus("completed").build());
+
+        verify(suggestionMapper, never()).insert(any(TodoSuggestion.class));
+    }
+
+    // ==================== confirm 决议：applyRecordResolutions ====================
+
+    private TodoResolutionDTO resolution(Long suggestionId, String action, String status) {
+        TodoResolutionDTO dto = new TodoResolutionDTO();
+        dto.setSuggestionId(suggestionId);
+        dto.setAction(action);
+        dto.setStatus(status);
+        return dto;
+    }
+
+    @Test
+    @DisplayName("confirm 决议 confirmed：回写源头+证据 chunk taskStatus、registry、evidence link、建议 confirmed")
+    void applyResolutions_confirmed() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        Chunk evidence = todoChunk(77L, "作业补完了", "completed");
+        Chunk source = todoChunk(CHUNK_ID, "补作业", "not_started");
+        when(chunkMapper.selectList(any())).thenReturn(List.of(evidence));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L)))
+                .thenReturn(List.of(suggestion(9L, 1L, 77L, "pending", "completed")));
+        when(registryMapper.selectById(1L)).thenReturn(registry(1L, "not_started"));
+        when(chunkMapper.selectById(77L)).thenReturn(evidence);
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(source);
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID,
+                List.of(resolution(9L, "confirmed", "completed")));
+
+        // 源头 + 证据两处 taskStatus 回写（补现状缺口）
+        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
+        verify(chunkMapper, org.mockito.Mockito.times(2)).updateById(chunkCaptor.capture());
+        for (Chunk c : chunkCaptor.getAllValues()) {
+            assertEquals("completed", c.getMetadata().get("taskStatus"));
+        }
+        verify(registryMapper).update(isNull(), any());
+        ArgumentCaptor<TodoRegistryLink> linkCaptor = ArgumentCaptor.forClass(TodoRegistryLink.class);
+        verify(linkMapper).insert(linkCaptor.capture());
+        assertEquals("evidence", linkCaptor.getValue().getRelation());
+        verify(suggestionMapper).update(isNull(), any()); // 建议 confirmed
+    }
+
+    @Test
+    @DisplayName("confirm 决议：body 未出现的 pending 建议一律作废")
+    void applyResolutions_unhandledDismissed() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                todoChunk(77L, "x", "completed"), todoChunk(78L, "y", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L, 78L))).thenReturn(List.of(
+                suggestion(9L, 1L, 77L, "pending", "completed"),
+                suggestion(10L, 2L, 78L, "pending", "in_progress")));
+        when(registryMapper.selectById(1L)).thenReturn(registry(1L, "not_started"));
+        when(chunkMapper.selectById(77L)).thenReturn(todoChunk(77L, "x", "completed"));
+        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(todoChunk(CHUNK_ID, "s", "not_started"));
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID,
+                List.of(resolution(9L, "confirmed", "completed")));
+
+        // 建议 9 confirmed + 建议 10 未处理 dismissed = 两次建议行 update
+        verify(suggestionMapper, org.mockito.Mockito.times(2)).update(isNull(), any());
+    }
+
+    @Test
+    @DisplayName("confirm 决议：body 缺省（旧客户端）未处理建议一律作废，不误改状态")
+    void applyResolutions_bodyAbsentDismissAll() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L)))
+                .thenReturn(List.of(suggestion(9L, 1L, 77L, "pending", "completed")));
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID, null);
+
+        verify(suggestionMapper).update(isNull(), any());
+        verify(registryMapper, never()).update(any(), any());
+        verify(chunkMapper, never()).updateById(any());
+        verify(linkMapper, never()).insert(any(TodoRegistryLink.class));
+    }
+
+    @Test
+    @DisplayName("confirm 决议 confirmed 缺 status → 400（契约：status 必填）")
+    void applyResolutions_confirmedRequiresStatus() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L)))
+                .thenReturn(List.of(suggestion(9L, 1L, 77L, "pending", "completed")));
+
+        assertThrows(BusinessException.class, () -> service.applyRecordResolutions(RECORD_ID, USER_ID,
+                List.of(resolution(9L, "confirmed", null))));
+        verify(registryMapper, never()).update(any(), any());
+    }
+
+    @Test
+    @DisplayName("confirm 决议：不在本记录窗口的建议忽略，其余未处理作废")
+    void applyResolutions_foreignSuggestionIgnored() {
+        Record record = Record.builder().id(RECORD_ID).userId(USER_ID).build();
+        when(recordMapper.selectById(RECORD_ID)).thenReturn(record);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(todoChunk(77L, "x", "completed")));
+        when(suggestionMapper.selectPendingByEvidenceChunks(List.of(77L)))
+                .thenReturn(List.of(suggestion(9L, 1L, 77L, "pending", "completed")));
+
+        service.applyRecordResolutions(RECORD_ID, USER_ID,
+                List.of(resolution(999L, "confirmed", "completed")));
+
+        verify(suggestionMapper).update(isNull(), any()); // 建议 9 未处理作废
+        verify(registryMapper, never()).update(any(), any());
+    }
+
+    // ==================== 审核页数据接口 ====================
+
+    @Test
+    @DisplayName("审核页接口：listRecordSuggestions 字段按契约键映射")
+    void listRecordSuggestions_maps() {
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("suggestionId", 123L);
+        row.put("todoId", 1L);
+        row.put("todoTitle", "补作业");
+        row.put("todoStatus", "not_started");
+        row.put("suggestedStatus", "completed");
+        row.put("evidenceChunkId", 77L);
+        when(suggestionMapper.selectRecordSuggestions(RECORD_ID, USER_ID)).thenReturn(List.of(row));
+
+        List<TodoSuggestionVO.RecordSuggestion> result = service.listRecordSuggestions(RECORD_ID, USER_ID);
+
+        assertEquals(1, result.size());
+        assertEquals(123L, result.get(0).getSuggestionId());
+        assertEquals(1L, result.get(0).getTodoId());
+        assertEquals("补作业", result.get(0).getTodoTitle());
+        assertEquals("not_started", result.get(0).getTodoStatus());
+        assertEquals("completed", result.get(0).getSuggestedStatus());
+        assertEquals(77L, result.get(0).getEvidenceChunkId());
     }
 
     @SuppressWarnings("unchecked")
