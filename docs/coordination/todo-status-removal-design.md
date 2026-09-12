@@ -77,7 +77,11 @@ ownership 在 SQL 层过滤（`r.user_id`），非本人返回空；已删除 to
 
 ## 6. chunk 口径统计排除（`AND COALESCE(c.metadata->>'todoRemoved','false') != 'true'`）
 
-以下 SQL 已要求 `status='done'`，删除待办所在 chunk 仍属 done 记录，故按 `todoRemoved` 标记排除：
+> **2026-09-12 更新（见 §11）**：下列查询已改为 **registry 主表**口径，不再按 chunk 快照统计，
+> 因此不再需要 `todoRemoved` 过滤（`t.deleted_at IS NULL` 已覆盖）。标记**仍继续落库**
+> （删除三写之一，见 §3），作为 chunk 侧兜底与历史兼容，不回退该行为。
+
+以下 SQL 已要求 `status='done'`，删除待办所在 chunk 仍属 done 记录，故按 `todoRemoved` 标记排除（改造前）：
 - `ProfileStatsMapper.selectOpenTodos`、`selectTodoStatusCounts`
 - `DailySummaryMapper.selectOpenTodos`
 
@@ -141,4 +145,68 @@ ownership 在 SQL 层过滤（`r.user_id`），非本人返回空；已删除 to
 ### 边界与不变式
 - 现有 `suggestionId` 分支行为**零回归**（含 dismissed 语义）。
 - 真源唯一（#33）不变：`chunk.metadata.taskStatus` 真源 + `registry.current_status` 物化双写。
+  （**读路径**口径见 §11：状态类读取统一以 registry 为准，#33 只约束写路径双写。）
 - 不碰前端仓库；不改 AI 侧。
+
+## 11. 统计口径统一 registry（2026-09-12 补丁）
+
+### 背景（用户实测确证）
+镜子页 TODO 统计卡（`GET /mirror/stats` 的 todo 段）显示 **未开始 4 · 进行中 4 · 完成 1**，
+登记表真实状态是 **未开始 1 · 进行中 2 · 完成 3**。
+
+根因：`ProfileStatsMapper.selectTodoStatusCounts` 按 `chunk.metadata.taskStatus` 统计，
+而 **状态变更只更新 todo_registry**（chunk 快照从此过期）。例："写接口文档" 的 chunk 仍是
+`not_started`，registry 里早已 `completed`——chunk 快照是**登记时刻的初值**，不是实时状态。
+
+### 决策
+**待办状态类读取统一以 `todo_registry` 为主表**（registry 是持续维护的状态机真源）：
+
+- 状态一律取 `t.current_status`；`chunk.metadata.taskStatus` **退化为"创建时初值"**，
+  仅作源头徽标的兜底展示（展示层仍可读，不参与统计/过滤）。
+- 写路径（裁决 #33 双写）**不变**：状态变更仍同时写 chunk taskStatus + registry，
+  本轮只翻转读路径，避免历史 chunk 数据与新口径割裂。
+- 过滤约定（所有 registry 口径查询统一）：
+  `t.deleted_at IS NULL` + `INNER JOIN chunks c ON c.id = t.source_chunk_id`（天然排 orphan，
+  与 `TodoRegistryMapper.selectOpenTodos` 同口径）+ `JOIN records`（保留消费口径
+  `source='user'`、`status='done'`、`deleted_at IS NULL`）。
+- **不再过滤 `todoRemoved`**：删除时 registry 已软删（`deleted_at`），
+  `t.deleted_at IS NULL` 即权威判据；chunk 标记只服务 chunk 侧渲染，重复过滤无意义。
+  也不再判 `contentType IN ('todo','plan')`——registry 行只由 todo/plan 片段登记产生
+  （`TodoRegistryServiceImpl.registerFromRecord`）。
+
+### 改造清单（现状 → 改后）
+
+| # | 查询 | 消费方 | 现状（chunk 快照） | 改后（registry） |
+|---|---|---|---|---|
+| 1 | `ProfileStatsMapper.selectTodoStatusCounts` | `MirrorServiceImpl.stats`（统计卡）/ `buildRollingContext` facts / `GetStatsTool` | `chunks` 主表，`COALESCE(metadata->>'taskStatus','not_started')` 分组 | `todo_registry` 主表，`t.current_status` 分组；`status`/`count` 列名不变 |
+| 2 | `ProfileStatsMapper.selectOpenTodos` | `MirrorServiceImpl.stats` openItems / `collectStats`（画像 prompt `todos[]`）/ `buildRollingContext` facts | `chunks` 主表，`taskStatus != 'completed'` | `todo_registry` 主表，`t.current_status != 'completed'`；`recordId/title/summary/taskStatus/createdAt` 字段不变 |
+| 3 | `DailySummaryMapper.selectOpenTodos` | `SummaryServiceImpl.buildDailyPrompt`（日报"未完成待办"） | `chunks` 主表 + 昨日窗口 | `todo_registry` 主表 + **窗口保留**（源头记录 `r.created_at ∈ [dayStart,dayEnd)`）；`title/summary` 字段不变 |
+| 4 | `TodoRegistryMapper.selectOpenChainBase` | `TodoRegistryServiceImpl.listOpenChains`（`GET /todos/open-chain`） | 附带 `chunkStatus`（chunk 实时值），Service 优先取 chunk、脏值回退 registry | 只出 `currentStatus`（registry）；`chunkStatus` 列移除 |
+| — | `TodoRegistryMapper.selectOpenTodos` / `selectAllByUserRaw` / `selectOneByUser`、`TodoSuggestionMapper.selectRecordSuggestions` | 判别注入 / `GET /todos` / 审核页建议 | 已是 registry 口径 | 不变 |
+
+### 消费方影响
+- **返回结构零变化**（字段名/类型/排序/上限全部保持），1/2/3 的消费方代码**无需改动**：
+  `MirrorServiceImpl.stats`、`buildRollingContext`、`collectStats`、`SummaryServiceImpl.buildDailyPrompt`、`GetStatsTool`。
+- 唯一适配：`listOpenChains` 状态取值从 `chunkstatus` 改为 `currentstatus`（1 行），
+  脏值兜底由"回退 registry"改为 `not_started`（registry 写入侧已归一，纯防御）。
+- 语义变化（预期内）：统计卡/日报/证据链展示的状态**跟随 registry 实时值**，
+  不再是登记时刻的快照。
+
+### 回归防线
+新增 `src/test/java/org/xianshen/mumirrorb/mapper/TodoStatusCaliberTest`——直接断言四个 Mapper
+注解 SQL 的口径（主表 = `todo_registry`、状态取 `t.current_status`、含 `t.deleted_at IS NULL`、
+不含 `metadata->>'taskStatus'`）。Service 层 mock 单测覆盖不到 SQL 口径，由此测试守卫。
+
+### 遗留（未执行）
+- **历史 chunk 快照不回写**：存量 `chunks.metadata.taskStatus` 与 registry 不一致的行未做修复
+  （本轮不写数据修复脚本）。读路径已不依赖 chunk 快照，功能上无影响；
+  若后续要求"源头徽标"与登记状态一致，可一次性执行（建议方案，需人工确认后跑）：
+  ```sql
+  UPDATE chunks c
+     SET metadata = jsonb_set(metadata, '{taskStatus}', to_jsonb(t.current_status), true)
+    FROM todo_registry t
+   WHERE t.source_chunk_id = c.id
+     AND t.deleted_at IS NULL
+     AND c.metadata->>'taskStatus' IS DISTINCT FROM t.current_status;
+  ```
+- `todoRemoved` 标记与 `patchChunkTodoRemoved` 保留（删除三写之一），目前仅作 chunk 侧兜底。
