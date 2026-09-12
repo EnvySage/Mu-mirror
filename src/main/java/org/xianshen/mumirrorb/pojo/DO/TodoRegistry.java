@@ -66,4 +66,14 @@ public class TodoRegistry {
     /** completed 时刻（追溯；Asia/Shanghai） */
     @Schema(description = "完成时刻（completed 时有值）")
     private OffsetDateTime closedAt;
+
+    /**
+     * 软删时间戳（todo-status-removal-design.md）
+     *
+     * <p>删除 = 特例（侧栏直删+弹框）：registry 行保留 + deleted_at 落值（不动 auto 已定稿代码）。
+     * 非 null = 已删除：所有视图（清单/注入/证据链/统计）过滤，不再产生新建议、不可改状态。
+     * 源头片段 metadata 另加 {@code todoRemoved: true} 标记（chunk 口径统计排除）。</p>
+     */
+    @Schema(description = "软删时间戳（非 null = 已删除）")
+    private OffsetDateTime deletedAt;
 }

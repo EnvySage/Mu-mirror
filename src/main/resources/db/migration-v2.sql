@@ -207,3 +207,11 @@ CREATE TABLE IF NOT EXISTS todo_suggestions (
     resolved_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_todo_sug_user ON todo_suggestions(user_id, status);
+
+-- ---------- 12. 2026-09-12 待办交互重构 + 删除功能（todo-status-removal-design.md） ----------
+-- 删除 = 特例（侧栏直删）：软删方案——registry 行保留 + deleted_at 时间戳，所有视图过滤；
+-- 源头片段 metadata 加 todoRemoved=true 标记（chunk 口径统计排除）；pending 建议一并作废。
+ALTER TABLE todo_registry ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+-- 活行部分索引：查询口径一律 deleted_at IS NULL
+CREATE INDEX IF NOT EXISTS idx_todo_reg_user_active
+    ON todo_registry(user_id, current_status) WHERE deleted_at IS NULL;

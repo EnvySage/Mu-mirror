@@ -225,9 +225,13 @@ CREATE TABLE IF NOT EXISTS todo_registry (
     source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,  -- 原始待办片段；被删→orphan 关闭
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
-    closed_at TIMESTAMPTZ                     -- completed 时刻（追溯）
+    closed_at TIMESTAMPTZ,                    -- completed 时刻（追溯）
+    deleted_at TIMESTAMPTZ                    -- 软删时间戳（保留行；所有视图过滤；todo-status-removal-design.md）
 );
 CREATE INDEX IF NOT EXISTS idx_todo_reg_user ON todo_registry(user_id, current_status);
+-- 活行部分索引：查询口径一律 deleted_at IS NULL，命中该索引避免全表筛
+CREATE INDEX IF NOT EXISTS idx_todo_reg_user_active
+    ON todo_registry(user_id, current_status) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS todo_registry_links (
     id BIGSERIAL PRIMARY KEY,
