@@ -23,6 +23,14 @@ message ClassifyRequest {
   bool single = 3;           // true：单段模式，禁止拆分，恰好返回 1 条 ClassifyItem（设计文档 4.4）
   repeated GlossaryTerm glossary = 4; // 用户个人词典（confirmed top 30；注入点：分类现场修个人指代最便宜）
   repeated TodoHint open_todos = 5;   // 用户未完成待办清单（todo-registry 判别期；B 侧查 registry，最近优先 ≤20 条）
+  repeated RecentHint recent_context = 6; // 近 7 天记录摘要（B 侧查 chunks.metadata，最近优先 ≤20 条；指代消解语境）
+}
+
+// 近期语境条目（近 7 天记录摘要）：B 侧查 chunks.metadata 注入；Python 侧只渲染不查库
+message RecentHint {
+  string date = 1;              // 记录日期 yyyy-MM-dd（Asia/Shanghai）
+  string title = 2;             // chunk metadata.title
+  repeated string keywords = 3; // chunk metadata.keywords（≤5 个）
 }
 
 // 待办清单条目（todo-registry-design.md §3.2）：B 侧查 todo_registry（current_status != 'completed'）注入；

@@ -175,7 +175,8 @@ public class ChunkServiceImpl implements ChunkService {
 
         // 3. 同步调用单段分类（single=true）回填 metadata；失败不阻断（metadata 留空）
         try {
-            var response = aiGrpcClient.classifySingle(userId, segmentText);
+            // 新 chunk 尚未入库，排除所属 record 既有 chunk（避免同记录标题自污染）
+            var response = aiGrpcClient.classifySingle(userId, segmentText, recordId);
             if (!response.getSkip() && response.getItemsCount() > 0) {
                 Map<String, Object> metadata = ClassifyItemConverter.toMetadata(response.getItems(0));
                 chunk.setMetadata(metadata);

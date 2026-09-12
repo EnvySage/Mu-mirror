@@ -178,4 +178,44 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     List<java.util.Map<String, Object>> selectCorrectionIndex(@Param("userId") UUID userId,
                                                               @Param("since") java.time.OffsetDateTime since,
                                                               @Param("until") java.time.OffsetDateTime until);
+
+    /**
+     * 近期语境条目（近 7 天记录摘要，分类指代消解用）
+     *
+     * <p>口径对齐 {@link #selectLookbackChunks} / {@link #selectCorrectionIndex}（user 记录、未删除、
+     * 非 failed、非 vault）；额外要求 title 非空。按时间倒序取，SQL 上限 {@code limit}（默认 50，
+     * Java 侧按 title 去重后取最近若干条）。</p>
+     *
+     * <p>{@code excludeRecordId} 非空时排除该 record 自身（审核补分类防旧标题自污染）。</p>
+     *
+     * @param userId          用户ID
+     * @param since           时间窗下界（含）
+     * @param excludeRecordId 需要排除的 recordId（可空）
+     * @param limit           返回数量上限
+     * @return 每行含 title / keywordsJson / date 三个 key（keywordsJson 用引号别名，防 PG 折叠成小写）
+     */
+    @Select("""
+            <script>
+            SELECT c.metadata->>'title' AS title,
+                   c.metadata->'keywords' AS "keywordsJson",
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status != 'failed'
+              AND c.vault_item_id IS NULL
+              AND c.metadata->>'title' IS NOT NULL
+              AND c.metadata->>'title' != ''
+              AND r.created_at &gt;= #{since}
+              <if test="excludeRecordId != null">AND c.record_id != #{excludeRecordId}</if>
+            ORDER BY r.created_at DESC, c.id DESC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<java.util.Map<String, Object>> selectRecentContextHints(@Param("userId") UUID userId,
+                                                                @Param("since") java.time.OffsetDateTime since,
+                                                                @Param("excludeRecordId") Long excludeRecordId,
+                                                                @Param("limit") int limit);
 }

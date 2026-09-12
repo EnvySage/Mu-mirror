@@ -238,7 +238,9 @@ public class RecordServiceImpl implements RecordService {
             }
             String text = chunk.getSegment() != null ? chunk.getSegment() : chunk.getContent();
             try {
-                RecordProcessorProto.ClassifyResponse response = aiGrpcClient.classifySingle(userId, text);
+                // 传入 chunk 所属 recordId：组装近 7 天语境时排除该 record 自身旧标题，防自污染
+                RecordProcessorProto.ClassifyResponse response =
+                        aiGrpcClient.classifySingle(userId, text, chunk.getRecordId());
                 if (!response.getSkip() && response.getItemsCount() > 0) {
                     Map<String, Object> metadata = ClassifyItemConverter.toMetadata(response.getItems(0));
                     chunk.setMetadata(metadata);

@@ -106,3 +106,10 @@ mirror:
   lookback-max-chars: 150000           # 总字符闸（与条数闸先触发者生效），旧→新裁剪直到塞下
   per-chunk-max-chars: 2000            # 单条日记渲染截断
   mirror-summary-after-months: 12      # 递归链超 N 个月，更早镜子只带一行摘要
+
+# 分类语境注入（近 7 天记录摘要：B 侧查 chunks.metadata 组装，Python 侧只渲染不查库）
+record-context:
+  window-days: 7                       # 近 N 天窗口（records.created_at）
+  max-hints: 20                        # 最终注入条数上限（title 去重后取最近 N 条）
+  max-query: 50                        # SQL 查询上限（去重前多查兜底）
+  max-keywords: 5                      # 每条条目携带 keywords 上限

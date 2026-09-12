@@ -122,13 +122,13 @@ class ConfirmReviewTest {
                 .content("原文").segment("改过的文本").classifiedSegment(null) // 文本已改，需补分类
                 .build();
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
-        when(aiGrpcClient.classifySingle(eq(USER_ID), any()))
+        when(aiGrpcClient.classifySingle(eq(USER_ID), any(), eq(RECORD_ID)))
                 .thenThrow(new RuntimeException("gRPC down"));
         when(aiGrpcClient.embed(eq(USER_ID), any())).thenReturn(embedResponse());
 
         recordService.confirmReview(RECORD_ID, USER_ID);
 
-        verify(aiGrpcClient).classifySingle(eq(USER_ID), eq("改过的文本"));
+        verify(aiGrpcClient).classifySingle(eq(USER_ID), eq("改过的文本"), eq(RECORD_ID));
         assertEquals(RecordStatus.DONE, record.getStatus());
         assertTrue(record.getUserReviewed());
         assertNull(chunk.getMetadata());
@@ -149,7 +149,7 @@ class ConfirmReviewTest {
         recordService.confirmReview(RECORD_ID, USER_ID);
 
         // 文本未变 → 不调 LLM
-        verify(aiGrpcClient, never()).classifySingle(any(), any());
+        verify(aiGrpcClient, never()).classifySingle(any(), any(), any());
         assertEquals(RecordStatus.DONE, record.getStatus());
         assertTrue(record.getUserReviewed());
         assertNull(chunk.getEmbedding());
@@ -163,7 +163,7 @@ class ConfirmReviewTest {
                 .content("原文").segment("新文本").classifiedSegment(null)
                 .build();
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
-        when(aiGrpcClient.classifySingle(eq(USER_ID), eq("新文本")))
+        when(aiGrpcClient.classifySingle(eq(USER_ID), eq("新文本"), eq(RECORD_ID)))
                 .thenReturn(singleResponse("学Spring Boot"));
         when(aiGrpcClient.embed(eq(USER_ID), any())).thenReturn(embedResponse());
 

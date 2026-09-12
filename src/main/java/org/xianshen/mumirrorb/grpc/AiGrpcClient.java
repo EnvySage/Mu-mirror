@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.xianshen.mumirrorb.common.utils.CryptoUtils;
+import org.xianshen.mumirrorb.config.RecordContextProperties;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingServiceGrpc;
@@ -17,14 +18,20 @@ import org.xianshen.mumirrorb.grpc.gen.MirrorProfileGrpc;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorGrpc;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
+import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.VO.GlossaryGroupVO.UserTermVO;
 import org.xianshen.mumirrorb.service.GlossaryService;
 import org.springframework.context.annotation.Lazy;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -46,17 +53,26 @@ public class AiGrpcClient {
     private final SettingsMapper settingsMapper;
     private final GlossaryService glossaryService;
     private final org.springframework.context.ApplicationContext applicationContext;
+    private final ChunkMapper chunkMapper;
+    private final RecordContextProperties recordContextProperties;
+
+    /** 记录日期时区（Asia/Shanghai，与全项目口径一致） */
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
 
     public AiGrpcClient(ManagedChannel channel,
                         SettingsMapper settingsMapper,
                         @Lazy GlossaryService glossaryService,
-                        org.springframework.context.ApplicationContext applicationContext) {
+                        org.springframework.context.ApplicationContext applicationContext,
+                        ChunkMapper chunkMapper,
+                        RecordContextProperties recordContextProperties) {
         this.channel = channel;
         this.settingsMapper = settingsMapper;
         this.glossaryService = glossaryService;
         this.applicationContext = applicationContext;
+        this.chunkMapper = chunkMapper;
+        this.recordContextProperties = recordContextProperties;
     }
 
     private RecordProcessorGrpc.RecordProcessorBlockingStub recordStub;
@@ -116,6 +132,9 @@ public class AiGrpcClient {
             // open_todos 注入（todo-registry-design.md §3.2 判别期）：未完成待办清单（≤20 条，
             // 最近优先）。组装失败按空清单继续——清单错了退化为 LLM 不知道旧待办，不炸分类。
             requestBuilder.addAllOpenTodos(todoHintTerms(userId));
+            // recent_context 注入（近 7 天记录摘要，指代消解语境）：组装失败按空清单继续——
+            // 语境缺失退化为普通分类，绝不阻断。（创建路径无需排除 record：此时该 record 尚无 chunk）
+            requestBuilder.addAllRecentContext(recentContextHints(userId, null));
 
             RecordProcessorProto.ClassifyRequest request = requestBuilder.build();
 
@@ -157,7 +176,24 @@ public class AiGrpcClient {
      * @return 分类结果（应恰好 1 条；异常时抛出，由调用方决定是否阻断）
      */
     public RecordProcessorProto.ClassifyResponse classifySingle(UUID userId, String content) {
-        log.info("gRPC 调用 Classify(single=true)，用户: {}, 内容长度: {}", userId, content.length());
+        return classifySingle(userId, content, null);
+    }
+
+    /**
+     * 调用 AI 分类服务（单段模式，可排除指定 record 自身）
+     *
+     * <p>审核补分类（confirmReview）传入 chunk 所属 recordId，组装近 7 天语境时排除该 record 自身，
+     * 防止被自己旧标题污染；新增片段路径（addSegment）新 chunk 尚未入库，传所属 recordId 排除同记录
+     * 既有 chunk 同样安全。{@code excludeRecordId} 为 null 时不做排除。</p>
+     *
+     * @param userId          用户 ID（用于读取模型配置）
+     * @param content         单个片段文本（用户确认过边界的完整片段）
+     * @param excludeRecordId 组装 recent_context 时排除的 recordId（可空）
+     * @return 分类结果（应恰好 1 条；异常时抛出，由调用方决定是否阻断）
+     */
+    public RecordProcessorProto.ClassifyResponse classifySingle(UUID userId, String content, Long excludeRecordId) {
+        log.info("gRPC 调用 Classify(single=true)，用户: {}, 内容长度: {}, 排除记录: {}",
+                userId, content.length(), excludeRecordId);
         try {
             CommonProto.LlmConfig llmConfig = buildLlmConfig(userId);
 
@@ -165,6 +201,7 @@ public class AiGrpcClient {
                     .setContent(content)
                     .setLlmConfig(llmConfig)
                     .setSingle(true)
+                    .addAllRecentContext(recentContextHints(userId, excludeRecordId))
                     .build();
 
             RecordProcessorProto.ClassifyResponse response = recordStub
@@ -418,6 +455,72 @@ public class AiGrpcClient {
             return hints;
         } catch (Exception e) {
             log.warn("open_todos 组装失败（按空清单继续），用户: {}, 原因: {}", userId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * recent_context 组装（近 7 天记录摘要，分类指代消解语境）
+     *
+     * <p>查 chunks.metadata（口径同 selectCorrectionIndex：user 记录、未删除、非 failed、非 vault、
+     * title 非空），按时间倒序取 SQL 上限 {@code maxQuery} 条；Java 侧按 title 去重（SQL 已倒序，
+     * 首次出现即最新），最终最多 {@code maxHints} 条，每条 keywords 取前 {@code maxKeywords} 个。
+     * {@code excludeRecordId} 非空时排除该 record 自身（审核补分类防旧标题自污染）。</p>
+     *
+     * <p>整体 try-catch：SQL 异常 / JSON 解析异常均降级为空清单并打 warn，绝不阻断分类。</p>
+     */
+    private List<RecordProcessorProto.RecentHint> recentContextHints(UUID userId, Long excludeRecordId) {
+        try {
+            OffsetDateTime since = OffsetDateTime.now(ZONE)
+                    .minusDays(recordContextProperties.getWindowDays());
+            List<Map<String, Object>> rows = chunkMapper.selectRecentContextHints(
+                    userId, since, excludeRecordId, recordContextProperties.getMaxQuery());
+            // LinkedHashMap：插入序 = 时间倒序；同 title 首现即最新，后续重复跳过
+            Map<String, RecordProcessorProto.RecentHint> dedup = new LinkedHashMap<>();
+            for (Map<String, Object> row : rows) {
+                if (dedup.size() >= recordContextProperties.getMaxHints()) {
+                    break;
+                }
+                String title = row.get("title") == null ? null : String.valueOf(row.get("title"));
+                if (title == null || title.isBlank() || dedup.containsKey(title)) {
+                    continue; // 标题缺失 / 同 title 去重（保留最近一条）
+                }
+                List<String> keywords = parseKeywords(row.get("keywordsJson"));
+                if (keywords.size() > recordContextProperties.getMaxKeywords()) {
+                    keywords = keywords.subList(0, recordContextProperties.getMaxKeywords());
+                }
+                String date = row.get("date") == null ? "" : String.valueOf(row.get("date"));
+                dedup.put(title, RecordProcessorProto.RecentHint.newBuilder()
+                        .setDate(date)
+                        .setTitle(title)
+                        .addAllKeywords(keywords)
+                        .build());
+            }
+            return new ArrayList<>(dedup.values());
+        } catch (Exception e) {
+            log.warn("recent_context 组装失败（按空清单继续），用户: {}, 原因: {}", userId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 解析 chunk metadata.keywords（JSONB → List&lt;String&gt;，写法参考 MirrorServiceImpl.parseStringList）
+     *
+     * <p>JDBC 可能返回 PGobject 或已解析 List；解析失败返回空清单（不抛）。</p>
+     */
+    private static List<String> parseKeywords(Object json) {
+        if (json == null) {
+            return List.of();
+        }
+        try {
+            if (json instanceof List<?> list) {
+                return list.stream().map(String::valueOf).toList();
+            }
+            com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+            return om.readValue(json.toString(),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {
+                    });
+        } catch (Exception e) {
             return List.of();
         }
     }
