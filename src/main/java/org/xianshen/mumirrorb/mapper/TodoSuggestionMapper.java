@@ -3,9 +3,12 @@ package org.xianshen.mumirrorb.mapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.xianshen.mumirrorb.pojo.DO.TodoSuggestion;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -34,4 +37,23 @@ public interface TodoSuggestionMapper extends BaseMapper<TodoSuggestion> {
                 .eq(TodoSuggestion::getStatus, "pending"));
         return cnt == null ? 0 : cnt;
     }
+
+    /**
+     * 证据链批量计数（GET /todos/open-chain 第三段）：一次 IN(todoIds) + status='pending'
+     * GROUP BY todo_id，防逐条 countPendingByTodo 的 N+1。无 pending 的 todo 不出现在结果里
+     * （Service 层缺省 0）。
+     *
+     * @param todoIds 待办 ID 列表（调用方保证非空）
+     */
+    @Select("""
+            <script>
+            SELECT s.todo_id AS todoId, COUNT(*) AS cnt
+            FROM todo_suggestions s
+            WHERE s.status = 'pending'
+              AND s.todo_id IN
+              <foreach collection="todoIds" item="tid" open="(" separator="," close=")">#{tid}</foreach>
+            GROUP BY s.todo_id
+            </script>
+            """)
+    List<Map<String, Object>> selectPendingCounts(@Param("todoIds") List<Long> todoIds);
 }

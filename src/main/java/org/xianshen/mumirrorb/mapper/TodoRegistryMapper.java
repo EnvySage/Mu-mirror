@@ -54,6 +54,35 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
                                                    @Param("limit") int limit);
 
     /**
+     * 未完成待办基础行（GET /todos/open-chain 证据链聚合第一段查询）
+     *
+     * <p>口径与 selectOpenTodos 完全一致（current_status != 'completed' + INNER JOIN chunks
+     * 天然排除 orphan + created_at DESC, id DESC），仅两点差异：</p>
+     * <ul>
+     *   <li>currentStatus 取 <b>chunk.metadata.taskStatus 实时值</b>（真源 #33；COALESCE 缺省
+     *       not_started，与 ProfileStatsMapper 同款）——registry 只是物化索引，读路径以 chunk 为准；
+     *       行过滤仍按 registry.current_status（双写保证一致，chunk 脏值时 Service 回退 registry 值）</li>
+     *   <li>created_at 输出 yyyy-MM-dd HH:mm:ss（Asia/Shanghai，AT TIME ZONE 口径照 ProfileStatsMapper）</li>
+     * </ul>
+     */
+    @Select("""
+            SELECT t.id AS todoId,
+                   t.title AS title,
+                   t.current_status AS currentStatus,
+                   COALESCE(c.metadata->>'taskStatus', 'not_started') AS chunkStatus,
+                   t.source_chunk_id AS sourceChunkId,
+                   TO_CHAR(t.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS createdAt
+            FROM todo_registry t
+            JOIN chunks c ON c.id = t.source_chunk_id
+            WHERE t.user_id = #{userId}::uuid
+              AND t.current_status != 'completed'
+            ORDER BY t.created_at DESC, t.id DESC
+            LIMIT #{limit}
+            """)
+    List<Map<String, Object>> selectOpenChainBase(@Param("userId") UUID userId,
+                                                  @Param("limit") int limit);
+
+    /**
      * 单条登记行（带 source chunk 摘要；ownership 过滤在 SQL 层——非本人查不到，防存在性探测）
      */
     @Select("""

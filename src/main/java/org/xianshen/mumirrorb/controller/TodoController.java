@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.xianshen.mumirrorb.pojo.R;
+import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
 import org.xianshen.mumirrorb.service.TodoRegistryService;
@@ -127,5 +128,24 @@ public class TodoController {
         UUID userId = getCurrentUserId();
         List<TodoItemVO> todos = todoRegistryService.listAll(userId);
         return R.ok("查询成功", TodoItemVO.TodoListVO.builder().todos(todos).build());
+    }
+
+    @Operation(
+            summary = "未完成待办证据链（open-chain 聚合）",
+            description = "只返回未完成待办（current_status != completed 且非 orphan），按登记时间新→旧。"
+                    + "每链 = origin（登记原始片段，理论必有）+ evidence[]（用户背书确认的后续证据，"
+                    + "按片段时刻升序，confirmedAt=背书时刻）+ pendingSuggestionCount。"
+                    + "excerpt 取 COALESCE(segment,content) 截 60 字符；"
+                    + "currentStatus 以 chunk.metadata.taskStatus 实时值为准（真源）。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "查询成功"),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
+    })
+    @GetMapping("/open-chain")
+    public R<TodoChainVO.ChainListVO> openChain() {
+        UUID userId = getCurrentUserId();
+        List<TodoChainVO> chains = todoRegistryService.listOpenChains(userId);
+        return R.ok(TodoChainVO.ChainListVO.builder().chains(chains).build());
     }
 }

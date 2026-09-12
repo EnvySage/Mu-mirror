@@ -2,6 +2,7 @@ package org.xianshen.mumirrorb.service;
 
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
+import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
 
@@ -83,4 +84,14 @@ public interface TodoRegistryService {
      * 全量登记列表（GET /todos，带关联计数）
      */
     List<TodoItemVO> listAll(UUID userId);
+
+    /**
+     * 未完成待办证据链（GET /todos/open-chain）
+     *
+     * <p>口径：selectOpenTodos 同款（!= completed 且非 orphan），按 createdAt DESC；
+     * 每链 = origin（可空，代码判空）+ evidence[]（date ASC）+ pendingSuggestionCount。
+     * currentStatus 以 chunk.metadata.taskStatus 实时值为准（真源 #33）。
+     * 批量三段查询防 N+1：open 基础行 → links IN JOIN chunks → suggestions count GROUP BY。</p>
+     */
+    List<TodoChainVO> listOpenChains(UUID userId);
 }

@@ -20,6 +20,7 @@ import org.xianshen.mumirrorb.pojo.DO.TodoRegistry;
 import org.xianshen.mumirrorb.pojo.DO.TodoRegistryLink;
 import org.xianshen.mumirrorb.pojo.DO.TodoSuggestion;
 import org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO;
+import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
 import org.xianshen.mumirrorb.service.TodoRegistryService;
@@ -28,6 +29,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -61,6 +63,10 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     static final int EXCERPT_LIMIT = 100;
     /** 建议卡片段展示截断 */
     static final int CARD_EXCERPT_LIMIT = 160;
+    /** 证据链片段摘录截断（GET /todos/open-chain 契约：60 字符） */
+    static final int CHAIN_EXCERPT_LIMIT = 60;
+    /** 证据链返回上限（侧栏全量口径；列表侧传大值，同 GET /todos 不限 20 的语义） */
+    static final int CHAIN_LIMIT = 200;
     /** 三态合法值 */
     private static final Set<String> VALID_STATUSES = Set.of("not_started", "in_progress", "completed");
 
@@ -323,6 +329,90 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                     .build());
         }
         return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TodoChainVO> listOpenChains(UUID userId) {
+        // ① open registry 基础行（selectOpenTodos 同口径：!= completed + INNER JOIN chunks 排 orphan，
+        //    createdAt DESC；currentStatus 附带 chunk 实时 taskStatus——真源 #33）
+        List<Map<String, Object>> bases = registryMapper.selectOpenChainBase(userId, CHAIN_LIMIT);
+        if (bases.isEmpty()) {
+            return List.of();
+        }
+        List<Long> todoIds = new ArrayList<>(bases.size());
+        for (Map<String, Object> row : bases) {
+            Long id = longOf(row.get("todoid"));
+            if (id != null) {
+                todoIds.add(id);
+            }
+        }
+        if (todoIds.isEmpty()) {
+            return List.of();
+        }
+
+        // ② 一次 links IN JOIN chunks：origin/evidence 全带回（SQL 已按 chunk date ASC 排），
+        //    按 todoId 分组、按 relation 拆分
+        Map<Long, TodoChainVO.ChainRef> origins = new HashMap<>();
+        Map<Long, List<TodoChainVO.ChainEvidence>> evidences = new HashMap<>();
+        for (Map<String, Object> l : linkMapper.selectChainLinks(todoIds)) {
+            Long todoId = longOf(l.get("todoid"));
+            if (todoId == null) {
+                continue;
+            }
+            TodoChainVO.ChainRef ref = TodoChainVO.ChainRef.builder()
+                    .chunkId(longOf(l.get("chunkid")))
+                    .recordId(longOf(l.get("recordid")))
+                    .excerpt(trunc(str(l.get("excerpt")), CHAIN_EXCERPT_LIMIT))
+                    .date(str(l.get("date")))
+                    .build();
+            if ("origin".equals(str(l.get("relation")))) {
+                origins.putIfAbsent(todoId, ref); // UNIQUE(todo_id, chunk_id) 下 origin 至多一条，防御取首条
+            } else if ("evidence".equals(str(l.get("relation")))) {
+                evidences.computeIfAbsent(todoId, k -> new ArrayList<>())
+                        .add(TodoChainVO.ChainEvidence.builder()
+                                .chunkId(ref.getChunkId())
+                                .recordId(ref.getRecordId())
+                                .excerpt(ref.getExcerpt())
+                                .date(ref.getDate())
+                                .confirmedAt(str(l.get("confirmedat")))
+                                .build());
+            }
+        }
+
+        // ③ 一次 suggestions pending 计数 GROUP BY todo_id
+        Map<Long, Long> pendingCounts = new HashMap<>();
+        for (Map<String, Object> c : suggestionMapper.selectPendingCounts(todoIds)) {
+            Long todoId = longOf(c.get("todoid"));
+            if (todoId != null) {
+                pendingCounts.put(todoId, longOf(c.get("cnt")));
+            }
+        }
+
+        // 组装（保持基础行 createdAt DESC 顺序）
+        List<TodoChainVO> chains = new ArrayList<>(bases.size());
+        for (Map<String, Object> row : bases) {
+            Long todoId = longOf(row.get("todoid"));
+            if (todoId == null) {
+                continue;
+            }
+            // currentStatus 真源口径：chunk.metadata.taskStatus 实时值（COALESCE 已缺省 not_started）；
+            // chunk 值是脏数据时回退 registry 物化值（双写正常时两者一致）
+            String status = normalizeStatus(str(row.get("chunkstatus")));
+            if (status == null) {
+                status = str(row.get("currentstatus"));
+            }
+            chains.add(TodoChainVO.builder()
+                    .todoId(todoId)
+                    .title(str(row.get("title")))
+                    .currentStatus(status)
+                    .createdAt(str(row.get("createdat")))
+                    .origin(origins.get(todoId)) // 理论必有；links 行丢失时判空不报错
+                    .evidence(evidences.getOrDefault(todoId, List.of()))
+                    .pendingSuggestionCount(pendingCounts.getOrDefault(todoId, 0L))
+                    .build());
+        }
+        return chains;
     }
 
     // ==================== 内部工具 ====================
