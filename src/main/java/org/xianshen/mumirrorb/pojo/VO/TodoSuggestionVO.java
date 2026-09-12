@@ -96,4 +96,36 @@ public class TodoSuggestionVO {
         @Schema(description = "pending 建议卡列表")
         private List<SuggestionCard> suggestions;
     }
+
+    /**
+     * 审核页数据接口条目（GET /records/{id}/suggestions）
+     *
+     * <p>合同字段（todo-status-removal-design.md §4）：suggestionId / todoId / todoTitle /
+     * todoStatus / suggestedStatus / evidenceChunkId。</p>
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Schema(description = "审核页待办建议条目")
+    public static class RecordSuggestion {
+        @Schema(description = "建议ID", example = "123")
+        private Long suggestionId;
+
+        @Schema(description = "待办登记ID", example = "1")
+        private Long todoId;
+
+        @Schema(description = "待办标题", example = "补作业")
+        private String todoTitle;
+
+        @Schema(description = "待办当前状态", example = "not_started")
+        private String todoStatus;
+
+        @Schema(description = "建议状态（机器猜的）", example = "completed")
+        private String suggestedStatus;
+
+        @Schema(description = "触发建议的 chunk ID（evidence，属本记录）", example = "77")
+        private Long evidenceChunkId;
+    }
 }
