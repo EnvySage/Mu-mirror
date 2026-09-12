@@ -18,6 +18,7 @@ import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
+import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
 import org.xianshen.mumirrorb.pojo.VO.CalendarDayVO;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
@@ -199,8 +200,15 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO confirmReview(Long recordId, UUID userId) {
+        return confirmReview(recordId, userId, null);
+    }
+
+    @Override
+    @Transactional
+    public RecordVO confirmReview(Long recordId, UUID userId, List<TodoResolutionDTO> resolutions) {
         log.info("============ confirmReview 开始 ============");
-        log.info("记录ID: {}, 用户ID: {}", recordId, userId);
+        log.info("记录ID: {}, 用户ID: {}, 待办决议: {} 条",
+                recordId, userId, resolutions == null ? 0 : resolutions.size());
 
         // 1. 查询记录并验证所有权
         Record record = recordMapper.selectOne(
@@ -280,7 +288,21 @@ public class RecordServiceImpl implements RecordService {
         recordMapper.updateById(record);
         log.info("记录审查已确认完成，ID: {}, 状态: DONE", recordId);
 
-        // 8. 待办登记钩子（todo-registry-design.md §3.1 登记期，零门禁）：
+        // 8. 待办窗口决议（todo-status-removal-design.md §5）：审核页选的待办状态随本次入库一起生效。
+        //    处理本记录 evidence 的 pending 建议：body.todoResolutions 中 confirmed 走 doConfirm
+        //    （回写源头+证据 chunk taskStatus / registry / evidence link），dismissed 静默；
+        //    未出现在 body 中的一律 dismissed（含 resolutions=null 的旧客户端——行为变化）。
+        //    必须先于登记：evidence chunk 若本身是 todo 片段，回写的 taskStatus 会被登记读取。
+        try {
+            todoRegistryService().applyRecordResolutions(recordId, userId, resolutions);
+        } catch (BusinessException e) {
+            throw e; // 参数/业务错误（action/status 非法）→ 400，事务回滚，不吞
+        } catch (Exception e) {
+            // 运行时故障（含单测无上下文）不阻断确认主流程：建议错误退化为无跟踪，账本零污染
+            log.warn("待办决议处理失败（不阻断确认主流程），记录ID: {}，原因: {}", recordId, e.getMessage());
+        }
+
+        // 9. 待办登记钩子（todo-registry-design.md §3.1 登记期，零门禁）：
         //    记录含 todo/plan 片段 → 幂等登记 todo_registry + origin link。
         //    登记失败不阻断确认主流程（登记无风险，错了退化为无跨日记跟踪）。
         try {

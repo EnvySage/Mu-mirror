@@ -11,13 +11,17 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.xianshen.mumirrorb.pojo.DTO.RecordConfirmDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
+import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
+import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
 import org.xianshen.mumirrorb.service.ChunkService;
 import org.xianshen.mumirrorb.service.RecordService;
+import org.xianshen.mumirrorb.service.TodoRegistryService;
 
 import java.util.List;
 import java.util.Map;
@@ -44,6 +48,7 @@ public class RecordController {
 
     private final RecordService recordService;
     private final ChunkService chunkService;
+    private final TodoRegistryService todoRegistryService;
 
     /**
      * 获取当前登录用户的UUID
@@ -189,9 +194,12 @@ public class RecordController {
      * @return 状态更新后的记录
      */
     @Operation(
-            summary = "确认审查完成",
+            summary = "确认审查完成（携带待办决议）",
             description = "将记录状态从'人工审查'改为'已完成'。" +
-                    "表示用户已确认 AI 生成的标签无误，或已完成修改。" +
+                    "可选 body：{\"todoResolutions\":[{\"suggestionId\":123,\"action\":\"confirmed\"," +
+                    "\"status\":\"completed\"},{\"suggestionId\":124,\"action\":\"dismissed\"}]}。" +
+                    "action=confirmed 时 status 必填（not_started/in_progress/completed），状态随入库一起生效；" +
+                    "该记录下未出现在 body 中的 pending 建议一律作废。body 缺省 = 全部未处理建议作废。" +
                     "只有'人工审查'状态的记录才能调用此接口。"
     )
     @ApiResponses(value = {
@@ -202,7 +210,7 @@ public class RecordController {
             ),
             @ApiResponse(
                     responseCode = "400",
-                    description = "记录状态不允许确认（非'人工审查'状态）",
+                    description = "记录状态不允许确认（非'人工审查'状态）或 todoResolutions 参数非法",
                     content = @Content
             ),
             @ApiResponse(
@@ -219,10 +227,42 @@ public class RecordController {
     @PutMapping("/{id}/confirm")
     public R<RecordVO> confirmReview(
             @Parameter(description = "记录ID", required = true, example = "1")
+            @PathVariable Long id,
+            @RequestBody(required = false) RecordConfirmDTO body) {
+        UUID userId = getCurrentUserId();
+        List<TodoResolutionDTO> resolutions = body == null ? null : body.getTodoResolutions();
+        RecordVO record = recordService.confirmReview(id, userId, resolutions);
+        return R.ok("审查已完成", record);
+    }
+
+    /**
+     * 审核页待办建议数据
+     *
+     * 返回该记录 evidence 的 pending 建议（审核窗口绑定），供审核页渲染待办状态选择项。
+     * 字段契约：{suggestionId, todoId, todoTitle, todoStatus, suggestedStatus, evidenceChunkId}。
+     *
+     * @param id 记录ID（须属当前用户且处于人工审查状态；非本人返回空）
+     * @return pending 建议列表
+     */
+    @Operation(
+            summary = "审核页待办建议列表",
+            description = "返回该记录 evidence 的 pending 建议（审核窗口绑定）。" +
+                    "字段：suggestionId / todoId / todoTitle / todoStatus / suggestedStatus / evidenceChunkId。" +
+                    "confirm 提交时据此渲染待办状态选择并随 todoResolutions 一起入库。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "查询成功",
+                    content = @Content(schema = @Schema(implementation = TodoSuggestionVO.RecordSuggestion.class))),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
+    })
+    @GetMapping("/{id}/suggestions")
+    public R<List<TodoSuggestionVO.RecordSuggestion>> listSuggestions(
+            @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id) {
         UUID userId = getCurrentUserId();
-        RecordVO record = recordService.confirmReview(id, userId);
-        return R.ok("审查已完成", record);
+        List<TodoSuggestionVO.RecordSuggestion> suggestions =
+                todoRegistryService.listRecordSuggestions(id, userId);
+        return R.ok("查询成功", suggestions);
     }
 
     /**

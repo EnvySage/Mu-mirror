@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,12 +26,15 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 待办登记控制器（todo-registry-design.md §4-B）
+ * 待办登记控制器（todo-registry-design.md §4-B；交互重构见 todo-status-removal-design.md）
  *
  * <p>GET /api/todos/pending-suggestions（侧栏角标+建议卡）·
  * POST /api/todos/suggestions/{id}/resolve（裁决：confirmed/dismissed，body 可带三态 status）·
- * PUT /api/todos/{id}/status（侧栏直调三态）·
+ * PUT /api/todos/{id}/status（侧栏直调三态，<b>已废弃</b>：保留接口不被前端调用）·
+ * DELETE /api/todos/{id}（删除特例：软删 + 源头标记 + 建议作废）·
  * GET /todos（registry 列表，带 evidence 关联计数，"全部待办"入口）</p>
+ *
+ * <p>状态变更唯一入口 = 记录审核页（PUT /records/{id}/confirm 携带 todoResolutions）。</p>
  *
  * <p>安全：全接口 JWT + ownership（非本人一律 4041 不暴露存在性，模式照 VaultController）。</p>
  */
@@ -147,5 +151,26 @@ public class TodoController {
         UUID userId = getCurrentUserId();
         List<TodoChainVO> chains = todoRegistryService.listOpenChains(userId);
         return R.ok(TodoChainVO.ChainListVO.builder().chains(chains).build());
+    }
+
+    @Operation(
+            summary = "删除待办（软删）",
+            description = "特例动线（侧栏直删+弹框）：registry.deleted_at 落时间戳（行保留）+ 源头片段 "
+                    + "metadata 加 todoRemoved=true + 该待办 pending 建议全部作废。"
+                    + "删除后所有视图（清单/注入/证据链/统计）不可见，不再产生新建议、不可改状态；"
+                    + "原始记录保留，终态可追溯。已删除幂等返回成功。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "已删除（含幂等）"),
+            @ApiResponse(responseCode = "404", description = "待办不存在（含非本人）"),
+            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
+    })
+    @DeleteMapping("/{id}")
+    public R<Void> delete(
+            @Parameter(description = "登记ID", required = true, example = "1")
+            @PathVariable Long id) {
+        UUID userId = getCurrentUserId();
+        todoRegistryService.deleteTodo(id, userId);
+        return R.ok("待办已删除", null);
     }
 }
