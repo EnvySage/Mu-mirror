@@ -32,6 +32,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               AND c.metadata->>'contentType' IN ('todo', 'plan')
               AND COALESCE(c.metadata->>'taskStatus', 'not_started') != 'completed'
             ORDER BY r.created_at DESC
@@ -52,6 +53,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               AND c.metadata->>'contentType' IN ('todo', 'plan')
             GROUP BY 1
             """)
@@ -75,6 +77,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               AND c.metadata->>'contentType' = 'learning'
             ORDER BY r.created_at DESC
             LIMIT 30
@@ -100,6 +103,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -128,6 +132,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -143,8 +148,8 @@ public interface ProfileStatsMapper {
      * 按日记录数聚合（镜子统计页频率柱状图数据源，含无 chunk 的记录）
      *
      * <p>日期按 Asia/Shanghai 本地时区切分；只返回有记录的天，
-     * 缺失日期由 Service 层补零。排除 failed 记录（与日历 countByDay 口径一致）。
-     * 窗口 [since, until)（until 可空=不限）。</p>
+     * 缺失日期由 Service 层补零。只统计已确认（status='done'）记录——消费口径收口，
+     * 未确认（REVIEWING）数据不进画像统计。窗口 [since, until)（until 可空=不限）。</p>
      */
     @Select("""
             <script>
@@ -154,7 +159,7 @@ public interface ProfileStatsMapper {
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND r.status != 'failed'
+              AND r.status = 'done'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -178,6 +183,7 @@ public interface ProfileStatsMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -202,6 +208,7 @@ public interface ProfileStatsMapper {
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -223,6 +230,7 @@ public interface ProfileStatsMapper {
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -242,6 +250,7 @@ public interface ProfileStatsMapper {
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND r.status = 'done'
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             </script>

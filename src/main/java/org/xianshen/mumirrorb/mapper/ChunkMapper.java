@@ -127,7 +127,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * 回看窗口原文（rolling-mirror-design.md §2：按 lookback 档位带②本月原始记录）
      *
      * <p>时间窗 [since, until)：until 开区间；旧→新升序（截断时保留最近 N 条由 Service 层实现，
-     * SQL LIMIT 是条数闸硬上限兜底）。只带 source='user'、未删除、非 failed 记录的 chunk；
+     * SQL LIMIT 是条数闸硬上限兜底）。只带 source='user'、未删除、status='done'（已确认）记录的 chunk；
+     * 未确认（REVIEWING）数据不进注入，防污染下游；
      * segment 优先渲染（用户可编辑的唯一真源，裁决 #2），空则回退 content 由 Service 判。</p>
      */
     @Select("""
@@ -138,7 +139,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND r.status != 'failed'
+              AND r.status = 'done'
               AND c.vault_item_id IS NULL
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -154,7 +155,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     /**
      * 校正索引源数据（rolling-mirror-design.md §1③：上期镜子涉及的记录 title+日期清单）
      *
-     * <p>与 lookback 窗口同口径（user 记录、未删除、非 failed），取窗口内全部 chunk 的
+     * <p>与 lookback 窗口同口径（user 记录、未删除、status='done' 已确认），取窗口内全部 chunk 的
      * title + 日期；lookback=0 时随请求携带（唯一防误差手段）。</p>
      */
     @Select("""
@@ -166,7 +167,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND r.status != 'failed'
+              AND r.status = 'done'
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''
@@ -183,7 +184,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * 近期语境条目（近 7 天记录摘要，分类指代消解用）
      *
      * <p>口径对齐 {@link #selectLookbackChunks} / {@link #selectCorrectionIndex}（user 记录、未删除、
-     * 非 failed、非 vault）；额外要求 title 非空。按时间倒序取，SQL 上限 {@code limit}（默认 50，
+     * status='done' 已确认、非 vault）；额外要求 title 非空。按时间倒序取，SQL 上限 {@code limit}（默认 50，
      * Java 侧按 title 去重后取最近若干条）。</p>
      *
      * <p>{@code excludeRecordId} 非空时排除该 record 自身（审核补分类防旧标题自污染）。</p>
@@ -204,7 +205,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND r.status != 'failed'
+              AND r.status = 'done'
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''

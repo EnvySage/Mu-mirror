@@ -66,6 +66,14 @@ public class SettingsVO {
     @Schema(description = "审核模式", example = "manual")
     private String reviewMode;
 
+    /**
+     * auto 审核模式是否可用（只读，来自后端总闸 review.auto-enabled）
+     *
+     * <p>false 时前端隐藏 auto 开关（字段名固定为 autoReviewAvailable，前端契约）。</p>
+     */
+    @Schema(description = "auto 审核模式是否可用（false 时前端隐藏 auto 开关）", example = "false")
+    private boolean autoReviewAvailable;
+
     @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")
     private Integer ragHalfLife;
 

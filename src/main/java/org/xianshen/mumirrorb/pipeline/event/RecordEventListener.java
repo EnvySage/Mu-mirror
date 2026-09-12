@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.config.ReviewProperties;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
@@ -49,6 +50,7 @@ public class RecordEventListener {
     private final RecordService recordService;
     private final SettingsMapper settingsMapper;
     private final org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
+    private final ReviewProperties reviewProperties;
 
     /**
      * 记录创建后，异步执行管道处理
@@ -154,8 +156,19 @@ public class RecordEventListener {
 
     /**
      * 读取用户审核模式（manual / auto；缺省 manual）
+     *
+     * <p><strong>两级判定：</strong></p>
+     * <ol>
+     *   <li>总闸 {@code review.auto-enabled=false} → 恒返回 manual（忽略 user_settings 存量值，
+     *       不查库；auto 分支整体软禁用）；</li>
+     *   <li>总闸开启 → 原逻辑：读 user_settings.review_mode，缺省 manual。</li>
+     * </ol>
      */
     private String getReviewMode(UUID userId) {
+        if (!reviewProperties.isAutoEnabled()) {
+            log.debug("auto 审核已禁用（review.auto-enabled=false），用户: {} 强制 manual", userId);
+            return "manual";
+        }
         UserSettings settings = settingsMapper.selectOne(
                 new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
         return settings != null && settings.getReviewMode() != null

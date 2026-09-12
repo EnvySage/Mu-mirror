@@ -28,6 +28,10 @@ import java.util.UUID;
  * 全文消化 chunk 不进对话上下文（§3.3c「内容问答走 recall_item」，防全文灌入 prompt），
  * 未确认资产检索不到（§3.3b 确认门禁）。SEMANTIC/HYBRID 另有 embedding IS NOT NULL
  * （确认前不 embed，天然挡住）；STRUCTURED 无向量过滤，谓词是唯一防线。</p>
+ *
+ * <p>fix（REVIEWING 被消费修复）：STRUCTURED 补 {@code r.status = 'done'}——未确认记录
+ * （reviewing）不得进对话 RAG 检索。SEMANTIC/HYBRID 依赖 embedding IS NOT NULL 天然安全
+ * （reviewing 数据无向量），保持不动。</p>
  */
 @Mapper
 public interface ChatSearchMapper {
@@ -52,6 +56,7 @@ public interface ChatSearchMapper {
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
+              AND r.status = 'done'
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>

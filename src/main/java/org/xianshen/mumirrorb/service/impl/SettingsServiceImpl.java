@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.common.utils.CryptoUtils;
+import org.xianshen.mumirrorb.config.ReviewProperties;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
@@ -31,6 +32,7 @@ public class SettingsServiceImpl implements SettingsService {
 
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
+    private final ReviewProperties reviewProperties;
 
     @Override
     @Transactional(readOnly = true)
@@ -73,7 +75,18 @@ public class SettingsServiceImpl implements SettingsService {
             settings.setEmbeddingModel(dto.getEmbeddingModel());
         }
         if (dto.getReviewMode() != null) {
-            settings.setReviewMode(dto.getReviewMode());
+            String reviewMode = dto.getReviewMode();
+            // 白名单校验：仅接受 null（跳过）/空串/manual/auto；其他值拒绝（空串语义按原行为原样写入）
+            if (!reviewMode.isEmpty()
+                    && !"manual".equals(reviewMode)
+                    && !"auto".equals(reviewMode)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "非法的审核模式: " + reviewMode);
+            }
+            // 总闸设防：auto 已禁用时拒绝置为 auto（防 API 绕过；前端正常流程不会触发）
+            if ("auto".equals(reviewMode) && !reviewProperties.isAutoEnabled()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "自动审核模式已禁用");
+            }
+            settings.setReviewMode(reviewMode);
         }
         if (dto.getRagHalfLife() != null) {
             settings.setRagHalfLife(dto.getRagHalfLife());
@@ -225,6 +238,7 @@ public class SettingsServiceImpl implements SettingsService {
                 .embeddingApiKey(settings.getEmbeddingApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getEmbeddingApiKey())) : null)
                 .embeddingModel(settings.getEmbeddingModel())
                 .reviewMode(settings.getReviewMode())
+                .autoReviewAvailable(reviewProperties.isAutoEnabled())
                 .ragHalfLife(settings.getRagHalfLife())
                 .mirrorLookback(settings.getMirrorLookback() == null ? 1 : settings.getMirrorLookback())
                 .createdAt(settings.getCreatedAt())
