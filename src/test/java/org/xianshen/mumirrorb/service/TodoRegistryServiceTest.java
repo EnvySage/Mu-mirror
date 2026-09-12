@@ -53,7 +53,8 @@ import static org.mockito.Mockito.when;
  *
  * <p>覆盖：登记幂等 / 非 todo 片段跳过 / resolve confirmed 事务三写断言（chunk.metadata 定向改 +
  * registry 双写 + evidence link + 建议行 confirmed）/ dismissed 静默（关联不落 todo 不动）/
- * 直调双写 + pending 建议作废 / suggestFromChunk 去重与已完成不提示 / orphan 排除（注入清单口径）。</p>
+ * 删除（幂等/源头标记/建议作废/守卫）/ 审核窗口决议各分支 / suggestFromChunk 去重与已完成不提示 /
+ * orphan 排除（注入清单口径）。</p>
  *
  * <p>Mockito 环境无 MyBatis-Plus 启动过程：LambdaQueryWrapper 解析实体 lambda 列依赖
  * TableInfo 缓存，@BeforeAll 手动注册（GetProfileMonthTest 同款解法）。</p>
@@ -364,53 +365,6 @@ class TodoRegistryServiceTest {
         assertThrows(BusinessException.class, () -> service.resolve(9L, USER_ID, "maybe", null));
 
         verify(chunkMapper, never()).update(any(), any());
-    }
-
-    // ==================== 裁决期：直调双写 + 建议作废 ====================
-
-    @Test
-    @DisplayName("直调：双写 chunk+registry + 该 todo 的 pending 建议全部作废")
-    void setStatusDirectly_dualWriteAndInvalidateSuggestions() {
-        TodoRegistry todo = registry(1L, "not_started");
-        when(registryMapper.selectById(1L)).thenReturn(todo);
-        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(todoChunk(CHUNK_ID, "补作业", "not_started"));
-
-        service.setStatusDirectly(1L, USER_ID, "completed");
-
-        // 真源定向改（updateById）+ registry 物化写
-        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
-        verify(chunkMapper).updateById(chunkCaptor.capture());
-        assertEquals("completed", chunkCaptor.getValue().getMetadata().get("taskStatus"));
-        verify(registryMapper).update(isNull(), any());
-        // pending 建议作废（status=dismissed）
-        verify(suggestionMapper).update(isNull(), any());
-    }
-
-    @Test
-    @DisplayName("直调：orphan（source chunk 已删）只改 registry 不炸")
-    void setStatusDirectly_orphanChunk() {
-        TodoRegistry todo = registry(1L, "not_started");
-        when(registryMapper.selectById(1L)).thenReturn(todo);
-        when(chunkMapper.selectById(CHUNK_ID)).thenReturn(null); // chunk 已物理删除
-
-        service.setStatusDirectly(1L, USER_ID, "in_progress");
-
-        verify(chunkMapper, never()).update(any(), any());
-        verify(registryMapper).update(isNull(), any());
-        verify(suggestionMapper).update(isNull(), any());
-    }
-
-    @Test
-    @DisplayName("直调：他人待办 404 / 非法 status 400")
-    void setStatusDirectly_guards() {
-        TodoRegistry others = registry(1L, "not_started");
-        others.setUserId(OTHER_USER_ID);
-        when(registryMapper.selectById(1L)).thenReturn(others);
-        assertThrows(BusinessException.class, () -> service.setStatusDirectly(1L, USER_ID, "completed"));
-
-        when(registryMapper.selectById(1L)).thenReturn(registry(1L, "not_started"));
-        assertThrows(BusinessException.class, () -> service.setStatusDirectly(1L, USER_ID, "done"));
-        verify(registryMapper, never()).update(any(), any());
     }
 
     // ==================== 查询：orphan 排除口径 ====================

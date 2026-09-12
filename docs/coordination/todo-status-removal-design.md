@@ -6,7 +6,7 @@
 
 | 动线 | 现状 | 本轮定稿 |
 |---|---|---|
-| 侧栏状态直调 | PUT /todos/{id}/status（三态 chip 直调） | **废弃**：接口保留但不被前端调用，先不删 |
+| 侧栏状态直调 | PUT /todos/{id}/status（三态 chip 直调） | **移除**：Controller 端点 + `setStatusDirectly` 接口/实现已彻底删除，杜绝绕过"审核页唯一入口"的通道 |
 | 状态变更（未开始/进行中/完成） | 侧栏直调 / 建议裁决 | **唯一入口 = 记录修改页（审核页）**：仅 REVIEWING 记录，用户在审核页选状态，随 `PUT /records/{id}/confirm` **入库时一起生效**；提交后锁死（不改已入库记录的 todo 状态） |
 | 旧 todo 改状态 | 直调 | 必须借**新记录的审核窗口**（新记录 evidence 命中旧 todo → 建议 → 审核页裁决一起入库） |
 | 删除 | 无 | **特例**：侧栏直删 + 弹框（软删，见 §3） |
@@ -88,7 +88,7 @@ ownership 在 SQL 层过滤（`r.user_id`），非本人返回空；已删除 to
 ## 8. 行为变化声明
 
 1. **confirm 缺省 body 语义变化**：旧客户端仅 `PUT /records/{id}/confirm`（无 body）现在会**作废该记录全部未处理 pending 建议**（原为保留）。
-2. **状态变更入口收口**：侧栏直调接口保留但前端不再调用；状态只能经审核页随 confirm 入库。
+2. **状态变更入口收口**：侧栏直调接口（PUT /todos/{id}/status）已彻底移除；状态只能经审核页随 confirm 入库。
 3. **终态回写源头**：confirmed 现在同时回写旧 todo 的 source chunk taskStatus（原来只写 evidence 片段）。
 4. **pendingSuggestions 收窄**：只展示证据记录仍 REVIEWING 的建议（历史遗留 pending 若证据记录已 DONE 将不再展示）。
 5. 删除是软删：registry 行保留、原始记录保留，仅不可见/不可再变更。

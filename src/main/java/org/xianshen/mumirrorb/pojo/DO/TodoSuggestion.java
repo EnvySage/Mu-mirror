@@ -22,8 +22,9 @@ import java.util.UUID;
  *   <li>确认：事务内三写（chunk.metadata.taskStatus + registry.current_status/closed_at
  *       + evidence link）+ 建议行 confirmed</li>
  *   <li>忽略：建议行 dismissed（永久静默——同一证据不再提示），todo 不动，关联不落</li>
- *   <li>侧栏直调（PUT /todos/{id}/status）：该待办的 pending 建议全部作废
- *       （status=dismissed，用户手动改了，机器建议作废）</li>
+ *   <li>审核页决议（PUT /records/{id}/confirm 携带 todoResolutions）：confirmed 随入库生效；
+ *       该记录未出现在 body 中的 pending 建议一律 dismissed（窗口绑定）</li>
+ *   <li>删除待办：该待办全部 pending 建议 dismissed（DELETE /todos/{id}）</li>
  * </ul>
  */
 @Data

@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,15 +29,15 @@ import java.util.UUID;
  *
  * <p>GET /api/todos/pending-suggestions（侧栏角标+建议卡）·
  * POST /api/todos/suggestions/{id}/resolve（裁决：confirmed/dismissed，body 可带三态 status）·
- * PUT /api/todos/{id}/status（侧栏直调三态，<b>已废弃</b>：保留接口不被前端调用）·
  * DELETE /api/todos/{id}（删除特例：软删 + 源头标记 + 建议作废）·
  * GET /todos（registry 列表，带 evidence 关联计数，"全部待办"入口）</p>
  *
- * <p>状态变更唯一入口 = 记录审核页（PUT /records/{id}/confirm 携带 todoResolutions）。</p>
+ * <p>已移除侧栏直调端点 PUT /todos/{id}/status：状态变更唯一入口 = 记录审核页
+ * （PUT /records/{id}/confirm 携带 todoResolutions），杜绝绕过审核窗口的通道。</p>
  *
  * <p>安全：全接口 JWT + ownership（非本人一律 4041 不暴露存在性，模式照 VaultController）。</p>
  */
-@Tag(name = "待办登记", description = "跨日记待办状态跟踪：建议裁决与直调状态变更")
+@Tag(name = "待办登记", description = "跨日记待办状态跟踪：建议裁决与删除")
 @RestController
 @RequestMapping("/todos")
 @RequiredArgsConstructor
@@ -93,29 +92,6 @@ public class TodoController {
         String status = body == null ? null : body.get("status");
         todoRegistryService.resolve(id, userId, action, status);
         return R.ok("confirmed".equalsIgnoreCase(action) ? "待办状态已更新" : "已忽略", null);
-    }
-
-    @Operation(
-            summary = "直调待办状态（侧栏三态 chip）",
-            description = "auto/manual 通用动线：事务内双写（chunk.metadata.taskStatus 真源 + "
-                    + "registry.current_status 物化；completed 时 closed_at 落值）+ "
-                    + "该待办的 pending 建议全部作废。body {\"status\": \"not_started|in_progress|completed\"}。"
-    )
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "状态已变更"),
-            @ApiResponse(responseCode = "400", description = "status 非法"),
-            @ApiResponse(responseCode = "404", description = "待办不存在（含非本人）"),
-            @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
-    })
-    @PutMapping("/{id}/status")
-    public R<Void> setStatus(
-            @Parameter(description = "登记ID", required = true, example = "1")
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
-        UUID userId = getCurrentUserId();
-        String status = body == null ? null : body.get("status");
-        todoRegistryService.setStatusDirectly(id, userId, status);
-        return R.ok("状态已更新", null);
     }
 
     @Operation(

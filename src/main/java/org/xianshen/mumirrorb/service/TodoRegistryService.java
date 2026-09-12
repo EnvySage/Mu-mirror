@@ -19,7 +19,7 @@ import java.util.UUID;
  *       每 todo/plan chunk 幂等登记</li>
  *   <li>判别期（proto 扩展）：组装 ClassifyRequest 查 {@link #openTodosForHint} 塞 open_todos；
  *       ClassifyReply 回传 refers_to_todo → {@link #suggestFromChunk} 落 pending 建议</li>
- *   <li>裁决期（用户主权）：{@link #resolve} 事务三写 / {@link #setStatusDirectly} 直调双写</li>
+ *   <li>裁决期（用户主权）：{@link #resolve} 事务三写 / {@link #applyRecordResolutions} 审核窗口决议</li>
  * </ol>
  */
 public interface TodoRegistryService {
@@ -58,18 +58,6 @@ public interface TodoRegistryService {
      * @param status       用户选的三态（可改 LLM 建议；action=confirmed 时可空=按 suggested_status）
      */
     void resolve(Long suggestionId, UUID userId, String action, String status);
-
-    /**
-     * 侧栏直调状态变更（§3.3 auto 主路径）
-     *
-     * <p>事务内双写（chunk.metadata.taskStatus + registry.current_status/closed_at）
-     * + 该待办的 pending 建议全部作废（status=dismissed，resolved_at）。</p>
-     *
-     * @param todoId    登记 ID
-     * @param userId    用户 ID（ownership）
-     * @param newStatus 三态
-     */
-    void setStatusDirectly(Long todoId, UUID userId, String newStatus);
 
     /**
      * 判别期注入清单（open_todos；未完成 + 非 orphan，最近优先，≤20 条）

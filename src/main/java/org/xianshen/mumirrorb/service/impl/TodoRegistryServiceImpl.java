@@ -276,30 +276,6 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                 suggestion.getTodoId(), suggestion.getUserId(), suggestion.getEvidenceChunkId());
     }
 
-    @Override
-    @Transactional
-    public void setStatusDirectly(Long todoId, UUID userId, String newStatus) {
-        String status = normalizeStatus(newStatus);
-        if (status == null) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "status 取值非法（not_started/in_progress/completed）");
-        }
-        TodoRegistry todo = registryMapper.selectById(todoId);
-        if (todo == null || !todo.getUserId().equals(userId)) {
-            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "待办不存在");
-        }
-        OffsetDateTime now = OffsetDateTime.now(ZONE);
-        // 双写：真源（source chunk）+ 物化索引；source chunk 已删（orphan）时只改 registry
-        patchChunkTaskStatus(todo.getSourceChunkId(), status);
-        applyRegistryStatus(todoId, status, now);
-        // 该待办的 pending 建议全部作废（用户手动改了，机器建议作废；resolved_at 落）
-        suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
-                .eq(TodoSuggestion::getTodoId, todoId)
-                .eq(TodoSuggestion::getStatus, "pending")
-                .set(TodoSuggestion::getStatus, "dismissed")
-                .set(TodoSuggestion::getResolvedAt, now));
-        log.info("待办状态直调：todo={}, {} → {}，pending 建议作废，用户={}", todoId, todo.getCurrentStatus(), status, userId);
-    }
-
     // ==================== 查询（侧栏/列表） ====================
 
     @Override
