@@ -449,6 +449,8 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         if (record == null || !record.getUserId().equals(userId)) {
             return; // 防御：调用方 confirmReview 已校验归属
         }
+        // 契约校验先行（suggestionId / todoId 恰好其一）：即便记录无 chunk 也须对非法 body 报 400
+        validateResolutions(resolutions);
         List<Chunk> chunks = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
                 .eq(Chunk::getRecordId, recordId));
         List<Long> chunkIds = new ArrayList<>(chunks.size());
@@ -472,36 +474,56 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         }
 
         // ① 处理 body 指定决议
+        OffsetDateTime now = OffsetDateTime.now(ZONE);
         Set<Long> handled = new HashSet<>();
         if (resolutions != null) {
             for (TodoResolutionDTO r : resolutions) {
-                if (r == null || r.getSuggestionId() == null) {
-                    continue;
-                }
-                TodoSuggestion s = byId.get(r.getSuggestionId());
-                if (s == null) {
-                    // 不在本记录窗口 / 已处理 / 非本人：不泄存在性，跳过（前端脏数据容错）
-                    log.warn("待办决议跳过：建议不在本记录审核窗口或已处理，record={}, suggestion={}",
-                            recordId, r.getSuggestionId());
-                    continue;
+                if (r == null) {
+                    continue; // 脏数据防御（validateResolutions 已保证非 null 条目恰好其一）
                 }
                 String act = r.getAction() == null ? "" : r.getAction().trim().toLowerCase(Locale.ROOT);
-                switch (act) {
-                    case "confirmed" -> {
-                        if (r.getStatus() == null || r.getStatus().isBlank()) {
-                            throw new BusinessException(ResultCode.PARAM_ERROR, "action=confirmed 时 status 必填");
-                        }
-                        if (normalizeStatus(r.getStatus()) == null) {
-                            throw new BusinessException(ResultCode.PARAM_ERROR,
-                                    "status 取值非法（not_started/in_progress/completed）");
-                        }
-                        doConfirm(s, userId, r.getStatus());
+                if (r.getSuggestionId() != null) {
+                    // ---- 现有分支：裁决 AI 建议（行为不变） ----
+                    TodoSuggestion s = byId.get(r.getSuggestionId());
+                    if (s == null) {
+                        // 不在本记录窗口 / 已处理 / 非本人：不泄存在性，跳过（前端脏数据容错）
+                        log.warn("待办决议跳过：建议不在本记录审核窗口或已处理，record={}, suggestion={}",
+                                recordId, r.getSuggestionId());
+                        continue;
                     }
-                    case "dismissed" -> doDismiss(s);
-                    default -> throw new BusinessException(ResultCode.PARAM_ERROR,
-                            "action 取值非法（confirmed/dismissed）");
+                    switch (act) {
+                        case "confirmed" -> {
+                            if (r.getStatus() == null || r.getStatus().isBlank()) {
+                                throw new BusinessException(ResultCode.PARAM_ERROR, "action=confirmed 时 status 必填");
+                            }
+                            if (normalizeStatus(r.getStatus()) == null) {
+                                throw new BusinessException(ResultCode.PARAM_ERROR,
+                                        "status 取值非法（not_started/in_progress/completed）");
+                            }
+                            doConfirm(s, userId, r.getStatus());
+                        }
+                        case "dismissed" -> doDismiss(s);
+                        default -> throw new BusinessException(ResultCode.PARAM_ERROR,
+                                "action 取值非法（confirmed/dismissed）");
+                    }
+                    handled.add(s.getId());
+                } else {
+                    // ---- 新增分支：用户主动挂载已注册 todo（无建议） ----
+                    // action 仅允许 confirmed：不挂载就不提交该行，无"忽略"语义（dismissed → 400）
+                    if (!"confirmed".equals(act)) {
+                        throw new BusinessException(ResultCode.PARAM_ERROR,
+                                "todoId 分支 action 必须为 confirmed（不挂载则不提交该行）");
+                    }
+                    if (r.getStatus() == null || r.getStatus().isBlank()) {
+                        throw new BusinessException(ResultCode.PARAM_ERROR, "action=confirmed 时 status 必填");
+                    }
+                    if (normalizeStatus(r.getStatus()) == null) {
+                        throw new BusinessException(ResultCode.PARAM_ERROR,
+                                "status 取值非法（not_started/in_progress/completed）");
+                    }
+                    // 合并确认的建议 id 一并纳入 handled，避免随后被"未处理一律作废"误改
+                    handled.addAll(mountTodo(r.getTodoId(), userId, r.getStatus(), chunkIds, now));
                 }
-                handled.add(s.getId());
             }
         }
 
@@ -536,6 +558,93 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     }
 
     // ==================== 内部工具 ====================
+
+    /**
+     * 契约校验：每条决议的 suggestionId / todoId 恰好提供其一（都无 / 都有 → 400 防歧义）
+     *
+     * <p>先于一切副作用执行（含"记录无 chunk 短路"之前），保证非法 body 无论记录形态如何都报 400。</p>
+     */
+    private void validateResolutions(List<TodoResolutionDTO> resolutions) {
+        if (resolutions == null) {
+            return;
+        }
+        for (TodoResolutionDTO r : resolutions) {
+            if (r == null) {
+                continue; // 脏数据：单项 null 静默跳过
+            }
+            boolean hasSuggestion = r.getSuggestionId() != null;
+            boolean hasTodo = r.getTodoId() != null;
+            if (hasSuggestion == hasTodo) {
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        "suggestionId 与 todoId 必须恰好提供其一");
+            }
+        }
+    }
+
+    /**
+     * 用户主动挂载：把已注册 todo 关联到本记录并同步其状态（todoResolutions 的 todoId 分支）
+     *
+     * <p>事务内（由 applyRecordResolutions 外层事务包裹）：</p>
+     * <ol>
+     *   <li>todo 不存在 / 非本人 / 已删除（deleted_at 非空）→ 静默忽略该条 + warn（防御，
+     *       不阻断 confirm；与"越窗忽略"防御哲学一致）</li>
+     *   <li>回写源头片段 taskStatus（真源；source chunk orphan 则跳过，惯例）</li>
+     *   <li>registry.current_status 物化 + closed_at（状态相同也统一走，幂等）</li>
+     *   <li>本记录<b>全部</b> chunk 落 evidence link（UNIQUE(todo_id, chunk_id) 已存在则跳过）</li>
+     *   <li>该 todo <b>全部</b> pending 建议一并置 confirmed + resolved_at（防孤儿建议；
+     *       与 deleteTodo 的"todo 级 pending 作废"对称——todo 状态已由用户直接拍板，
+     *       任何证据来源的待处理建议均不再有意义）</li>
+     * </ol>
+     *
+     * @return 本次被合并确认的建议 id 集合（供"未处理一律作废"排除，避免误将 confirmed 改回 dismissed）
+     */
+    private Set<Long> mountTodo(Long todoId, UUID userId, String status, List<Long> recordChunkIds,
+                                OffsetDateTime now) {
+        TodoRegistry todo = registryMapper.selectById(todoId);
+        if (todo == null || !todo.getUserId().equals(userId)) {
+            log.warn("用户主动挂载跳过：todo 不存在或非本人，todo={}, 用户={}", todoId, userId);
+            return Set.of();
+        }
+        if (todo.getDeletedAt() != null) {
+            log.warn("用户主动挂载跳过：todo 已删除，todo={}, 用户={}", todoId, userId);
+            return Set.of();
+        }
+        // 调用方已保证 status 为合法三态
+        String newStatus = normalizeStatus(status);
+        // ① 真源回写：源头片段 taskStatus（source chunk orphan 则内部跳过）
+        patchChunkTaskStatus(todo.getSourceChunkId(), newStatus);
+        // ② registry 物化 + closed_at（completed 落值 / 非 completed 清空；状态相同也幂等走）
+        applyRegistryStatus(todoId, newStatus, now);
+        // ③ 本记录全部 chunk 落 evidence link（UNIQUE 已存在——含 origin——则跳过）
+        int linked = 0;
+        for (Long chunkId : recordChunkIds) {
+            if (linkMapper.selectOneByTodoAndChunk(todoId, chunkId) == null) {
+                linkMapper.insert(TodoRegistryLink.builder()
+                        .todoId(todoId)
+                        .chunkId(chunkId)
+                        .relation("evidence")
+                        .createdAt(now)
+                        .build());
+                linked++;
+            }
+        }
+        // ④ 该 todo 全部 pending 建议合并确认（防孤儿建议）
+        Set<Long> confirmed = new HashSet<>();
+        List<TodoSuggestion> pendingOfTodo = suggestionMapper.selectList(
+                new LambdaQueryWrapper<TodoSuggestion>()
+                        .eq(TodoSuggestion::getTodoId, todoId)
+                        .eq(TodoSuggestion::getStatus, "pending"));
+        for (TodoSuggestion s : pendingOfTodo) {
+            suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
+                    .eq(TodoSuggestion::getId, s.getId())
+                    .set(TodoSuggestion::getStatus, "confirmed")
+                    .set(TodoSuggestion::getResolvedAt, now));
+            confirmed.add(s.getId());
+        }
+        log.info("用户主动挂载成功：todo={}, 状态={}, 新增 evidence link={}, 合并确认建议={}, 用户={}",
+                todoId, newStatus, linked, confirmed.size(), userId);
+        return confirmed;
+    }
 
     /**
      * chunk.metadata.taskStatus 定向改（真源写）

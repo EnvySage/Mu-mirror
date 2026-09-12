@@ -99,14 +99,20 @@ public interface TodoRegistryService {
     void deleteTodo(Long todoId, UUID userId);
 
     /**
-     * 记录确认入库时应用待办决议（审核页唯一状态变更入口，todo-status-removal-design.md §5）
+     * 记录确认入库时应用待办决议（审核页唯一状态变更入口，todo-status-removal-design.md §5/§10）
      *
-     * <p>处理 {@code body.todoResolutions}：</p>
+     * <p>处理 {@code body.todoResolutions}，条目分两类（suggestionId 与 todoId <b>恰好其一</b>，
+     * 都无/都有 → 400）：</p>
      * <ul>
-     *   <li>confirmed → 更新该 todo registry 状态（closed_at 语义对齐 applyRegistryStatus）
+     *   <li><b>suggestionId 分支（裁决 AI 建议）</b>：
+     *       confirmed → 更新该 todo registry 状态（closed_at 语义对齐 applyRegistryStatus）
      *       → 回写 source chunk taskStatus（新需求）+ evidence chunk taskStatus（保留现状语义）
-     *       → 落 evidence link（若不存在）→ 建议置 confirmed + resolved_at</li>
-     *   <li>dismissed → 建议置 dismissed + resolved_at</li>
+     *       → 落 evidence link（若不存在）→ 建议置 confirmed + resolved_at；
+     *       dismissed → 建议置 dismissed + resolved_at</li>
+     *   <li><b>todoId 分支（用户主动挂载，无建议）</b>：action 仅允许 confirmed（dismissed → 400），
+     *       status 必填三态。todo 不存在/非本人/已删除 → 静默忽略该条 + warn（不阻断 confirm）；
+     *       status 相同也幂等走；回写 source chunk taskStatus + registry 物化 + 本记录 evidence link +
+     *       该 todo 全部 pending 建议一并 confirmed（防孤儿）</li>
      *   <li>本记录下未出现在 body 中的 pending 建议 → 一律 dismissed（含 body 缺省——旧客户端行为变化）</li>
      * </ul>
      *

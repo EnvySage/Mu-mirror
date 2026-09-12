@@ -197,8 +197,11 @@ public class RecordController {
             summary = "确认审查完成（携带待办决议）",
             description = "将记录状态从'人工审查'改为'已完成'。" +
                     "可选 body：{\"todoResolutions\":[{\"suggestionId\":123,\"action\":\"confirmed\"," +
-                    "\"status\":\"completed\"},{\"suggestionId\":124,\"action\":\"dismissed\"}]}。" +
+                    "\"status\":\"completed\"},{\"suggestionId\":124,\"action\":\"dismissed\"}," +
+                    "{\"todoId\":6,\"action\":\"confirmed\",\"status\":\"in_progress\"}]}。" +
+                    "条目分两类且 suggestionId / todoId 恰好其一：前者裁决 AI 建议，后者为'用户主动挂载已注册 todo'。" +
                     "action=confirmed 时 status 必填（not_started/in_progress/completed），状态随入库一起生效；" +
+                    "todoId 分支 action 仅允许 confirmed。" +
                     "该记录下未出现在 body 中的 pending 建议一律作废。body 缺省 = 全部未处理建议作废。" +
                     "只有'人工审查'状态的记录才能调用此接口。"
     )

@@ -111,6 +111,10 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
      *
      * <p>JOIN LATERAL 计 evidence 关联数；isOrphan = source chunk 已被物理删除
      * （LEFT JOIN 不上即 true，行保留但不进注入清单）。</p>
+     *
+     * <p>排序（todo-status-removal-design.md §10）：<b>未完成在前</b>——PG 布尔 false &lt; true，
+     * {@code (current_status = 'completed')} 升序即未完成（false）优先；同组内 created_at DESC。
+     * 过滤（deleted_at IS NULL）与返回字段不变。</p>
      */
     @Select("""
             SELECT t.id AS todoId,
@@ -130,7 +134,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             LEFT JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
-            ORDER BY t.created_at DESC, t.id DESC
+            ORDER BY (t.current_status = 'completed') ASC, t.created_at DESC, t.id DESC
             """)
     List<Map<String, Object>> selectAllByUserRaw(@Param("userId") UUID userId);
 }
