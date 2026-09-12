@@ -20,6 +20,7 @@ import org.xianshen.mumirrorb.pojo.DO.TodoRegistry;
 import org.xianshen.mumirrorb.pojo.DO.TodoRegistryLink;
 import org.xianshen.mumirrorb.pojo.DO.TodoSuggestion;
 import org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO;
+import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
 import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
@@ -30,6 +31,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -161,6 +163,9 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         if (todo == null || !todo.getUserId().equals(userId)) {
             return; // 清单外/他人 todo：静默丢弃（不炸分类主流程）
         }
+        if (todo.getDeletedAt() != null) {
+            return; // 已删除的待办不再产生新建议（todo-status-removal-design.md §8）
+        }
         if ("completed".equals(todo.getCurrentStatus())) {
             return; // 已完成的不再建议（§3.2：只对未完成项判别）
         }
@@ -206,8 +211,9 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     }
 
     /**
-     * 确认：事务内三写——① chunk.metadata.taskStatus（真源，定向改）② registry.current_status
-     * 同步 + completed 时 closed_at ③ evidence 关联落库（用户背书才落）④ 建议行 confirmed
+     * 确认：事务内五写——① （todo 存在时）终态回写源头片段 taskStatus（新需求，补齐现状缺口）
+     * ② chunk.metadata.taskStatus（证据片段真源，定向改）③ registry.current_status
+     * 同步 + completed 时 closed_at ④ evidence 关联落库（用户背书才落）⑤ 建议行 confirmed
      */
     private void doConfirm(TodoSuggestion suggestion, UUID userId, String status) {
         String newStatus = status != null && !status.isBlank()
@@ -218,14 +224,26 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         OffsetDateTime now = OffsetDateTime.now(ZONE);
         Chunk evidenceChunk = chunkMapper.selectById(suggestion.getEvidenceChunkId());
 
-        // ① chunk.metadata.taskStatus（真源；定向 SET 不触发 classified_segment 重置——
-        //    元数据变更不影响文本状态机，5.3 既有语义）
+        // 已删除的 todo 不可改状态（防御；正常路径删除时 pending 建议已作废，
+        // todo==null 为脏数据，降级跳过源头回写）
+        TodoRegistry todo = registryMapper.selectById(suggestion.getTodoId());
+        if (todo != null) {
+            if (todo.getDeletedAt() != null) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "该待办已删除，无法变更状态");
+            }
+            // ① 终态回写源头片段（todo-status-removal-design.md §5：补齐现状缺口——原建议裁决
+            //    路径只写 evidence 片段；source chunk 已删/orphan 时 patchChunkTaskStatus 内部跳过）
+            patchChunkTaskStatus(todo.getSourceChunkId(), newStatus);
+        }
+
+        // ② chunk.metadata.taskStatus（证据片段真源；定向 SET 不触发 classified_segment 重置——
+        //    元数据变更不影响文本状态机，5.3 既有语义；保留现状语义）
         patchChunkTaskStatus(suggestion.getEvidenceChunkId(), newStatus);
 
-        // ② registry.current_status 同步 + completed 时 closed_at
+        // ③ registry.current_status 同步 + completed 时 closed_at
         applyRegistryStatus(suggestion.getTodoId(), newStatus, now);
 
-        // ③ evidence 关联（用户背书才落；UNIQUE(todo_id, chunk_id) 已有 origin 时跳过）
+        // ④ evidence 关联（用户背书才落；UNIQUE(todo_id, chunk_id) 已有 origin 时跳过）
         if (evidenceChunk != null
                 && linkMapper.selectOneByTodoAndChunk(suggestion.getTodoId(), evidenceChunk.getId()) == null) {
             linkMapper.insert(TodoRegistryLink.builder()
@@ -236,7 +254,7 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                     .build());
         }
 
-        // ④ 建议行 confirmed
+        // ⑤ 建议行 confirmed
         suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
                 .eq(TodoSuggestion::getId, suggestion.getId())
                 .set(TodoSuggestion::getStatus, "confirmed")
@@ -415,6 +433,132 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         return chains;
     }
 
+    // ==================== 删除（特例：侧栏直删） ====================
+
+    @Override
+    @Transactional
+    public void deleteTodo(Long todoId, UUID userId) {
+        TodoRegistry todo = registryMapper.selectById(todoId);
+        if (todo == null || !todo.getUserId().equals(userId)) {
+            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "待办不存在");
+        }
+        OffsetDateTime now = OffsetDateTime.now(ZONE);
+        if (todo.getDeletedAt() != null) {
+            log.info("待办已删除（幂等返回成功）：todo={}, 用户={}", todoId, userId);
+            return;
+        }
+        // ① registry 软删（行保留 + deleted_at；所有视图过滤）
+        registryMapper.update(null, new LambdaUpdateWrapper<TodoRegistry>()
+                .eq(TodoRegistry::getId, todoId)
+                .set(TodoRegistry::getDeletedAt, now)
+                .set(TodoRegistry::getUpdatedAt, now));
+        // ② 源头片段 metadata 加 todoRemoved=true（source_chunk_id 空 / chunk 不存在则跳过）
+        patchChunkTodoRemoved(todo.getSourceChunkId());
+        // ③ 该 todo 全部 pending 建议作废（永久静默；resolved_at 落）
+        suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
+                .eq(TodoSuggestion::getTodoId, todoId)
+                .eq(TodoSuggestion::getStatus, "pending")
+                .set(TodoSuggestion::getStatus, "dismissed")
+                .set(TodoSuggestion::getResolvedAt, now));
+        log.info("待办已删除（软删 + 源头标记 + pending 建议作废）：todo={}, title={}, 用户={}",
+                todoId, todo.getTitle(), userId);
+    }
+
+    // ==================== 审核窗口：记录确认应用待办决议 ====================
+
+    @Override
+    @Transactional
+    public void applyRecordResolutions(Long recordId, UUID userId, List<TodoResolutionDTO> resolutions) {
+        Record record = recordMapper.selectById(recordId);
+        if (record == null || !record.getUserId().equals(userId)) {
+            return; // 防御：调用方 confirmReview 已校验归属
+        }
+        List<Chunk> chunks = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                .eq(Chunk::getRecordId, recordId));
+        List<Long> chunkIds = new ArrayList<>(chunks.size());
+        for (Chunk c : chunks) {
+            if (c.getId() != null) {
+                chunkIds.add(c.getId());
+            }
+        }
+        if (chunkIds.isEmpty()) {
+            return;
+        }
+        // 本记录 evidence 的 pending 建议 = 本次窗口待处理清单（不按 record.status 过滤：
+        // confirmReview 在调用本方法前已把记录置 DONE，窗口语义由 evidence 归属表达）
+        List<TodoSuggestion> pendings = suggestionMapper.selectPendingByEvidenceChunks(chunkIds);
+        if (pendings.isEmpty() && (resolutions == null || resolutions.isEmpty())) {
+            return;
+        }
+        Map<Long, TodoSuggestion> byId = new HashMap<>();
+        for (TodoSuggestion s : pendings) {
+            byId.put(s.getId(), s);
+        }
+
+        // ① 处理 body 指定决议
+        Set<Long> handled = new HashSet<>();
+        if (resolutions != null) {
+            for (TodoResolutionDTO r : resolutions) {
+                if (r == null || r.getSuggestionId() == null) {
+                    continue;
+                }
+                TodoSuggestion s = byId.get(r.getSuggestionId());
+                if (s == null) {
+                    // 不在本记录窗口 / 已处理 / 非本人：不泄存在性，跳过（前端脏数据容错）
+                    log.warn("待办决议跳过：建议不在本记录审核窗口或已处理，record={}, suggestion={}",
+                            recordId, r.getSuggestionId());
+                    continue;
+                }
+                String act = r.getAction() == null ? "" : r.getAction().trim().toLowerCase(Locale.ROOT);
+                switch (act) {
+                    case "confirmed" -> {
+                        if (r.getStatus() == null || r.getStatus().isBlank()) {
+                            throw new BusinessException(ResultCode.PARAM_ERROR, "action=confirmed 时 status 必填");
+                        }
+                        if (normalizeStatus(r.getStatus()) == null) {
+                            throw new BusinessException(ResultCode.PARAM_ERROR,
+                                    "status 取值非法（not_started/in_progress/completed）");
+                        }
+                        doConfirm(s, userId, r.getStatus());
+                    }
+                    case "dismissed" -> doDismiss(s);
+                    default -> throw new BusinessException(ResultCode.PARAM_ERROR,
+                            "action 取值非法（confirmed/dismissed）");
+                }
+                handled.add(s.getId());
+            }
+        }
+
+        // ② 未出现在 body 中的 pending 建议 → 一律作废（含 body 缺省，行为变化）
+        int dismissed = 0;
+        for (TodoSuggestion s : pendings) {
+            if (!handled.contains(s.getId())) {
+                doDismiss(s);
+                dismissed++;
+            }
+        }
+        log.info("记录 {} 待办决议完成：confirmed/dismissed 指定 {} 条，未处理作废 {} 条，用户={}",
+                recordId, handled.size(), dismissed, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TodoSuggestionVO.RecordSuggestion> listRecordSuggestions(Long recordId, UUID userId) {
+        List<Map<String, Object>> rows = suggestionMapper.selectRecordSuggestions(recordId, userId);
+        List<TodoSuggestionVO.RecordSuggestion> result = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            result.add(TodoSuggestionVO.RecordSuggestion.builder()
+                    .suggestionId(longOf(row.get("suggestionId")))
+                    .todoId(longOf(row.get("todoId")))
+                    .todoTitle(str(row.get("todoTitle")))
+                    .todoStatus(str(row.get("todoStatus")))
+                    .suggestedStatus(str(row.get("suggestedStatus")))
+                    .evidenceChunkId(longOf(row.get("evidenceChunkId")))
+                    .build());
+        }
+        return result;
+    }
+
     // ==================== 内部工具 ====================
 
     /**
@@ -443,6 +587,28 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         } else {
             metadata.put("taskStatus", taskStatus);
         }
+        chunk.setMetadata(metadata);
+        chunkMapper.updateById(chunk);
+    }
+
+    /**
+     * 源头片段 metadata 加 {@code todoRemoved: true} 标记（删除特例）
+     *
+     * <p>与 patchChunkTaskStatus 同款 updateById 全实体回写（JsonbMapTypeHandler 生效），
+     * 只动 todoRemoved 一个键。source_chunk_id 为空（orphan）或 chunk 物理不存在则跳过——
+     * registry 的 deleted_at 仍保证所有视图过滤，标记仅用于 chunk 口径统计排除。</p>
+     */
+    private void patchChunkTodoRemoved(Long chunkId) {
+        if (chunkId == null) {
+            return;
+        }
+        Chunk chunk = chunkMapper.selectById(chunkId);
+        if (chunk == null) {
+            return;
+        }
+        Map<String, Object> metadata = chunk.getMetadata() == null
+                ? new java.util.HashMap<>() : chunk.getMetadata();
+        metadata.put("todoRemoved", true);
         chunk.setMetadata(metadata);
         chunkMapper.updateById(chunk);
     }

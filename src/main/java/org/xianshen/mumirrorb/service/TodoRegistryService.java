@@ -2,6 +2,7 @@ package org.xianshen.mumirrorb.service;
 
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
+import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
 import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoSuggestionVO;
@@ -94,4 +95,48 @@ public interface TodoRegistryService {
      * 批量三段查询防 N+1：open 基础行 → links IN JOIN chunks → suggestions count GROUP BY。</p>
      */
     List<TodoChainVO> listOpenChains(UUID userId);
+
+    /**
+     * 删除待办（特例：侧栏直删 + 弹框；软删方案，todo-status-removal-design.md §3/§4）
+     *
+     * <p>事务内：① registry.deleted_at=now（已删幂等返回成功）② 源头片段 metadata 加
+     * {@code todoRemoved: true}（source_chunk_id 为空或 chunk 不存在则跳过）③ 该 todo 全部
+     * pending 建议置 dismissed + resolved_at。原始记录保留，终态可追溯。</p>
+     *
+     * <p>删除后：所有视图过滤不可见，不再产生新建议，不可改状态。</p>
+     *
+     * @param todoId 登记 ID
+     * @param userId 用户 ID（ownership；非本人一律 404 不暴露存在性）
+     */
+    void deleteTodo(Long todoId, UUID userId);
+
+    /**
+     * 记录确认入库时应用待办决议（审核页唯一状态变更入口，todo-status-removal-design.md §5）
+     *
+     * <p>处理 {@code body.todoResolutions}：</p>
+     * <ul>
+     *   <li>confirmed → 更新该 todo registry 状态（closed_at 语义对齐 applyRegistryStatus）
+     *       → 回写 source chunk taskStatus（新需求）+ evidence chunk taskStatus（保留现状语义）
+     *       → 落 evidence link（若不存在）→ 建议置 confirmed + resolved_at</li>
+     *   <li>dismissed → 建议置 dismissed + resolved_at</li>
+     *   <li>本记录下未出现在 body 中的 pending 建议 → 一律 dismissed（含 body 缺省——旧客户端行为变化）</li>
+     * </ul>
+     *
+     * <p>调用方（confirmReview）在事务内调用；与补分类/embedding/待办登记衔接。建议先于
+     * registerFromRecord 调用：evidence chunk 若本身是 todo 片段，回写的 taskStatus 会
+     * 被登记读取，避免物化值落后。</p>
+     *
+     * @param recordId    正在确认的记录 ID（REVIEWING）
+     * @param userId      用户 ID
+     * @param resolutions body 决议列表（null/空 = 全部未处理作废）
+     */
+    void applyRecordResolutions(Long recordId, UUID userId, List<TodoResolutionDTO> resolutions);
+
+    /**
+     * 审核页数据接口（GET /records/{id}/suggestions）
+     *
+     * <p>返回该记录 evidence 的 pending 建议（合同字段见
+     * {@link TodoSuggestionVO.RecordSuggestion}）。ownership 在 SQL 层过滤。</p>
+     */
+    List<TodoSuggestionVO.RecordSuggestion> listRecordSuggestions(Long recordId, UUID userId);
 }
