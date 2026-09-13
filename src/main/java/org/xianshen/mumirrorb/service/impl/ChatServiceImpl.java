@@ -61,7 +61,9 @@ public class ChatServiceImpl implements ChatService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int CONTEXT_CHUNK_LIMIT = 5;      // 日记 ≤5 条
     private static final int SNAPSHOT_LIMIT = 2;           // 快照 ≤2 份
-    private static final int HISTORY_ROUNDS = 20;          // 对话历史最近 20 轮（单会话≈全程记忆；超长会话截断最旧，防 token 爆炸）
+    private static final int HISTORY_ROUNDS = 3;           // 对话历史最近 3 轮（设计 6.2：6 条消息）
+    // ↑ 早期放到 20 轮（实际送 40 条）反而有害：模型会顺着上文的结论和措辞继续说，
+    //   上一轮跑偏的因果会被"接着上文"放大；同时挤占 prompt token。追问所需的上文 3 轮足够。
     private static final int TITLE_MAX_LEN = 50;
     private static final int QUOTE_MAX_LEN = 60;
     private static final double DEFAULT_HALF_LIFE = 30.0;
@@ -77,6 +79,7 @@ public class ChatServiceImpl implements ChatService {
     private final GlossaryService glossaryService;
     private final org.xianshen.mumirrorb.tools.ToolOrchestrator toolOrchestrator;
     private final ObjectMapper objectMapper;
+    private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties;
 
     @Override
     @Async
@@ -102,6 +105,8 @@ public class ChatServiceImpl implements ChatService {
                     .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
                     .map(CommonProto.ToolResult::getSummary)
                     .toList();
+            // 工具轨迹落库（[{tool, summary}]）：历史回放时前端据此还原工具轨迹芯片
+            java.util.List<Map<String, Object>> toolsUsedRecords = toolsUsedRecords(toolResults);
             if (!toolsUsed.isEmpty()) {
                 sendEvent(emitter, "meta", Map.of(
                         "sessionId", session.getId().toString(),
@@ -116,14 +121,17 @@ public class ChatServiceImpl implements ChatService {
             List<RetrievedChunkDTO> chunks = retrieve(userId, route, intent);
             log.info("对话检索完成，路由: {}，命中: {}", route, chunks.size());
 
-            // 5. 检索为空兜底（6.6）
-            if (chunks.isEmpty()) {
+            // 5. 检索为空兜底（6.6）：工具已查得实质数据时仍放行到 LLM——
+            // "我传过的开题报告在哪"这类问题本就可由 find_item 独立回答，提前 return 会把
+            // toolResults 连同 vault_refs 文件卡一起丢掉（工具白跑 + 兜底文案答非所问）。
+            if (chunks.isEmpty() && !hasUsableToolData(toolResults)) {
                 finishWithFallback(emitter, userId, session.getId(), route, FALLBACK_NO_RECORDS);
                 return;
             }
 
             // 6. 流式 Chat 透传（带工具结果）
-            streamAnswer(emitter, userId, session.getId(), route, question, intent, chunks, toolResults);
+            streamAnswer(emitter, userId, session.getId(), route, question, intent, chunks,
+                    toolResults, toolsUsedRecords);
         } catch (Exception e) {
             log.error("对话处理失败，用户: {}", userId, e);
             try {
@@ -145,7 +153,8 @@ public class ChatServiceImpl implements ChatService {
     private void streamAnswer(SseEmitter emitter, UUID userId, UUID sessionId, String route,
                               String question, MirrorChatProto.ExtractIntentResponse intent,
                               List<RetrievedChunkDTO> chunks,
-                              List<CommonProto.ToolResult> toolResults) {
+                              List<CommonProto.ToolResult> toolResults,
+                              List<Map<String, Object>> toolsUsedRecords) {
         MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, intent, chunks, sessionId, toolResults);
         StringBuilder answer = new StringBuilder();
         List<Map<String, Object>> sources = null;
@@ -177,16 +186,18 @@ public class ChatServiceImpl implements ChatService {
             return;
         }
 
-        // assistant 消息落库（sources 落库，裁决 #8）+ 触碰 session.updated_at
+        // assistant 消息落库（sources/tools_used/vault_refs：裁决 #8 + 历史回放契约）+ 触碰 session
         if (sources == null) {
-            sources = deriveSources(chunks);
+            sources = List.of(); // AI 没回 done 块（流中断）→ 没有来源信息，不猜
         }
-        insertMessage(userId, sessionId, "assistant", answer.toString(), sources);
+        // vault_refs（toolcalling-vault-design.md 4.1 + fix-batch B3）两路合并：
+        // ① 工具侧 [F编号] 引用 ② 通用检索命中的 vault keyChunk（弱引用）
+        java.util.List<Map<String, Object>> vaultRefs =
+                vaultRefsFromChunks(chunks, extractVaultRefs(answer.toString(), toolResults));
+        insertMessage(userId, sessionId, "assistant", answer.toString(), sources,
+                toolsUsedRecords, vaultRefs);
         touchSession(sessionId);
         sendEvent(emitter, "sources", sources);
-        // vault_refs（toolcalling-vault-design.md 4.1 + fix-batch B3）：AI 输出 [F编号] 引用 vault
-        // 工具结果中的文件 → 解析出被引用文件卡（字段：n/vault_item_id/display_name/file_type/size/digest_status/quote）
-        java.util.List<Map<String, Object>> vaultRefs = extractVaultRefs(answer.toString(), toolResults);
         if (!vaultRefs.isEmpty()) {
             sendEvent(emitter, "vault_refs", vaultRefs);
         }
@@ -275,21 +286,98 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
+     * 工具是否产出了可独立支撑回答的实质数据（4.1 断环修复）。
+     *
+     * <p>只认 payload 里"有内容"的值：空列表/空 map/0/空串 一律不算——这样
+     * find_item 的 {"count":0,"items":[]}（成功但没找到）不会绕过"没有找到相关记录"兜底，
+     * 而真命中的 {"count":1,"items":[{…}]} 会放行到 LLM 并触发 vault_refs 文件卡。</p>
+     */
+    private boolean hasUsableToolData(List<CommonProto.ToolResult> toolResults) {
+        if (toolResults == null || toolResults.isEmpty()) {
+            return false;
+        }
+        for (CommonProto.ToolResult tr : toolResults) {
+            if (!tr.getSuccess() || tr.getPayloadJson().isBlank()) {
+                continue;
+            }
+            try {
+                Map<String, Object> payload = objectMapper.readValue(tr.getPayloadJson(),
+                        new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+                        });
+                if (hasSubstance(payload)) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
+    }
+
+    /** 递归判定 JSON 值是否"有实质内容"（null/空容器/0/blank/false 视为无） */
+    private boolean hasSubstance(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof CharSequence cs) {
+            return !cs.toString().isBlank();
+        }
+        if (value instanceof Number n) {
+            return n.doubleValue() != 0;
+        }
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        if (value instanceof Map<?, ?> m) {
+            return m.values().stream().anyMatch(this::hasSubstance);
+        }
+        if (value instanceof Iterable<?> it) {
+            for (Object o : it) {
+                if (hasSubstance(o)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return false;
+    }
+
+    /**
      * 四路检索路由（设计文档 6.6）
      */
     private List<RetrievedChunkDTO> retrieve(UUID userId, String route,
                                              MirrorChatProto.ExtractIntentResponse intent) {
         return switch (route) {
             case "profile" -> retrieveProfile(userId, intent);
-            case "structured" -> searchMapper.searchStructured(userId,
-                    emptyToNull(intent.getContentType()),
-                    intent.getMoodsList(),
-                    toPgTextArray(intent.getMoodsList()),
-                    timeStart(intent.getTimeRange()), timeEnd(intent.getTimeRange()),
-                    CONTEXT_CHUNK_LIMIT);
+            case "structured" -> {
+                // 结构化路由必须真带元数据条件，否则就退化成"按时间倒序端最近 N 条"
+                // （与问题内容完全无关，等于强行喂噪声）。无任何条件时回退 HYBRID
+                // 走向量+相关性阈值（同 PROFILE 无快照回退 HYBRID 的口径）。
+                boolean hasMetaFilter = emptyToNull(intent.getContentType()) != null
+                        || !intent.getMoodsList().isEmpty()
+                        || hasTimeRange(intent.getTimeRange());
+                if (!hasMetaFilter) {
+                    log.info("STRUCTURED 无元数据过滤条件，回退 HYBRID（避免按时间倒序喂噪声）");
+                    yield searchHybrid(userId, intent);
+                }
+                yield searchMapper.searchStructured(userId,
+                        emptyToNull(intent.getContentType()),
+                        intent.getMoodsList(),
+                        toPgTextArray(intent.getMoodsList()),
+                        timeStart(intent.getTimeRange()), timeEnd(intent.getTimeRange()),
+                        CONTEXT_CHUNK_LIMIT);
+            }
             case "semantic" -> searchSemantic(userId, intent);
             default -> searchHybrid(userId, intent);
         };
+    }
+
+    /**
+     * 相关性下限（余弦距离）：配置 ≤0 表示关闭阈值 → null（SQL 的 if 不拼该条件）。
+     * 超过阈值的 chunk 在 SQL 层就被丢弃，全部被丢弃时返回空列表 → 走"没有找到相关记录"兜底。
+     */
+    private Double maxCosineDistance() {
+        double configured = mirrorProperties.getRagMaxCosineDistance();
+        return configured > 0 ? configured : null;
     }
 
     /**
@@ -321,6 +409,7 @@ public class ChatServiceImpl implements ChatService {
             if (notBlank(snapshot.getTodoAnalysis())) text.append(" 待办：").append(snapshot.getTodoAnalysis());
             if (notBlank(snapshot.getRhythmAnalysis())) text.append(" 节奏：").append(snapshot.getRhythmAnalysis());
             // record_id=0 表示画像伪 chunk：不进 sources（前端点击溯源只针对真实记录）
+            // score=-1：画像快照是整段上下文而非检索命中，无相似度可言（哨兵值约定见 ChatSearchMapper）
             result.add(RetrievedChunkDTO.builder()
                     .recordId(0L)
                     .content(text.toString())
@@ -328,7 +417,7 @@ public class ChatServiceImpl implements ChatService {
                     .createdAt(snapshot.getCreatedAt() == null ? ""
                             : snapshot.getCreatedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
                     .contentType("profile")
-                    .score(0.0)
+                    .score(-1.0)
                     .build());
         }
         return result;
@@ -341,7 +430,8 @@ public class ChatServiceImpl implements ChatService {
                                                    MirrorChatProto.ExtractIntentResponse intent) {
         String vector = embedQueryVector(userId, rewritten(intent));
         boolean decay = !hasTimeRange(intent.getTimeRange());
-        return searchMapper.searchSemantic(userId, vector, decay, halfLife(userId), CONTEXT_CHUNK_LIMIT);
+        return searchMapper.searchSemantic(userId, vector, decay, halfLife(userId),
+                maxCosineDistance(), CONTEXT_CHUNK_LIMIT);
     }
     /**
      * HYBRID：元数据预过滤 + 向量 + 时间衰减；time_range 解析成功时同时收窄时间窗
@@ -357,7 +447,7 @@ public class ChatServiceImpl implements ChatService {
                 intent.getMoodsList(),
                 toPgTextArray(intent.getMoodsList()),
                 start, end,
-                decay, halfLife(userId), CONTEXT_CHUNK_LIMIT);
+                decay, halfLife(userId), maxCosineDistance(), CONTEXT_CHUNK_LIMIT);
     }
 
     /**
@@ -399,7 +489,9 @@ public class ChatServiceImpl implements ChatService {
                     .setTitle(nullToEmpty(c.getTitle()))
                     .setCreatedAt(nullToEmpty(c.getCreatedAt()))
                     .setContentType(nullToEmpty(c.getContentType()))
-                    .setScore(c.getScore() == null ? 0f : c.getScore().floatValue()));
+                    // score 缺省传 -1（无相似度信息哨兵），不能传 0——proto 默认 0 会被
+                    // AI 侧换算成"相关度 100%"，等于给噪声盖章认证
+                    .setScore(c.getScore() == null ? -1f : c.getScore().floatValue()));
         }
         return builder.build();
     }
@@ -449,6 +541,8 @@ public class ChatServiceImpl implements ChatService {
                         .role(h.getRole())
                         .content(h.getContent())
                         .sources(h.getSources())
+                        .toolsUsed(h.getToolsUsed())
+                        .vaultRefs(h.getVaultRefs())
                         .createdAt(h.getCreatedAt())
                         .build()).toList();
         return ChatSessionVO.builder()
@@ -497,15 +591,42 @@ public class ChatServiceImpl implements ChatService {
 
     private void insertMessage(UUID userId, UUID sessionId, String role, String content,
                                List<Map<String, Object>> sources) {
+        insertMessage(userId, sessionId, role, content, sources, null, null);
+    }
+
+    private void insertMessage(UUID userId, UUID sessionId, String role, String content,
+                               List<Map<String, Object>> sources,
+                               List<Map<String, Object>> toolsUsed,
+                               List<Map<String, Object>> vaultRefs) {
         ConversationHistory message = ConversationHistory.builder()
                 .sessionId(sessionId)
                 .userId(userId)
                 .role(role)
                 .content(content)
                 .sources(sources)
+                .toolsUsed(toolsUsed)
+                .vaultRefs(vaultRefs)
                 .createdAt(OffsetDateTime.now(ZONE))
                 .build();
         historyMapper.insert(message);
+    }
+
+    /** 工具轨迹落库形态 [{tool, summary}]（前端 normalizeToolsUsed 兼容对象/字符串两种形态） */
+    private List<Map<String, Object>> toolsUsedRecords(List<CommonProto.ToolResult> toolResults) {
+        List<Map<String, Object>> records = new ArrayList<>();
+        if (toolResults == null) {
+            return records;
+        }
+        for (CommonProto.ToolResult tr : toolResults) {
+            if (!tr.getSuccess()) {
+                continue;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("tool", tr.getTool());
+            m.put("summary", tr.getSummary());
+            records.add(m);
+        }
+        return records;
     }
 
     private void touchSession(UUID sessionId) {
@@ -682,7 +803,10 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 从 ChatChunk.done 提取 Python 返回的 sources；为空时用本地检索结果兜底推导
+     * 从 ChatChunk.done 提取 Python 返回的 sources；为空时用本地检索结果兜底推导。
+     *
+     * <p>每条都带 n（正文里的 [n]，1-based）：Python 只回被引用的子集、编号会跳号，
+     * 前端必须按 n 定位来源，不能用数组下标（sources[n-1] 在引用 [5] 而列表只有 2 项时落空）。</p>
      */
     private List<Map<String, Object>> extractSources(MirrorChatProto.ChatChunk chunk,
                                                      List<RetrievedChunkDTO> chunks) {
@@ -691,36 +815,66 @@ public class ChatServiceImpl implements ChatService {
             if (s.getRecordId() <= 0) {
                 continue; // 画像伪 chunk 不进 sources
             }
+            if (isVaultRecord(chunks, s.getRecordId())) {
+                continue; // vault 文件记录不是"日记来源"，由 vault_refs 文件卡承载
+            }
             Map<String, Object> map = new LinkedHashMap<>();
+            map.put("n", s.getN() > 0 ? s.getN() : null);
             map.put("record_id", s.getRecordId());
             map.put("quote", truncate(s.getQuote()));
             map.put("date", s.getDate());
             result.add(map);
         }
-        return result.isEmpty() ? deriveSources(chunks) : result;
+        // 不再用"本地检索结果"兜底：sources 必须严格等于模型实际引用的记录。
+        // 模型没写 [n] 就说明它没用这些资料，此时兜底挂前 3 条会让用户误以为回答基于这些日记
+        // （实测反馈：回答完全没提日记，底部却挂了 3 条来源芯片）。
+        return result;
+    }
+
+    /** 该 record_id 在 chunks 里对应的是 vault 文件记录吗 */
+    private boolean isVaultRecord(List<RetrievedChunkDTO> chunks, long recordId) {
+        for (RetrievedChunkDTO c : chunks) {
+            if (c.getRecordId() != null && c.getRecordId() == recordId) {
+                return c.getVaultItemId() != null;
+            }
+        }
+        return false;
     }
 
     /**
-     * 本地兜底 sources：取前 3 条真实记录 chunk（record_id>0）
+     * 通用检索命中的 vault keyChunk → 弱引用文件卡，与工具侧 [F编号] 卡按 vault_item_id 去重合并。
+     *
+     * <p>用户问"我的项目设计"时，即使 PlanTools 没规划 find_item，向量检索也可能命中该文件的
+     * keyChunk（title=文件名）——这时必须出<b>文件卡</b>，而不是把它当成一条日记来源芯片
+     * （文件记录没有可打开的日记详情，归到 sources 是错的）。</p>
+     *
+     * <p>检索侧拿不到 file_type/size，且无 quote → 前端渲染为"弱引用芯片"（点开确认），
+     * 与 find_item 的 weak/vague 档位语义一致。</p>
      */
-    private List<Map<String, Object>> deriveSources(List<RetrievedChunkDTO> chunks) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (RetrievedChunkDTO c : chunks) {
-            if (c.getRecordId() == null || c.getRecordId() <= 0) {
-                continue;
-            }
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("record_id", c.getRecordId());
-            map.put("quote", truncate(c.getTitle() != null && !c.getTitle().isBlank()
-                    ? c.getTitle() : c.getContent()));
-            map.put("date", c.getCreatedAt() != null && c.getCreatedAt().length() >= 10
-                    ? c.getCreatedAt().substring(0, 10) : "");
-            result.add(map);
-            if (result.size() >= 3) {
-                break;
+    private List<Map<String, Object>> vaultRefsFromChunks(List<RetrievedChunkDTO> chunks,
+                                                          List<Map<String, Object>> fromTools) {
+        List<Map<String, Object>> refs = new ArrayList<>(fromTools);
+        java.util.Set<Long> seen = new java.util.LinkedHashSet<>();
+        for (Map<String, Object> r : refs) {
+            Object id = r.get("vault_item_id");
+            if (id instanceof Number n) {
+                seen.add(n.longValue());
             }
         }
-        return result;
+        for (RetrievedChunkDTO c : chunks) {
+            if (c.getVaultItemId() == null || !seen.add(c.getVaultItemId())) {
+                continue;
+            }
+            Map<String, Object> ref = new LinkedHashMap<>();
+            ref.put("n", null); // 检索侧没有 [F编号]
+            ref.put("vault_item_id", c.getVaultItemId());
+            ref.put("display_name", notBlank(c.getTitle()) ? c.getTitle() : c.getContent());
+            // 能进通用检索即 confirmed（ChatSearchMapper 白名单 keyChunk='true'）
+            ref.put("digest_status", "confirmed");
+            ref.put("quote", null);
+            refs.add(ref);
+        }
+        return refs;
     }
 
     private String truncate(String s) {

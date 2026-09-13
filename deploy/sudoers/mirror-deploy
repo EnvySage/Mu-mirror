@@ -1,0 +1,16 @@
+# Jenkins 用户的最小 sudo 白名单（发布脚本要用 systemctl 重启服务）
+#
+# 安装：sudo cp deploy/sudoers/mirror-deploy /etc/sudoers.d/mirror-deploy
+#       sudo chmod 440 /etc/sudoers.d/mirror-deploy
+#       sudo visudo -c          # 语法自检，务必跑，写错会导致 sudo 全局不可用
+#
+# 若 Jenkins 不以 jenkins 用户运行，把第一段改成实际用户（whoami）。
+
+jenkins ALL=(root) NOPASSWD: /bin/systemctl restart mirror-backend, \
+                             /bin/systemctl restart mirror-ai, \
+                             /bin/systemctl stop mirror-backend, \
+                             /bin/systemctl stop mirror-ai, \
+                             /bin/systemctl start mirror-backend, \
+                             /bin/systemctl start mirror-ai, \
+                             /usr/sbin/nginx -t, \
+                             /usr/sbin/nginx -s reload

@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS conversation_history (
     role VARCHAR(20) NOT NULL,             -- user / assistant
     content TEXT NOT NULL,
     sources JSONB,                         -- [{record_id, quote, date}]，assistant 消息的来源追溯
+    tools_used JSONB,                      -- [{tool, summary}]，assistant 消息用过的工具（历史回放工具轨迹芯片）
+    vault_refs JSONB,                      -- [{n, vault_item_id, display_name, ...}]，对话文件卡（历史回放）
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_history_session ON conversation_history(session_id, created_at ASC);

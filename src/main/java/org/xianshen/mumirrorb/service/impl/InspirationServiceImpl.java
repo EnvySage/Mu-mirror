@@ -52,8 +52,10 @@ public class InspirationServiceImpl implements InspirationService {
         vector.append(']');
 
         // 2. pgvector 检索相关历史（纯向量，无衰减——灵感要的是语义相关而非时效）
+        // maxDistance 传 null：灵感是"启发式"场景，不做相关性卡口（prompt 已声明
+        // "若无相关历史，基于草稿本身给出延展角度"），保持既有行为不变。
         List<RetrievedChunkDTO> related = searchMapper.searchSemantic(
-                userId, vector.toString(), false, 30.0, RELATED_LIMIT);
+                userId, vector.toString(), false, 30.0, null, RELATED_LIMIT);
 
         // 3. 复用 Chat 生成 2-3 条提示
         StringBuilder prompt = new StringBuilder();

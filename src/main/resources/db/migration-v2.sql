@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS conversation_history (
 CREATE INDEX IF NOT EXISTS idx_history_session ON conversation_history(session_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_history_user ON conversation_history(user_id, created_at DESC);
 
+-- 2026-09-13 历史回放补齐：工具轨迹 + 对话文件卡落库（前端 chat.js 早已按此契约消费，
+-- B 侧此前未落库 → 切页重载后工具芯片/文件卡/行内 [Fn] 芯片全部消失）
+ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS tools_used JSONB;
+ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS vault_refs JSONB;
+
 -- ---------- 8. 已删除记录的 chunks 保留（软删除记录不进检索，由 SQL 关联过滤，见 ChunkMapper） ----------
 
 -- 2026-09-05 个人词典 user_terms（lexicon-design.md）

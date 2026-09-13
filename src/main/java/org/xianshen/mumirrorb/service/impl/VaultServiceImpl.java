@@ -236,9 +236,10 @@ public class VaultServiceImpl implements VaultService {
         Long chunks = chunkMapper.selectCount(new LambdaQueryWrapper<Chunk>()
                 .eq(Chunk::getVaultItemId, itemId));
         int chunkCount = chunks == null ? 0 : chunks.intValue();
-        // 内容问答层（query 非空才做；失败降级为空列表，绝不炸对话工具链路）
+        // 内容层：带 query → 文件内相似度检索；不带 query → 文档开头概览
+        // （"你能看到哪些内容/这份文档写了什么"这类概览型问题没有明确 query，也要有料可答）
         List<Map<String, Object>> quotes = (query == null || query.isBlank())
-                ? null : contentQuotes(userId, itemId, query);
+                ? documentOverview(userId, itemId) : contentQuotes(userId, itemId, query);
         return toVO(item, null, null, quote, chunkCount, quotes);
     }
 
@@ -273,6 +274,48 @@ public class VaultServiceImpl implements VaultService {
                     userId, itemId, e.getMessage());
         }
         return quotes;
+    }
+
+    /**
+     * 文档概览（recall_item 不带 query 时）：全文 chunk 按写入顺序前 3 段（各截 300 字）。
+     *
+     * <p>"你能看到哪些内容/这份文档写了什么"这类概览型问题没有明确的检索 query，
+     * 以前直接跳过内容层 → 模型只能说"我看不到内容本身"。现在给文档开头几段，足够概述。
+     * 失败降级为空列表，不影响 recall 的元数据兜底。</p>
+     */
+    private List<Map<String, Object>> documentOverview(UUID userId, Long itemId) {
+        List<Map<String, Object>> overview = new ArrayList<>();
+        try {
+            List<Chunk> chunks = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                    .eq(Chunk::getVaultItemId, itemId)
+                    .orderByAsc(Chunk::getId)
+                    .last("LIMIT 8"));
+            for (Chunk c : chunks) {
+                // keyChunk 是"文件名：描述"元数据行，不是正文（id 比全文 chunk 大，防御性跳过）
+                if (c.getMetadata() != null
+                        && "true".equals(String.valueOf(c.getMetadata().get("keyChunk")))) {
+                    continue;
+                }
+                String text = c.getSegment() != null && !c.getSegment().isBlank()
+                        ? c.getSegment() : c.getContent();
+                if (text == null || text.isBlank()) {
+                    continue;
+                }
+                if (text.length() > 300) {
+                    text = text.substring(0, 300) + "…";
+                }
+                Map<String, Object> q = new LinkedHashMap<>();
+                q.put("index", overview.size() + 1);
+                q.put("text", text);
+                overview.add(q);
+                if (overview.size() >= 3) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("vault 文档概览失败（降级仅元数据/摘录），文件: {}, 原因: {}", itemId, e.getMessage());
+        }
+        return overview;
     }
 
     @Override

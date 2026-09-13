@@ -52,7 +52,8 @@ class VaultRefsParseTest {
                 snapshotMapper, settingsMapper, aiGrpcClient,
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.GlossaryService.class),
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.tools.ToolOrchestrator.class),
-                MAPPER);
+                MAPPER,
+                new org.xianshen.mumirrorb.config.MirrorProperties());
     }
 
     private CommonProto.ToolResult findItemResult() throws Exception {
@@ -116,6 +117,94 @@ class VaultRefsParseTest {
         List<Map<String, Object>> refs = parse("文件内容见 [F1]。", List.of(tr));
         assertEquals(1, refs.size());
         assertEquals(33L, refs.get(0).get("vault_item_id"));
+    }
+
+    @Test
+    @DisplayName("recall_item 真实 payload（RecallItemTool 实产）字段与 find_item 同构 → 出卡（防驼峰回归）")
+    void recallItem_realPayloadFromTool() throws Exception {
+        // 回归护栏：此前的用例手工拼蛇形 map，掩盖了 RecallItemTool 直接塞 VaultItemVO
+        // 被 Jackson 序列化成驼峰（originalName/digestStatus）的真链路断环。
+        org.xianshen.mumirrorb.service.VaultService vaultService =
+                org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.VaultService.class);
+        org.xianshen.mumirrorb.pojo.VO.VaultItemVO vo =
+                org.xianshen.mumirrorb.pojo.VO.VaultItemVO.builder()
+                        .id(33L).originalName("论文.pdf").fileType("pdf").sizeBytes(2048L)
+                        .digestStatus("confirmed").quote("第一章 绪论").matchLayer("strong").build();
+        org.mockito.Mockito.when(vaultService.recall(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(33L), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(vo);
+        org.xianshen.mumirrorb.tools.impl.RecallItemTool tool =
+                new org.xianshen.mumirrorb.tools.impl.RecallItemTool(vaultService);
+
+        org.xianshen.mumirrorb.tools.ToolExecutionResult result =
+                tool.execute(UUID.randomUUID(), Map.of("vault_item_id", 33));
+        assertTrue(result.isSuccess());
+        String payloadJson = MAPPER.writeValueAsString(result.getPayload());
+        CommonProto.ToolResult tr = CommonProto.ToolResult.newBuilder()
+                .setTool("recall_item").setPayloadJson(payloadJson).setSuccess(true).build();
+
+        List<Map<String, Object>> refs = parse("文件内容见 [F1]。", List.of(tr));
+        assertEquals(1, refs.size());
+        assertEquals(33L, refs.get(0).get("vault_item_id"));
+        assertEquals("论文.pdf", refs.get(0).get("display_name"));
+        assertEquals("pdf", refs.get(0).get("file_type"));
+        assertEquals("confirmed", refs.get(0).get("digest_status"));
+        assertEquals("第一章 绪论", refs.get(0).get("quote"));
+    }
+
+    @Test
+    @DisplayName("检索侧 vault keyChunk 命中 → 弱引用文件卡；文件记录不混进日记 sources")
+    void vaultChunkHit_becomesWeakFileCard() throws Exception {
+        org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO vaultChunk =
+                org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO.builder()
+                        .recordId(9L).vaultItemId(33L).title("mirror项目的设计文档.md")
+                        .content("mirror项目的设计文档.md：毕设整体设计，Markdown 文档")
+                        .createdAt("2026-09-12 21:13").contentType("note").score(0.42)
+                        .build();
+        org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO diaryChunk =
+                org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO.builder()
+                        .recordId(11L).title("导师评审").content("内容")
+                        .createdAt("2026-07-20 23:55").contentType("thought").score(0.30)
+                        .build();
+        List<org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO> chunks = List.of(diaryChunk, vaultChunk);
+
+        // 1) 检索侧 vault 命中 → 文件卡（无 quote → 前端渲染弱引用芯片）
+        java.lang.reflect.Method m = ChatServiceImpl.class.getDeclaredMethod(
+                "vaultRefsFromChunks", List.class, List.class);
+        m.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> refs =
+                (List<Map<String, Object>>) m.invoke(chatService, chunks, List.of());
+        assertEquals(1, refs.size());
+        assertEquals(33L, refs.get(0).get("vault_item_id"));
+        assertEquals("mirror项目的设计文档.md", refs.get(0).get("display_name"));
+        assertEquals("confirmed", refs.get(0).get("digest_status"));
+        org.junit.jupiter.api.Assertions.assertNull(refs.get(0).get("quote"));
+
+        // 2) 工具侧已有同 id 的卡 → 不重复出卡
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> merged = (List<Map<String, Object>>) m.invoke(chatService, chunks,
+                List.of(Map.of("n", 1, "vault_item_id", 33L, "quote", "摘录")));
+        assertEquals(1, merged.size());
+
+        // 3) 文件记录不进"日记来源"：模型回传的 source 指向 vault 记录时被跳过
+        org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.ChatChunk done =
+                org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.ChatChunk.newBuilder()
+                        .setDone(true)
+                        .addSources(org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.Source.newBuilder()
+                                .setRecordId(9L).setN(1))
+                        .addSources(org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.Source.newBuilder()
+                                .setRecordId(11L).setN(2))
+                        .build();
+        java.lang.reflect.Method es = ChatServiceImpl.class.getDeclaredMethod("extractSources",
+                org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.ChatChunk.class, List.class);
+        es.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> sources =
+                (List<Map<String, Object>>) es.invoke(chatService, done, chunks);
+        assertEquals(1, sources.size());
+        assertEquals(11L, sources.get(0).get("record_id"));
+        assertEquals(2, sources.get(0).get("n"));
     }
 
     @Test

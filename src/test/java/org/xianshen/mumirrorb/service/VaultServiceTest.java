@@ -342,8 +342,8 @@ class VaultServiceTest {
     }
 
     @Test
-    @DisplayName("recall query 为空：走旧摘录逻辑，不做内容检索（回归）")
-    void recall_blankQuery_legacyBehavior() {
+    @DisplayName("recall query 为空：走文档开头概览，不 embed 不做相似度检索")
+    void recall_blankQuery_documentOverviewFallback() {
         doReturn(confirmedItem()).when(itemMapper).selectAliveById(9L, USER_ID);
         doReturn(org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("第一章 绪论").build())
                 .when(chunkMapper).selectById(77L);
@@ -354,11 +354,37 @@ class VaultServiceTest {
 
         assertEquals("第一章 绪论", vo.getQuote());
         assertEquals(5, vo.getDigestChunkCount());
-        assertEquals(null, vo.getQuotes());
-        assertEquals(null, voNull.getQuotes());
-        // 内容检索 SQL 绝不被触达
+        // 概览路径：mock 未铺 chunk → 空列表（不再是 null）
+        org.junit.jupiter.api.Assertions.assertTrue(vo.getQuotes() == null || vo.getQuotes().isEmpty());
+        org.junit.jupiter.api.Assertions.assertTrue(voNull.getQuotes() == null || voNull.getQuotes().isEmpty());
+        // 相似度检索与 embed 绝不被触达（概览只按顺序读，不用向量）
         verify(chunkMapper, never()).searchByItemAndSimilarity(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
         verify(aiGrpcClient, never()).embed(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("recall query 为空：返回文档开头最多 3 段（跳过 keyChunk，各截 300 字，无 similarity）")
+    void recall_blankQuery_returnsOverviewSegments() {
+        doReturn(confirmedItem()).when(itemMapper).selectAliveById(9L, USER_ID);
+        doReturn(12L).when(chunkMapper).selectCount(any());
+        doReturn(List.of(
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder()
+                        .metadata(java.util.Map.of("keyChunk", "true"))
+                        .segment("论文.pdf：描述，PDF 文档").build(),
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("第一章 绪论").build(),
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("y".repeat(400)).build(),
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("第三章").build(),
+                org.xianshen.mumirrorb.pojo.DO.Chunk.builder().segment("第四章").build()))
+                .when(chunkMapper).selectList(any());
+
+        var vo = vaultService.recall(USER_ID, 9L, null);
+
+        assertEquals(3, vo.getQuotes().size());                      // 上限 3 段
+        assertEquals(1, vo.getQuotes().get(0).get("index"));
+        assertEquals("第一章 绪论", vo.getQuotes().get(0).get("text"));  // keyChunk 元数据行被跳过
+        assertEquals("y".repeat(300) + "…", vo.getQuotes().get(1).get("text")); // 单段截 300
+        assertEquals("第三章", vo.getQuotes().get(2).get("text"));
+        org.junit.jupiter.api.Assertions.assertNull(vo.getQuotes().get(0).get("similarity")); // 概览无相似度
     }
 
     @Test

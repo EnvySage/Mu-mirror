@@ -6,20 +6,10 @@ spring:
     username: postgres
     password: postgres
 
-  # Redis 配置（开发环境）
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      password:
-      database: 0
-      timeout: 10000
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
-          max-wait: -1
+    druid:
+      stat-view-servlet:
+        enabled: false
+
 
 # JWT 配置（开发环境 - 请修改为你自己的密钥）
 jwt:
@@ -45,5 +35,5 @@ springdoc:
 grpc:
   client:
     ai-service:
-      address: localhost:50051       # Python AI 服务地址
+      address: 127.0.0.1:10003       # Python AI 服务地址
       deadline-seconds: 60           # 默认超时（秒）

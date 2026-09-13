@@ -1,0 +1,27 @@
+[Unit]
+Description=Mu-mirror AI gRPC service (port 10003)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mirror
+Group=mirror
+WorkingDirectory=/opt/mirror/ai/app
+
+# venv 留在 releases 之外复用（装一次不重装）；代码由 Jenkins 用 rsync 覆盖
+ExecStart=/opt/mirror/ai/venv/bin/python server.py
+
+Restart=on-failure
+RestartSec=5
+
+# 2C2G 关键加固：AI 服务用 requirements-minimal（无 torch），
+# 这里再给一道 cgroup 上限，防止向量计算时吃爆整机内存
+MemoryMax=360M
+MemoryHigh=300M
+
+StandardOutput=append:/opt/mirror/shared/logs/ai.out.log
+StandardError=append:/opt/mirror/shared/logs/ai.err.log
+
+[Install]
+WantedBy=multi-user.target

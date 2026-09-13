@@ -65,6 +65,13 @@ public class ChatSessionVO {
                 example = "[{\"record_id\":1,\"quote\":\"...\",\"date\":\"2026-09-03\"}]")
         private List<Map<String, Object>> sources;
 
+        @Schema(description = "用过的工具（assistant 消息，历史回放工具轨迹芯片）",
+                example = "[{\"tool\":\"find_item\",\"summary\":\"4个文件\"}]")
+        private List<Map<String, Object>> toolsUsed;
+
+        @Schema(description = "对话文件卡（assistant 消息，历史回放文件卡与 [Fn] 行内芯片）")
+        private List<Map<String, Object>> vaultRefs;
+
         @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
         @Schema(description = "创建时间")
         private OffsetDateTime createdAt;

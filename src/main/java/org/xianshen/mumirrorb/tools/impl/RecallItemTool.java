@@ -32,8 +32,11 @@ public class RecallItemTool implements ToolExecutor {
     public ToolDefinition definition() {
         return new ToolDefinition(name(),
                 "读取用户资产库中某文件的详情与内容摘录（仅已消化的文档有摘录）。"
-                        + "适合\"那个文件里说了什么/打开我传的XX/文件里关于XX写了什么\"。",
-                "{\"vault_item_id\": 123, \"query\": \"想了解文件里的什么内容（可选，带上会返回文件中与该问题最相关的段落）\"}");
+                        + "适合\"那个文件里说了什么/打开我传的XX/文件里关于XX写了什么/你能看到这份文档的哪些内容\"。"
+                        + "vault_item_id 可省略——若计划里先调用了 find_item，"
+                        + "执行器会自动把 find_item 命中的第一个文件接给本工具。"
+                        + "query 也可省略——不带 query 时返回文档开头几段（适合\"这份文档写了什么\"这类概览问题）。",
+                "{\"vault_item_id\": 123（可省略，见描述）, \"query\": \"想了解文件里的什么内容（可选；省略则返回文档开头几段概览）\"}");
     }
 
     @Override
@@ -50,8 +53,24 @@ public class RecallItemTool implements ToolExecutor {
         String query = SearchRecordsTool.strOf(args.get("query"));
         try {
             var vo = vaultService.recall(userId, id, query);
+            // item 必须是蛇形文件卡（与 FindItemTool 的 items[] 同构）：B 侧 extractVaultRefs
+            // 只认 vault_item_id/display_name/file_type/digest_status/quote，AI 侧
+            // _describe_file_item 同样按蛇形读。直接 put(vo) 会按 Jackson 驼峰序列化
+            // （originalName/digestStatus…）→ 文件引用永远解析不出卡，且喂给 LLM 的描述
+            // 退化成"未命名文件"。
+            Map<String, Object> card = new LinkedHashMap<>();
+            card.put("vault_item_id", vo.getId());
+            card.put("display_name", vo.getOriginalName());
+            card.put("file_type", vo.getFileType());
+            card.put("size", vo.getSizeBytes());
+            card.put("digest_status", vo.getDigestStatus());
+            card.put("description", vo.getDescription());
+            card.put("created_at", vo.getCreatedAt() == null ? null : vo.getCreatedAt().toString());
+            card.put("match_layer", vo.getMatchLayer());
+            card.put("quote", vo.getQuote());
+
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("item", vo);
+            payload.put("item", card);
             payload.put("quote", vo.getQuote());
             payload.put("digest_status", vo.getDigestStatus());
             if (vo.getQuotes() != null && !vo.getQuotes().isEmpty()) {

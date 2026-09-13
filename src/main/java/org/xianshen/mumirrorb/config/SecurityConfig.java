@@ -54,10 +54,17 @@ public class SecurityConfig {
 
             // 请求授权规则
             .authorizeHttpRequests(auth -> auth
-                // ERROR/FORWARD/ASYNC dispatch（SSE complete 超时/客户端断开时 Tomcat 转发 /error）
-                // 不过 JWT 过滤器（OncePerRequestFilter 默认跳过 async dispatch），放行避免二次异常噪音
+                // ERROR/FORWARD/ASYNC dispatch（SseEmitter 完成/超时时 Tomcat 做 async dispatch
+                // 回容器线程，或转发 /error）
+                // 必须显式放行 ASYNC：JwtAuthenticationFilter 是 OncePerRequestFilter（默认
+                // shouldNotFilterAsyncDispatch=true 跳过）+ STATELESS，async dispatch 时
+                // SecurityContext 为空；而 Spring Security 6 的 AuthorizationFilter 默认
+                // shouldFilterAllDispatcherTypes=true 仍会过滤 ASYNC → 抛 AuthorizationDeniedException，
+                // 此时 SSE 响应已 committed → "Unable to handle the Spring Security Exception
+                // because the response is already committed"
                 .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR,
-                        jakarta.servlet.DispatcherType.FORWARD).permitAll()
+                        jakarta.servlet.DispatcherType.FORWARD,
+                        jakarta.servlet.DispatcherType.ASYNC).permitAll()
                 .requestMatchers("/error").permitAll()
                 // 公开接口（不含 context-path）
                 .requestMatchers("/auth/login", "/auth/register", "/auth/status").permitAll()

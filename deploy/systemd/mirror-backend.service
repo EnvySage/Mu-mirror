@@ -1,0 +1,35 @@
+[Unit]
+Description=Mu-mirror backend (Spring Boot, profile=prod)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mirror
+Group=mirror
+WorkingDirectory=/opt/mirror/backend
+
+# 密钥与连接串走独立文件（600 权限），不进 git、不落在命令行里
+EnvironmentFile=/opt/mirror/shared/backend.env
+# Spring Boot 读环境变量 SPRING_PROFILES_ACTIVE=prod
+
+# 堆参数写死在命令行（不要塞进 EnvironmentFile 的 JAVA_OPTS：
+# systemd 的变量展开分词规则容易踩坑，静态参数最稳）
+# 2C2G 机器上：留足给 PG / AI / 系统，别用默认（默认≈物理内存 1/4）
+ExecStart=/usr/bin/java -Xms192m -Xmx384m -XX:MaxMetaspaceSize=160m -XX:+UseSerialGC \
+    -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/opt/mirror/shared/logs \
+    -jar /opt/mirror/backend/current/app.jar
+
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+
+# cgroup 硬上限：后端失控时只杀自己，不连累同机的 PG / 其他项目
+MemoryMax=520M
+MemoryHigh=440M
+
+StandardOutput=append:/opt/mirror/shared/logs/backend.out.log
+StandardError=append:/opt/mirror/shared/logs/backend.err.log
+
+[Install]
+WantedBy=multi-user.target

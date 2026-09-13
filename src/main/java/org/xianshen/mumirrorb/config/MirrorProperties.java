@@ -28,6 +28,15 @@ public class MirrorProperties {
     /** 递归链压缩：距目标月超过 N 个月的更早镜子只带一行摘要。默认 12 */
     private int mirrorSummaryAfterMonths = 12;
 
+    /**
+     * 对话检索相关性下限（余弦距离，越小越严）：距离超过该值的 chunk 直接丢弃，
+     * 全部被丢弃时走"没有找到相关记录"兜底——宁可不答，也不把噪声喂给 LLM 让它编。
+     *
+     * <p>0.35 ≈ 相似度 0.65（严格档）；放宽到 0.45/0.55 可提高召回。
+     * ≤ 0 表示关闭阈值（回退旧行为：永远取 top-N）。</p>
+     */
+    private double ragMaxCosineDistance = 0.35;
+
     /** 生成接口 meta 透出字段名（截断发生时提示前端 toast，F 侧按此字段接线） */
     public static final String TRUNCATED_FLAG = "lookback_truncated";
 

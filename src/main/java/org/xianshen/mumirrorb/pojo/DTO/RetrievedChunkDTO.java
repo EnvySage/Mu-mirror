@@ -34,9 +34,13 @@ public class RetrievedChunkDTO {
     private String contentType;
 
     /**
-     * 排序分值：SEMANTIC/HYBRID = 余弦距离（可含时间衰减），STRUCTURED 恒为 1.0；
-     * 越小越相关，组装 RetrievedChunk.score 时转为 1/(1+distance) 相似度
+     * 余弦距离（越小越相关）。约定：&ge; 0 = 真实距离（SEMANTIC/HYBRID）；
+     * &lt; 0 = "无相似度信息"哨兵（STRUCTURED 命中、画像快照）——上层据此不给该条打相关度标记。
+     * 时间衰减只作用于 SQL 的 ORDER BY，不掺进本字段。
      */
-    @Schema(description = "排序分值（距离，越小越相关）")
+    @Schema(description = "余弦距离（越小越相关）；<0 表示无相似度信息")
     private Double score;
+
+    @Schema(description = "vault 资产 ID（非空 = 这条是文件资产的 keyChunk，不是日记片段）")
+    private Long vaultItemId;
 }

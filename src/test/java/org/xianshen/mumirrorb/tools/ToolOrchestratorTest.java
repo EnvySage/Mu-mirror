@@ -244,6 +244,162 @@ class ToolOrchestratorTest {
         assertEquals(false, results.get(0).getSuccess());
     }
 
+    /** 记录收到的 args 的桩工具（验证步骤间传参） */
+    static final class RecordingTool implements ToolExecutor {
+        private final String toolName;
+        private final ToolExecutionResult result;
+        Map<String, Object> lastArgs;
+
+        RecordingTool(String toolName, ToolExecutionResult result) {
+            this.toolName = toolName;
+            this.result = result;
+        }
+
+        @Override
+        public String name() {
+            return toolName;
+        }
+
+        @Override
+        public ToolDefinition definition() {
+            return new ToolDefinition(toolName, toolName, "{}");
+        }
+
+        @Override
+        public ToolExecutionResult execute(UUID userId, Map<String, Object> args) {
+            this.lastArgs = args;
+            return result;
+        }
+    }
+
+    private RecordingTool findItemTool(long firstId) {
+        return new RecordingTool("find_item", ToolExecutionResult.builder()
+                .success(true).summary("find_item:2个文件")
+                .payload(Map.of("count", 2, "items", List.of(
+                        Map.of("vault_item_id", firstId, "display_name", "设计文档.md"),
+                        Map.of("vault_item_id", firstId + 1, "display_name", "笔记.md"))))
+                .build());
+    }
+
+    private RecordingTool recallItemTool() {
+        return new RecordingTool("recall_item", ToolExecutionResult.builder()
+                .success(true).summary("recall_item:设计文档.md")
+                .payload(Map.of("item", Map.of("vault_item_id", 77, "display_name", "设计文档.md")))
+                .build());
+    }
+
+    private void useTools(ToolExecutor... tools) {
+        registry = new ToolRegistry(List.of(tools));
+        orchestrator = new ToolOrchestrator(aiGrpcClient, registry, auditService,
+                glossaryService, new VaultProperties(),
+                new com.fasterxml.jackson.databind.ObjectMapper());
+    }
+
+    @Test
+    @DisplayName("步骤间传参：recall_item 未给 id → 自动接上一步 find_item 命中的第一个文件")
+    void planAndExecute_recallItemInheritsFindItemId() {
+        RecordingTool findItem = findItemTool(77L);
+        RecordingTool recallItem = recallItemTool();
+        useTools(findItem, recallItem);
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply(
+                "find_item", "{\"query\":\"设计文档\"}",
+                "recall_item", "{\"query\":\"架构\"}"));
+
+        List<CommonProto.ToolResult> results =
+                orchestrator.planAndExecute(USER_ID, SESSION_ID, "设计文档里架构怎么写的");
+
+        assertEquals(2, results.size());
+        assertEquals(77L, recallItem.lastArgs.get("vault_item_id"));
+        assertEquals("架构", recallItem.lastArgs.get("query"));
+        // 审计带上自动补的 id（事后可追溯这次 recall 读的是哪个文件）
+        verify(auditService).record(eq(USER_ID), eq(SESSION_ID), eq("recall_item"),
+                org.mockito.ArgumentMatchers.argThat(a -> a != null
+                        && String.valueOf(a.get("vault_item_id")).equals("77")),
+                any(), eq(true), anyLong());
+    }
+
+    @Test
+    @DisplayName("步骤间传参：recall_item 自带 id → 不覆盖模型给的值")
+    void planAndExecute_recallItemKeepsOwnId() {
+        RecordingTool recallItem = recallItemTool();
+        useTools(findItemTool(77L), recallItem);
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply(
+                "find_item", "{\"query\":\"设计文档\"}",
+                "recall_item", "{\"vault_item_id\": 999, \"query\":\"架构\"}"));
+
+        orchestrator.planAndExecute(USER_ID, SESSION_ID, "设计文档里架构怎么写的");
+
+        // 模型给的 id 经 JSON 解析是 Integer，用字符串比对避免包装类型不一致
+        assertEquals("999", String.valueOf(recallItem.lastArgs.get("vault_item_id")));
+    }
+
+    @Test
+    @DisplayName("步骤间传参：没有前置 find_item 命中 → recall_item 参数不动（工具自己报缺 id）")
+    void planAndExecute_recallItemWithoutFindItem_untouched() {
+        RecordingTool recallItem = recallItemTool();
+        useTools(recallItem);
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong()))
+                .thenReturn(reply("recall_item", "{\"query\":\"架构\"}"));
+
+        orchestrator.planAndExecute(USER_ID, SESSION_ID, "那份文件里写了什么");
+
+        org.junit.jupiter.api.Assertions.assertFalse(recallItem.lastArgs.containsKey("vault_item_id"));
+    }
+
+    @Test
+    @DisplayName("步骤间传参：find_item 没命中文件 → 不传 id")
+    void planAndExecute_recallItemWithEmptyFindResult_noId() {
+        RecordingTool emptyFind = new RecordingTool("find_item", ToolExecutionResult.builder()
+                .success(true).summary("find_item:0个文件")
+                .payload(Map.of("count", 0, "items", List.of())).build());
+        RecordingTool recallItem = recallItemTool();
+        useTools(emptyFind, recallItem);
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply(
+                "find_item", "{\"query\":\"不存在的文件\"}",
+                "recall_item", "{\"query\":\"架构\"}"));
+
+        orchestrator.planAndExecute(USER_ID, SESSION_ID, "那份文件里写了什么");
+
+        org.junit.jupiter.api.Assertions.assertFalse(recallItem.lastArgs.containsKey("vault_item_id"));
+    }
+
+    @Test
+    @DisplayName("只规划 find_item → 自动补读 recall_item（保证问文件必然读到正文）")
+    void planAndExecute_autoRecallWhenNotPlanned() {
+        RecordingTool recallItem = recallItemTool();
+        useTools(findItemTool(77L), recallItem);
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong()))
+                .thenReturn(reply("find_item", "{\"query\":\"设计文档\"}"));
+
+        List<CommonProto.ToolResult> results =
+                orchestrator.planAndExecute(USER_ID, SESSION_ID, "我的设计文档里写了什么");
+
+        assertEquals(2, results.size());                       // find_item + 自动补的 recall_item
+        assertEquals("recall_item", results.get(1).getTool());
+        assertEquals(77L, recallItem.lastArgs.get("vault_item_id"));
+        assertEquals("我的设计文档里写了什么", recallItem.lastArgs.get("query")); // query = 用户原问题
+        verify(auditService).record(eq(USER_ID), eq(SESSION_ID), eq("recall_item"),
+                any(), any(), eq(true), anyLong());
+    }
+
+    @Test
+    @DisplayName("已规划 recall_item 不重复补；find_item 零命中也不补")
+    void planAndExecute_noAutoRecallWhenPlannedOrNothingFound() {
+        useTools(findItemTool(77L), recallItemTool());
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply(
+                "find_item", "{\"query\":\"设计文档\"}",
+                "recall_item", "{\"query\":\"架构\"}"));
+        assertEquals(2, orchestrator.planAndExecute(USER_ID, SESSION_ID, "架构怎么写的").size());
+
+        RecordingTool emptyFind = new RecordingTool("find_item", ToolExecutionResult.builder()
+                .success(true).summary("find_item:0个文件")
+                .payload(Map.of("count", 0, "items", List.of())).build());
+        useTools(emptyFind, recallItemTool());
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong()))
+                .thenReturn(reply("find_item", "{\"query\":\"不存在的文件\"}"));
+        assertEquals(1, orchestrator.planAndExecute(USER_ID, SESSION_ID, "那个文件呢").size());
+    }
+
     @Test
     @DisplayName("ToolRegistry：定义快照进 ToolSpec，name 分发")
     void registry_specs() {

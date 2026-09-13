@@ -59,6 +59,22 @@ public class ConversationHistory {
     @Schema(description = "来源追溯（assistant 消息）", example = "[{\"record_id\":1,\"quote\":\"...\",\"date\":\"2026-09-03\"}]")
     private List<Map<String, Object>> sources;
 
+    /**
+     * 用过的工具（JSONB 数组，仅 assistant 消息）：[{tool, summary}]
+     * 历史回放时前端据此渲染工具轨迹芯片（chat.js normalizeToolsUsed 兼容对象/字符串两种形态）
+     */
+    @TableField(typeHandler = JsonbTypeHandlerListMap.class)
+    @Schema(description = "用过的工具（assistant 消息）", example = "[{\"tool\":\"find_item\",\"summary\":\"4个文件\"}]")
+    private List<Map<String, Object>> toolsUsed;
+
+    /**
+     * 对话文件卡（JSONB 数组，仅 assistant 消息）：[{n, vault_item_id, display_name, digest_status, quote}]
+     * 历史回放时前端据此渲染文件卡与正文 [Fn] 行内芯片
+     */
+    @TableField(typeHandler = JsonbTypeHandlerListMap.class)
+    @Schema(description = "对话文件卡（assistant 消息）")
+    private List<Map<String, Object>> vaultRefs;
+
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;
 }

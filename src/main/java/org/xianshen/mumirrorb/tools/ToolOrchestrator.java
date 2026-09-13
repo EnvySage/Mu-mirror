@@ -68,6 +68,9 @@ public class ToolOrchestrator {
 
             // 2. 执行（≤2 步；未知工具/参数非法跳过）
             int executed = 0;
+            // 步骤间传参：Planner 一次性产出 ≤2 步、看不到前一步的结果，
+            // recall_item 需要的 vault_item_id 只能由执行器接上 find_item 的命中
+            Long lastFoundItemId = null;
             for (MirrorChatProto.PlannedCall call : calls) {
                 if (executed >= props.getMaxToolCalls()) {
                     break;
@@ -92,11 +95,24 @@ public class ToolOrchestrator {
                             "args parse error", false, System.currentTimeMillis() - start);
                     continue;
                 }
+                if (args == null) {
+                    args = new java.util.LinkedHashMap<>();
+                }
+                // 步骤间传参：recall_item 没给 id 时自动接上一步 find_item 命中的第一个文件
+                if ("recall_item".equals(toolName) && !hasPositiveVaultItemId(args)
+                        && lastFoundItemId != null) {
+                    args.put("vault_item_id", lastFoundItemId);
+                    log.info("recall_item 未给 vault_item_id，自动接 find_item 命中 id={}", lastFoundItemId);
+                }
                 try {
                     ToolExecutionResult result = executor.get().execute(userId, args);
                     long latency = System.currentTimeMillis() - start;
                     auditService.record(userId, sessionId, toolName, args,
                             result.getSummary(), result.isSuccess(), latency);
+                    // 记下 find_item 的首个命中，供后续 recall_item 取用
+                    if (result.isSuccess() && "find_item".equals(toolName)) {
+                        lastFoundItemId = firstVaultItemId(result.getPayload());
+                    }
                     if (result.isSuccess()) {
                         executed++;
                         results.add(CommonProto.ToolResult.newBuilder()
@@ -123,6 +139,37 @@ public class ToolOrchestrator {
                             "execute error: " + e.getMessage(), false, latency);
                 }
             }
+            // 3. 兜底补读：Planner 只规划了 find_item 却没规划 recall_item 时，自动补一次。
+            // 原因：find_item 只给"文件名 + 描述"，看不到正文；而"问某份材料"时读内容基本是必需动作，
+            // 是否规划 recall_item 全看模型是否听话（实测经常只规划 find_item，用户就得到
+            // "我只有文件名和元信息，具体内容看不到"）。这一步把它兜住，宁多读一次也不答不了。
+            boolean plannedRecall = calls.stream()
+                    .anyMatch(c -> "recall_item".equals(c.getTool()));
+            java.util.Optional<ToolExecutor> recallExecutor = registry.get("recall_item");
+            if (!plannedRecall && lastFoundItemId != null
+                    && executed < props.getMaxToolCalls() && recallExecutor.isPresent()) {
+                Map<String, Object> autoArgs = new java.util.LinkedHashMap<>();
+                autoArgs.put("vault_item_id", lastFoundItemId);
+                autoArgs.put("query", question);
+                long start = System.currentTimeMillis();
+                try {
+                    ToolExecutionResult auto = recallExecutor.get().execute(userId, autoArgs);
+                    auditService.record(userId, sessionId, "recall_item", autoArgs,
+                            auto.getSummary(), auto.isSuccess(), System.currentTimeMillis() - start);
+                    results.add(CommonProto.ToolResult.newBuilder()
+                            .setTool("recall_item")
+                            .setSummary(nullSafe(auto.getSummary()))
+                            .setPayloadJson(objectMapper.writeValueAsString(
+                                    auto.getPayload() == null ? Map.of() : auto.getPayload()))
+                            .setSuccess(auto.isSuccess())
+                            .build());
+                    log.info("PlanTools 未规划 recall_item，已自动补读文件内容，item: {}, 成功: {}",
+                            lastFoundItemId, auto.isSuccess());
+                } catch (Exception e) {
+                    log.warn("自动补读文件内容失败（不阻断回答），item: {}, 原因: {}",
+                            lastFoundItemId, e.getMessage());
+                }
+            }
             log.info("PlanTools 完成，用户: {}, 计划 {} 步, 成功执行 {} 步", userId, calls.size(), executed);
         } catch (Exception e) {
             // 零回归：规划失败/超时/Python 未上线 → 空结果，对话照常
@@ -130,6 +177,55 @@ public class ToolOrchestrator {
             return List.of();
         }
         return results;
+    }
+
+    /** args 里是否给了有效的 vault_item_id（>0）——没有则允许执行器自动补 */
+    private static boolean hasPositiveVaultItemId(Map<String, Object> args) {
+        Object raw = args.get("vault_item_id");
+        if (raw instanceof Number n) {
+            return n.longValue() > 0;
+        }
+        if (raw == null) {
+            return false;
+        }
+        try {
+            return Long.parseLong(String.valueOf(raw).trim()) > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /** find_item payload 里第一个命中文件的 vault_item_id（无命中返回 null） */
+    private static Long firstVaultItemId(Object payload) {
+        if (!(payload instanceof Map<?, ?> m)) {
+            return null;
+        }
+        if (m.get("items") instanceof List<?> items) {
+            for (Object o : items) {
+                Long id = vaultItemIdOf(o);
+                if (id != null) {
+                    return id;
+                }
+            }
+        }
+        return vaultItemIdOf(m.get("item"));
+    }
+
+    private static Long vaultItemIdOf(Object node) {
+        if (node instanceof Map<?, ?> m) {
+            Object raw = m.get("vault_item_id");
+            if (raw instanceof Number n) {
+                return n.longValue();
+            }
+            if (raw != null) {
+                try {
+                    return Long.parseLong(String.valueOf(raw).trim());
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     private static String nullSafe(String s) {
