@@ -7,6 +7,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.xianshen.mumirrorb.common.enums.ResultCode;
+import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.common.utils.CryptoUtils;
 import org.xianshen.mumirrorb.config.RecordContextProperties;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
@@ -634,6 +636,17 @@ public class AiGrpcClient {
             }
         }
 
+        // 不再允许"缺配置就发请求"：Python 侧已移除厂商兜底模型（qwen-plus 等），
+        // 这里同步 fail-fast，避免未配置时被下游静默换成另一个模型真实调用并计费。
+        if (builder.getApiKey().isEmpty() || builder.getBaseUrl().isEmpty() || builder.getModel().isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR.getCode(),
+                    "AI 模型未配置完整（API Key / API 地址 / 模型名称），请到设置页填写后再试");
+        }
+
+        // 调用审计：谁、用哪个模型、打到哪个地址（用于追查异常账单）
+        log.info("[AI调用] userId={} llm model={} baseUrl={} protocol={}",
+                userId, builder.getModel(), builder.getBaseUrl(), builder.getProtocol());
+
         return builder.build();
     }
 
@@ -665,6 +678,17 @@ public class AiGrpcClient {
             if (settings.getEmbeddingBaseUrl() != null) {
                 builder.setBaseUrl(settings.getEmbeddingBaseUrl());
             }
+        }
+
+        // api 来源必须配全（Python 侧已移除厂商兜底 embedding 模型）；local 走本地 BGE，无需这三项
+        if ("api".equalsIgnoreCase(builder.getSource())) {
+            if (builder.getApiKey().isEmpty() || builder.getBaseUrl().isEmpty() || builder.getApiModel().isEmpty()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR.getCode(),
+                        "Embedding 未配置完整（API Key / API 地址 / 模型名称），请到设置页填写后再试");
+            }
+            log.info("[AI调用] userId={} embedding model={} baseUrl={}", userId, builder.getApiModel(), builder.getBaseUrl());
+        } else {
+            log.info("[AI调用] userId={} embedding source=local model={}", userId, builder.getLocalModel());
         }
 
         return builder.build();
