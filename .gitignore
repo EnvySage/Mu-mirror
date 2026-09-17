@@ -60,3 +60,8 @@ temp/
 tmp/
 
 application-dev.yml
+
+### 本地工具与 IDE 数据（不入库） ###
+.codebuddy/
+# 召回评测脚本：本地测试用，含密钥/账号等敏感配置
+tests/rag-eval/
