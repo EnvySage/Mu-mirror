@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.ResultCode;
+import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.MirrorChatProto;
@@ -51,6 +53,11 @@ import java.util.UUID;
 public class SummaryServiceImpl implements SummaryService {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+
+    /** 日报列表分页：不传 limit 时的安全上限（日报按天累积，禁止全量返回） */
+    private static final int DEFAULT_LIST_LIMIT = 20;
+    /** 单页上限，防止前端传超大值 */
+    private static final int MAX_LIST_LIMIT = 50;
     private static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final String METADATA_CONTENT_TYPE = "daily_summary";
 
@@ -64,11 +71,25 @@ public class SummaryServiceImpl implements SummaryService {
     @Override
     @Transactional
     public DailySummaryVO generateForUser(UUID userId) {
-        LocalDate yesterday = LocalDate.now(ZONE).minusDays(1);
-        String summaryDate = yesterday.format(DAY);
+        return generateForUser(userId, LocalDate.now(ZONE).minusDays(1), false);
+    }
 
-        // 0. 幂等：该日期已有日报则跳过
-        if (findBySummaryDate(userId, summaryDate) != null) {
+    @Override
+    @Transactional
+    public DailySummaryVO generateForUser(UUID userId, LocalDate date, boolean force) {
+        if (date == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "日报日期不能为空");
+        }
+        // 只总结已经过完的一天：今天还没过完，未来日期无意义
+        if (!date.isBefore(LocalDate.now(ZONE))) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只能生成已经过去的日期的日报");
+        }
+        String summaryDate = date.format(DAY);
+
+        // 0. force（重生成）：先删除旧日报再重建；否则幂等——已有则跳过
+        if (force) {
+            deleteDailySummary(userId, summaryDate);
+        } else if (findBySummaryDate(userId, summaryDate) != null) {
             log.info("用户 {} 的 {} 日报已存在，跳过", userId, summaryDate);
             return null;
         }
@@ -81,13 +102,13 @@ public class SummaryServiceImpl implements SummaryService {
             return null;
         }
 
-        OffsetDateTime dayStart = yesterday.atStartOfDay(ZONE).toOffsetDateTime();
-        OffsetDateTime dayEnd = yesterday.plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
+        OffsetDateTime dayStart = date.atStartOfDay(ZONE).toOffsetDateTime();
+        OffsetDateTime dayEnd = date.plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
 
-        // 1. 昨日无有效记录则跳过（无可总结内容）
+        // 1. 当日无有效记录则跳过（无可总结内容）
         long recordCount = statsMapper.countRecords(userId, dayStart, dayEnd);
         if (recordCount == 0) {
-            log.info("用户 {} 昨日（{}）无记录，跳过每日总结", userId, summaryDate);
+            log.info("用户 {} {} 无记录，跳过每日总结", userId, summaryDate);
             return null;
         }
 
@@ -151,8 +172,14 @@ public class SummaryServiceImpl implements SummaryService {
     @Override
     @Transactional(readOnly = true)
     public List<DailySummaryVO> list(UUID userId, String date) {
+        return list(userId, date, null, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<DailySummaryVO> list(UUID userId, String date, Integer limit, String before) {
         if (date != null && !date.isBlank()) {
-            // 单篇查询（含全文）
+            // 单篇查询（含全文）：忽略分页参数
             Chunk chunk = findBySummaryDate(userId, date.trim());
             if (chunk == null) {
                 return List.of();
@@ -164,12 +191,18 @@ public class SummaryServiceImpl implements SummaryService {
             return List.of(toVO(record, chunk, true));
         }
 
-        // 全部日报（新→旧，不含全文，只给摘要行）
-        List<Chunk> chunks = chunkMapper.selectList(
-                new LambdaQueryWrapper<Chunk>()
-                        .eq(Chunk::getUserId, userId)
-                        .apply("metadata->>'contentType' = {0}", METADATA_CONTENT_TYPE)
-                        .orderByDesc(Chunk::getCreatedAt));
+        // 日报列表（新→旧，不含全文，只给摘要行）：游标分页，禁止全量返回
+        int size = limit == null || limit <= 0 ? DEFAULT_LIST_LIMIT : Math.min(limit, MAX_LIST_LIMIT);
+        LambdaQueryWrapper<Chunk> wrapper = new LambdaQueryWrapper<Chunk>()
+                .eq(Chunk::getUserId, userId)
+                .apply("metadata->>'contentType' = {0}", METADATA_CONTENT_TYPE);
+        if (before != null && !before.isBlank()) {
+            // 游标：summaryDate 为 'yyyy-MM-dd'，字符串比较即日期比较（严格早于 before）
+            wrapper.apply("metadata->>'summaryDate' < {0}", before.trim());
+        }
+        wrapper.orderByDesc(Chunk::getCreatedAt).last("LIMIT " + size);
+
+        List<Chunk> chunks = chunkMapper.selectList(wrapper);
         List<DailySummaryVO> result = new ArrayList<>();
         for (Chunk chunk : chunks) {
             Record record = recordMapper.selectById(chunk.getRecordId());
@@ -181,7 +214,49 @@ public class SummaryServiceImpl implements SummaryService {
         return result;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> listMissingDates(UUID userId, int days) {
+        int n = Math.max(1, Math.min(days, 30));
+        LocalDate today = LocalDate.now(ZONE);
+        List<String> missing = new ArrayList<>();
+        for (int d = 1; d <= n; d++) {
+            LocalDate date = today.minusDays(d);
+            OffsetDateTime dayStart = date.atStartOfDay(ZONE).toOffsetDateTime();
+            OffsetDateTime dayEnd = date.plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
+            // 有记录可总结 + 这天还没有日报 = 需要补生成
+            if (statsMapper.countRecords(userId, dayStart, dayEnd) > 0
+                    && findBySummaryDate(userId, date.format(DAY)) == null) {
+                missing.add(date.format(DAY));
+            }
+        }
+        return missing;
+    }
+
     // ==================== 内部方法 ====================
+
+    /**
+     * 删除指定日期的日报（force 重生成用）
+     *
+     * <p>Chunk 无 deleted_at，直接物理删除；系统 Record 走软删（与记录流一致，
+     * 保留审计痕迹）。返回是否删到东西。</p>
+     */
+    private boolean deleteDailySummary(UUID userId, String summaryDate) {
+        Chunk old = findBySummaryDate(userId, summaryDate);
+        if (old == null) {
+            return false;
+        }
+        chunkMapper.deleteById(old.getId());
+        if (old.getRecordId() != null) {
+            Record record = recordMapper.selectById(old.getRecordId());
+            if (record != null) {
+                record.setDeletedAt(OffsetDateTime.now(ZONE));
+                recordMapper.updateById(record);
+            }
+        }
+        log.info("已删除用户 {} 的 {} 旧日报（重生成）", userId, summaryDate);
+        return true;
+    }
 
     /**
      * 按summaryDate查日报 Chunk（metadata.contentType='daily_summary' AND metadata.summaryDate=?）
