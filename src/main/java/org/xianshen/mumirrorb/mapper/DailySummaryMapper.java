@@ -132,11 +132,15 @@ public interface DailySummaryMapper {
                                               @Param("dayEnd") OffsetDateTime dayEnd);
 
     /**
-     * 昨日 done 记录原文（供日报引用，最多 30 条）
+     * 当日 done 记录原文（供日报引用，最多 30 条，时间升序）
+     *
+     * <p>日报若只喂统计量（记录数/类型/情绪/时段），LLM 拿不到任何正文，只能产出
+     * "没查到具体记录内容"这类空话——必须把原文一起给进去。
+     * createdAt 用 TO_CHAR 出字符串，避免 text → OffsetDateTime 的隐式转换坑。</p>
      */
     @Select("""
             SELECT r.content,
-                   TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
+                   TO_CHAR(r.created_at, 'HH24:MI') AS createdAt
             FROM records r
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
@@ -147,7 +151,7 @@ public interface DailySummaryMapper {
             ORDER BY r.created_at ASC
             LIMIT 30
             """)
-    List<Chunk> selectDayRecords(@Param("userId") UUID userId,
-                                 @Param("dayStart") OffsetDateTime dayStart,
-                                 @Param("dayEnd") OffsetDateTime dayEnd);
+    List<Map<String, Object>> selectDayRecords(@Param("userId") UUID userId,
+                                               @Param("dayStart") OffsetDateTime dayStart,
+                                               @Param("dayEnd") OffsetDateTime dayEnd);
 }

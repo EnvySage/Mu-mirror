@@ -112,13 +112,15 @@ public class SummaryServiceImpl implements SummaryService {
             return null;
         }
 
-        // 2. 统计 + 组装日报输入 → 复用 Chat 生成（不新增 Proto/RPC）
+        // 2. 统计 + 当日原文 + 组装日报输入 → 复用 Chat 生成（不新增 Proto/RPC）
         List<Map<String, Object>> typeStats = statsMapper.selectTypeStats(userId, dayStart, dayEnd);
         List<Map<String, Object>> moodStats = statsMapper.selectMoodStats(userId, dayStart, dayEnd);
         List<Map<String, Object>> hours = statsMapper.selectHourDistribution(userId, dayStart, dayEnd);
         List<Map<String, Object>> openTodos = statsMapper.selectOpenTodos(userId, dayStart, dayEnd);
+        // 原文必须带上：只给统计量的话 LLM 无从总结，只会回"没查到具体记录内容"
+        List<Map<String, Object>> dayRecords = statsMapper.selectDayRecords(userId, dayStart, dayEnd);
         String summaryText = aiGrpcClient.chatBlocking(userId, buildDailyPrompt(
-                summaryDate, recordCount, typeStats, moodStats, hours, openTodos));
+                summaryDate, recordCount, typeStats, moodStats, hours, openTodos, dayRecords));
         if (summaryText == null || summaryText.isBlank()) {
             log.warn("用户 {} 每日总结 LLM 返回空，跳过", userId);
             return null;
@@ -277,18 +279,39 @@ public class SummaryServiceImpl implements SummaryService {
      * <p>每日总结走 Chat RPC 的 question 通道携带完整日报指令（Python chat prompt
      * 语义为"人生教练镜子"，对日报场景同样成立：基于事实陈述生成总结）。</p>
      */
+    /** 单条记录进 prompt 的字符上限（防长文把 prompt 撑爆） */
+    private static final int DAY_RECORD_MAX_CHARS = 600;
+
     private MirrorChatProto.ChatRequest buildDailyPrompt(String summaryDate, long recordCount,
                                                          List<Map<String, Object>> typeStats,
                                                          List<Map<String, Object>> moodStats,
                                                          List<Map<String, Object>> hours,
-                                                         List<Map<String, Object>> openTodos) {
+                                                         List<Map<String, Object>> openTodos,
+                                                         List<Map<String, Object>> dayRecords) {
         StringBuilder sb = new StringBuilder();
-        sb.append("请基于以下用户 ").append(summaryDate).append(" 一天的记录数据，生成一份第一人称口吻的每日总结（200 字以内，")
+        sb.append("请基于以下用户 ").append(summaryDate).append(" 一天的记录，生成一份第一人称口吻的每日总结（200 字以内，")
                 .append("包含：做了什么、情绪基调、待办遗留、一句明天的小建议）。只陈述事实，不要主观评价。\n");
+        sb.append("以下是当天的统计概览：\n");
         sb.append("记录数：").append(recordCount).append(" 条\n");
         sb.append("类型分布：").append(joinStats(typeStats, "type", "count")).append("\n");
         sb.append("情绪分布：").append(joinStats(moodStats, "mood", "count")).append("\n");
-        sb.append("活跃时段：").append(joinStats(hours, "bucket", "count")).append("\n");
+        sb.append("活跃时段：").append(joinStats(hours, "bucket", "count")).append("\n\n");
+        sb.append("以下是当天记录的原文，请据此总结（不要声称没查到内容，内容就在下面）：\n");
+        if (dayRecords == null || dayRecords.isEmpty()) {
+            sb.append("（无原文）\n");
+        } else {
+            for (Map<String, Object> r : dayRecords) {
+                String text = String.valueOf(r.get("content") == null ? "" : r.get("content")).trim();
+                if (text.isEmpty()) {
+                    continue;
+                }
+                if (text.length() > DAY_RECORD_MAX_CHARS) {
+                    text = text.substring(0, DAY_RECORD_MAX_CHARS) + "…";
+                }
+                sb.append("- [").append(r.get("createdAt")).append("] ").append(text).append('\n');
+            }
+        }
+        sb.append('\n');
         if (!openTodos.isEmpty()) {
             sb.append("未完成待办：\n");
             for (Map<String, Object> t : openTodos) {
