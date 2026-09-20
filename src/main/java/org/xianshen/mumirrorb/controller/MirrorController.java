@@ -43,6 +43,7 @@ public class MirrorController {
 
     private final MirrorService mirrorService;
     private final ChatService chatService;
+    private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties;
 
     private UUID getCurrentUserId() {
         String userIdStr = (String) SecurityContextHolder.getContext()
@@ -222,8 +223,9 @@ public class MirrorController {
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody ChatRequestDTO dto) {
         UUID userId = getCurrentUserId();
-        // 长超时：LLM 流式回答最长 60s（7.4），加上检索与网络余量
-        SseEmitter emitter = new SseEmitter(120_000L);
+        // 长超时（chat-loop-design.md §4.3）：循环预算 + Chat 流式 + 余量，配置化以便与
+        // vault.plan-tools-timeout-ms / loop-budget-ms 一起对齐（硬编码 120s 曾小于单步超时 135s）
+        SseEmitter emitter = new SseEmitter(mirrorProperties.getSseTimeoutMs());
         // 客户端断开/超时时优雅终结，避免 Tomcat 转发 /error 触发安全链异常噪音
         emitter.onCompletion(() -> { });
         emitter.onTimeout(emitter::complete);

@@ -75,6 +75,18 @@ public class ConversationHistory {
     @Schema(description = "对话文件卡（assistant 消息）")
     private List<Map<String, Object>> vaultRefs;
 
+    /**
+     * 兜底消息标记（chat-loop-design.md §6.2）：true = 这条 assistant 消息是系统兜底文案，
+     * <b>不进后续轮次的历史上下文</b>（{@code buildChatRequest} 按此列过滤）。
+     *
+     * <p>为什么不用文案匹配：用户自己打出"没有找到相关记录"会被误跳，脆得离谱；
+     * 这一列是精准判据。已有库不会随 {@code CREATE TABLE IF NOT EXISTS} 自动加列，
+     * 需手动执行设计稿 §11 的 ALTER TABLE。</p>
+     */
+    @TableField("is_fallback")
+    @Schema(description = "是否系统兜底文案（true 不进历史上下文）", example = "false")
+    private Boolean isFallback;
+
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;
 }

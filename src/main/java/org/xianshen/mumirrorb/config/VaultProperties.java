@@ -33,11 +33,33 @@ public class VaultProperties {
     /** digest 全消化文本上限（token 近似=字符数/2，超限只索引前 N 章）；默认 5 万 token ≈ 10 万字符 */
     private int digestMaxChars = 100_000;
 
-    /** PlanTools 单次规划超时（毫秒）——原设计 3s，mimo-v2.5 响应慢改 35s */
-    private long planToolsTimeoutMs = 65_000;
+    /**
+     * 规划**单步**超时（毫秒）。chat-loop-design.md §4.3：必须 < mirror.sse-timeout-ms，
+     * 否则单步跑满时 SSE 连接会先断（改造前 135s > 120s 就是这个隐患）。
+     */
+    private long planToolsTimeoutMs = 60_000;
 
-    /** PlanTools 单次对话最多工具步数 */
+    /** PlanTools（旧单次规划路径）单次对话最多工具步数 */
     private int maxToolCalls = 2;
+
+    /**
+     * 对话 Agent 循环开关（chat-loop-design.md 裁决 0.4 的回滚闸）：
+     * false 时退回旧的 PlanTools 单次规划链路，行为与改造前一致。
+     */
+    private boolean chatLoopEnabled = true;
+
+    /** 循环步数上限（chat-loop-design.md §4.1 终止条件 3） */
+    private int maxLoopSteps = 4;
+
+    /** 循环累计耗时预算（毫秒；§4.1 终止条件 4）——规划 + 工具执行合计 */
+    private long loopBudgetMs = 120_000;
+
+    /**
+     * 规划器历史窗口（轮）。与生成答案的 ChatServiceImpl.HISTORY_ROUNDS=3 **故意不同**：
+     * 那 3 轮是为了防止模型顺着上文措辞跑偏（见 ChatServiceImpl:65-66），而规划器输出 JSON
+     * 不输出散文，该风险不成立，但指代消解（"我焦虑怎么办"接上一问）需要更多上文。
+     */
+    private int planHistoryRounds = 6;
 
     /** find_item 结果上限 */
     private int findItemLimit = 10;

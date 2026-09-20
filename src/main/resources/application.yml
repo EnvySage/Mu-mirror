@@ -100,8 +100,15 @@ vault:
   max-file-size-bytes: 20971520        # 单文件 20MB
   quota-bytes: 524288000               # 每用户配额 500MB
   digest-max-chars: 100000             # 全消化文本上限（≈5万 token）
-  plan-tools-timeout-ms: 135000         # PlanTools 规划超时（原 3s，mimo-v2.5 决策约 20s，3s 必超时降级 RAG）
-  max-tool-calls: 2                    # 单次对话最多工具步数
+  # 规划【单步】超时：必须 < mirror.sse-timeout-ms，否则单步跑满时 SSE 先断
+  # （改造前 135000 > SSE 120000，chat-loop-design.md §4.3）
+  plan-tools-timeout-ms: 60000
+  max-tool-calls: 2                    # 旧 PlanTools 单次规划路径的步数上限
+  # ↓ 对话 Agent 循环（chat-loop-design.md §4.1）
+  chat-loop-enabled: true              # 回滚闸：false 退回旧 PlanTools 单次规划
+  max-loop-steps: 4                    # 循环步数上限
+  loop-budget-ms: 120000               # 循环累计耗时预算（规划+工具执行合计）
+  plan-history-rounds: 6               # 规划器历史窗口（轮），与答案侧 HISTORY_ROUNDS=3 故意不同
   find-item-limit: 10
   search-records-limit: 20
 
@@ -114,6 +121,8 @@ mirror:
   # 对话检索相关性下限（余弦距离，越小越严；0.35≈相似度0.65，0.45≈0.55 更宽）
   # 超阈值的 chunk 直接丢弃；全部丢弃 → 回答"没有找到相关记录"（宁可不答，不乱答）
   rag-max-cosine-distance: 0.35
+  # 对话 SSE 超时：≥ loop-budget-ms(120s) + chatStream deadline(60s) + 余量
+  sse-timeout-ms: 240000
 
 # 分类语境注入（近 7 天记录摘要：B 侧查 chunks.metadata 组装，Python 侧只渲染不查库）
 record-context:

@@ -52,6 +52,11 @@ import java.util.UUID;
  *
  * <p>时间衰减：final_score = (embedding &lt;=&gt; query) × 1/(1 + 天数差/half_life)，
  * half_life 读 user_settings.rag_half_life；ExtractIntent 返回 time_range 时关衰减。</p>
+ *
+ * <p>对话 Agent 循环（chat-loop-design.md §4.2）：检索之后进 {@code ToolOrchestrator.loopAndExecute}，
+ * 规划思考逐块透传 SSE {@code thinking}、每步推累积 {@code meta.tools_used}；
+ * "材料够不够"由模型每步自己判断，不再由检索完那一刻一次性判死。
+ * {@code vault.chat-loop-enabled=false} 时退回旧 {@code planAndExecute} 单次规划（回滚路径）。</p>
  */
 @Slf4j
 @Service
@@ -68,7 +73,39 @@ public class ChatServiceImpl implements ChatService {
     private static final int QUOTE_MAX_LEN = 60;
     private static final double DEFAULT_HALF_LIFE = 30.0;
     private static final String FALLBACK_NO_ANSWER = "暂时无法回答";
-    private static final String FALLBACK_NO_RECORDS = "没有找到相关记录";
+
+    // ── 兜底文案三档（chat-loop-design.md §6.1）：替换原来恒定的"没有找到相关记录" ──
+    // 人格口径：老朋友，不是查询系统；不编内容、不客套收尾。
+    // 三个常量 public：单测直接引用，避免把文案抄第二遍（抄一遍就会有一天忘了同步）。
+
+    /** 第 1 档：零记录新用户（一条记录都没有）——情绪引导，不用"查无此记录"的口吻 */
+    public static final String FALLBACK_NEW_USER =
+            "你这边还是空的，我手上一条记录都没有，所以现在说什么都只是我在猜。"
+            + "要不先随手写一条？不用讲究，今天哪件事让你分心、心里正卡着什么，写下来就行——有了这些我才接得上你。";
+
+    /** 第 2 档：有记录但这一问没匹配上——说清"你写过东西，只是这次我没对上" */
+    public static final String FALLBACK_NO_MATCH =
+            "你是写过东西的，但这一问我这边没对上——可能当时没记，也可能你换了个说法，我没认出来。"
+            + "再给我个抓手：大概什么时候、跟谁、或者那会儿在忙哪件事。";
+
+    /** 第 3 档：情绪倾诉类——有人情味地接住，但不无证据共情（红线不破） */
+    public static final String FALLBACK_EMOTIONAL =
+            "这话我先接住了。只是翻了一圈，你最近没往我这儿留下什么，我不清楚这股劲是从哪来的，也不想凭空安慰你。"
+            + "现在心里最堵的是哪一块？说给我听，或者顺手写一条，我陪着看。";
+
+    /**
+     * 情绪倾诉类关键词表（<b>权宜之计</b>，chat-loop-design.md 第一批设计的 Java 本地土办法）。
+     *
+     * <p>判据 = 命中本表 <b>或</b> {@code intent.getMoodsList()} 非空。这是个明知粗糙的实现：
+     * 关键词表覆盖不全、moods 非空在"我上个月焦虑的记录"这类检索型问题上会误判成倾诉。
+     * 之所以先这么做：兜底文案选档只影响一句话的语气，代价可控，不值得为它再开一次 LLM 调用
+     * （规划器本身已经在循环里做语义判断了）。后续若要做准，应由 Python 侧在 ExtractIntent
+     * 里给一个显式的"倾诉 / 检索"意图位，而不是在 Java 里堆词。</p>
+     */
+    private static final List<String> EMOTIONAL_KEYWORDS = List.of(
+            "焦虑", "难受", "难过", "崩", "累", "压力", "抑郁", "烦", "emo", "撑不住",
+            "睡不着", "害怕", "慌", "孤独", "委屈", "想哭", "没意思", "迷茫", "不开心",
+            "心累", "绝望", "痛苦", "内耗", "怎么办", "怎么调整", "怎么面对");
 
     private final ChatSessionMapper sessionMapper;
     private final ConversationHistoryMapper historyMapper;
@@ -80,6 +117,10 @@ public class ChatServiceImpl implements ChatService {
     private final org.xianshen.mumirrorb.tools.ToolOrchestrator toolOrchestrator;
     private final ObjectMapper objectMapper;
     private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties;
+    /** 循环开关 / 步数 / 预算 / 规划器历史窗口（chat-loop-design.md §4） */
+    private final org.xianshen.mumirrorb.config.VaultProperties vaultProperties;
+    /** 兜底分档要判"该用户一条记录都没有"——复用 get_stats 的现成计数，不新写 SQL */
+    private final org.xianshen.mumirrorb.mapper.ProfileStatsMapper statsMapper;
 
     @Override
     @Async
@@ -98,34 +139,70 @@ public class ChatServiceImpl implements ChatService {
                     extractIntentSafely(userId, question, GlossaryProtoMapper.toProtoList(matchedTerms));
             String route = normalizeRoute(intent.getQueryType());
 
-            // 3.5 PlanTools 编排（toolcalling-vault-design.md 第 1 节）：失败/空计划 → 空列表走纯 RAG，零回归
-            List<CommonProto.ToolResult> toolResults =
-                    toolOrchestrator.planAndExecute(userId, session.getId(), question);
-            java.util.List<String> toolsUsed = toolResults.stream()
-                    .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
-                    .map(CommonProto.ToolResult::getSummary)
-                    .toList();
-            // 工具轨迹落库（[{tool, summary}]）：历史回放时前端据此还原工具轨迹芯片
-            java.util.List<Map<String, Object>> toolsUsedRecords = toolsUsedRecords(toolResults);
-            if (!toolsUsed.isEmpty()) {
-                sendEvent(emitter, "meta", Map.of(
-                        "sessionId", session.getId().toString(),
-                        "route", route.toUpperCase(),
-                        "tools_used", toolsUsed));
+            boolean loopEnabled = vaultProperties.isChatLoopEnabled();
+            List<CommonProto.ToolResult> toolResults = List.of();
+
+            // 3.5 旧 PlanTools 单次规划（chat-loop-design.md 裁决 0.4 的回滚路径）：
+            // 顺序、事件序都保持改造前原样——检索之前一次性规划，失败/空计划 → 空列表走纯 RAG
+            if (!loopEnabled) {
+                toolResults = toolOrchestrator.planAndExecute(userId, session.getId(), question);
+                java.util.List<String> toolsUsed = toolResults.stream()
+                        .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
+                        .map(CommonProto.ToolResult::getSummary)
+                        .toList();
+                if (!toolsUsed.isEmpty()) {
+                    sendEvent(emitter, "meta", Map.of(
+                            "sessionId", session.getId().toString(),
+                            "route", route.toUpperCase(),
+                            "tools_used", toolsUsed));
+                }
             }
             sendEvent(emitter, "meta", Map.of(
                     "sessionId", session.getId().toString(),
                     "route", route.toUpperCase()));
 
-            // 4. 四路检索
+            // 4. 四路检索（循环路径必须先检索：has_retrieval 要告诉规划器"检索空了"）
             List<RetrievedChunkDTO> chunks = retrieve(userId, route, intent);
             log.info("对话检索完成，路由: {}，命中: {}", route, chunks.size());
 
-            // 5. 检索为空兜底（6.6）：工具已查得实质数据时仍放行到 LLM——
-            // "我传过的开题报告在哪"这类问题本就可由 find_item 独立回答，提前 return 会把
-            // toolResults 连同 vault_refs 文件卡一起丢掉（工具白跑 + 兜底文案答非所问）。
+            // 4.5 对话 Agent 循环（chat-loop-design.md §1）：模型每步自己判断材料够不够。
+            // thinking 逐块透传（消除黑屏）、每步推累积 tools_used（芯片实时增长）；
+            // 循环内任何失败都只是提前退出并带回已有结果，不会抛到这里（零回归裁决 0.4）
+            if (loopEnabled) {
+                final String routeUpper = route.toUpperCase();
+                final UUID sid = session.getId();
+                toolResults = toolOrchestrator.loopAndExecute(userId, sid, question,
+                        planHistory(sid, userId), !chunks.isEmpty(),
+                        new org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener() {
+                            @Override
+                            public void onThinking(String delta) {
+                                // 每块立刻推，绝不攒（事件名/payload 与 streamAnswer 的 thinking 完全同构）
+                                sendEvent(emitter, "thinking", Map.of("content", delta));
+                            }
+
+                            @Override
+                            public void onStepDone(List<String> cumulativeToolSummaries) {
+                                if (cumulativeToolSummaries.isEmpty()) {
+                                    return; // 不产生空芯片事件
+                                }
+                                // 前端 meta.tools_used 覆盖式赋值 → 每次发累积全量
+                                sendEvent(emitter, "meta", Map.of(
+                                        "sessionId", sid.toString(),
+                                        "route", routeUpper,
+                                        "tools_used", cumulativeToolSummaries));
+                            }
+                        });
+            }
+            // 工具轨迹落库（[{tool, summary}]）：历史回放时前端据此还原工具轨迹芯片
+            java.util.List<Map<String, Object>> toolsUsedRecords = toolsUsedRecords(toolResults);
+
+            // 5. 兜底（chat-loop-design.md §4.2）：判据从"这次检索空且工具无料"改为
+            // "**循环跑完仍无任何材料**"——材料够不够不再由检索完那一刻一次性判死，
+            // 而是等模型把该查的都查完（循环自己会终止）才认输。hasUsableToolData 口径不变：
+            // find_item 的 {"count":0,"items":[]}（成功但没找到）照旧不算材料。
             if (chunks.isEmpty() && !hasUsableToolData(toolResults)) {
-                finishWithFallback(emitter, userId, session.getId(), route, FALLBACK_NO_RECORDS);
+                finishWithFallback(emitter, userId, session.getId(), route,
+                        fallbackText(userId, question, intent));
                 return;
             }
 
@@ -473,14 +550,8 @@ public class ChatServiceImpl implements ChatService {
             log.warn("Chat 词表注入失败（按无词表继续），用户: {}, 原因: {}", userId, e.getMessage());
         }
 
-        // 对话历史最近 3 轮（6 条），时间正序
-        List<ConversationHistory> recent = historyMapper.selectRecent(sessionId, userId, HISTORY_ROUNDS * 2);
-        Collections.reverse(recent);
-        for (ConversationHistory h : recent) {
-            builder.addHistory(MirrorChatProto.ChatMessage.newBuilder()
-                    .setRole(h.getRole())
-                    .setContent(h.getContent()));
-        }
+        // 对话历史最近 3 轮（6 条），时间正序；兜底文案不进上下文（§6.2）
+        builder.addAllHistory(recentHistory(sessionId, userId, HISTORY_ROUNDS));
 
         for (RetrievedChunkDTO c : chunks) {
             builder.addChunks(MirrorChatProto.RetrievedChunk.newBuilder()
@@ -505,7 +576,8 @@ public class ChatServiceImpl implements ChatService {
             sendEvent(emitter, "delta", Map.of("content", fallbackText));
         } catch (Exception ignored) {
         }
-        insertMessage(userId, sessionId, "assistant", fallbackText, null);
+        // is_fallback=true：这条不进后续轮次的历史上下文（§6.2，靠列而不是文案匹配）
+        insertMessage(userId, sessionId, "assistant", fallbackText, null, null, null, true);
         touchSession(sessionId);
         try {
             sendEvent(emitter, "done", Map.of(
@@ -591,13 +663,25 @@ public class ChatServiceImpl implements ChatService {
 
     private void insertMessage(UUID userId, UUID sessionId, String role, String content,
                                List<Map<String, Object>> sources) {
-        insertMessage(userId, sessionId, role, content, sources, null, null);
+        insertMessage(userId, sessionId, role, content, sources, null, null, false);
     }
 
     private void insertMessage(UUID userId, UUID sessionId, String role, String content,
                                List<Map<String, Object>> sources,
                                List<Map<String, Object>> toolsUsed,
                                List<Map<String, Object>> vaultRefs) {
+        insertMessage(userId, sessionId, role, content, sources, toolsUsed, vaultRefs, false);
+    }
+
+    /**
+     * @param isFallback true = 系统兜底文案，落 {@code conversation_history.is_fallback}，
+     *                   后续轮次加载历史时跳过（§6.2）
+     */
+    private void insertMessage(UUID userId, UUID sessionId, String role, String content,
+                               List<Map<String, Object>> sources,
+                               List<Map<String, Object>> toolsUsed,
+                               List<Map<String, Object>> vaultRefs,
+                               boolean isFallback) {
         ConversationHistory message = ConversationHistory.builder()
                 .sessionId(sessionId)
                 .userId(userId)
@@ -606,9 +690,94 @@ public class ChatServiceImpl implements ChatService {
                 .sources(sources)
                 .toolsUsed(toolsUsed)
                 .vaultRefs(vaultRefs)
+                .isFallback(isFallback)
                 .createdAt(OffsetDateTime.now(ZONE))
                 .build();
         historyMapper.insert(message);
+    }
+
+    /**
+     * 历史消息注入（正序），<b>过滤掉 is_fallback=true 的 assistant 消息</b>（§6.2）。
+     *
+     * <p>为什么不做文案匹配：用户自己打出"没有找到相关记录"这句话会被误跳。列是精准判据。</p>
+     *
+     * @param rounds 轮数（× 2 = 消息条数）
+     */
+    private List<MirrorChatProto.ChatMessage> recentHistory(UUID sessionId, UUID userId, int rounds) {
+        List<ConversationHistory> recent =
+                new ArrayList<>(historyMapper.selectRecent(sessionId, userId, rounds * 2));
+        Collections.reverse(recent); // SQL 倒序取 N 条 → 反转成时间正序
+        List<MirrorChatProto.ChatMessage> messages = new ArrayList<>(recent.size());
+        for (ConversationHistory h : recent) {
+            if ("assistant".equals(h.getRole()) && Boolean.TRUE.equals(h.getIsFallback())) {
+                continue; // 兜底文案不污染上下文（模型会顺着"没有找到"继续说没有）
+            }
+            messages.add(MirrorChatProto.ChatMessage.newBuilder()
+                    .setRole(nullToEmpty(h.getRole()))
+                    .setContent(nullToEmpty(h.getContent()))
+                    .build());
+        }
+        return messages;
+    }
+
+    /**
+     * 规划器历史窗口（{@code vault.plan-history-rounds}=6）——与答案侧 {@code HISTORY_ROUNDS}=3
+     * 是<b>两个独立窗口</b>，故意不同：那 3 轮防的是模型顺着上文措辞跑偏（见类头 :65-66 注释），
+     * 规划器输出 JSON 不输出散文，该风险不成立，但"我焦虑怎么办"这类指代消解需要更多上文。
+     */
+    private List<MirrorChatProto.ChatMessage> planHistory(UUID sessionId, UUID userId) {
+        try {
+            return recentHistory(sessionId, userId, Math.max(vaultProperties.getPlanHistoryRounds(), 1));
+        } catch (Exception e) {
+            log.warn("规划器历史加载失败（按空历史继续），会话: {}, 原因: {}", sessionId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 兜底文案选档（chat-loop-design.md §6.1）：零记录新用户 / 情绪倾诉 / 有记录但没匹配上。
+     *
+     * <p>"零记录"复用 get_stats 的现成计数 {@code countUserRecords(userId, null, null)}（全时段），
+     * 不新写 SQL；计数查失败时按"有记录"处理——宁可说"没对上"，也不要对着写过几百条的老用户
+     * 说"你这边还是空的"。</p>
+     */
+    private String fallbackText(UUID userId, String question,
+                                MirrorChatProto.ExtractIntentResponse intent) {
+        long total;
+        try {
+            total = statsMapper.countUserRecords(userId, null, null);
+        } catch (Exception e) {
+            log.warn("兜底分档记录计数失败（按有记录处理），用户: {}, 原因: {}", userId, e.getMessage());
+            total = -1;
+        }
+        if (total == 0) {
+            // 零记录新用户：连"没匹配上"都谈不上，直接情绪引导 + 邀请写第一条
+            return FALLBACK_NEW_USER;
+        }
+        if (isEmotionalTalk(question, intent)) {
+            return FALLBACK_EMOTIONAL;
+        }
+        return FALLBACK_NO_MATCH;
+    }
+
+    /**
+     * 情绪倾诉类判定（<b>权宜之计</b>：见 {@link #EMOTIONAL_KEYWORDS} 注释）——
+     * 关键词表命中 或 ExtractIntent 给出了 moods。
+     */
+    private boolean isEmotionalTalk(String question, MirrorChatProto.ExtractIntentResponse intent) {
+        if (intent != null && !intent.getMoodsList().isEmpty()) {
+            return true;
+        }
+        if (question == null || question.isBlank()) {
+            return false;
+        }
+        String q = question.toLowerCase();
+        for (String kw : EMOTIONAL_KEYWORDS) {
+            if (q.contains(kw)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 工具轨迹落库形态 [{tool, summary}]（前端 normalizeToolsUsed 兼容对象/字符串两种形态） */

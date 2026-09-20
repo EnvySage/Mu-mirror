@@ -12,6 +12,9 @@ service MirrorChat {
   // 工具计划（toolcalling-vault-design.md 第 1/6 节）：LLM 按 JSON 约定输出 ≤2 步工具调用计划；
   // 失败/超时(3s)/空计划 → B 侧跳过走现有 RAG，零回归
   rpc PlanTools(PlanToolsRequest) returns (PlanToolsReply);
+  // 对话 Agent 循环（chat-loop-design.md §3）：Java 驱动，每步调一次，带上已执行结果；
+  // 服务端流式，先吐 thinking 增量（B 透传 SSE thinking，等待可感知），终帧给 calls/done
+  rpc PlanNextStep(PlanNextStepRequest) returns (stream PlanStepChunk);
 }
 
 // 工具计划请求
@@ -89,4 +92,31 @@ message Source {
   // Python 只回"回答里被引用到的"子集，编号会跳号——前端必须按 n 定位来源，
   // 不能用数组下标（sources[n-1] 在引用 [5] 而数组只有 2 项时会落空）。
   int32 n = 4;
+}
+
+// ── 对话 Agent 循环消息（chat-loop-design.md §3）──
+// 循环状态（步数/已执行结果/耗时预算）全在 Java，Python 每次只做单步决策 → 无状态铁律不破
+
+message PlanNextStepRequest {
+  string question = 1;                       // 用户原始提问
+  repeated GlossaryTerm glossary = 2;        // confirmed 个人词典（与对话同口径）
+  repeated ToolSpec tools = 3;               // Java 注册表快照（ToolSpec 定义在 common.proto）
+  LlmConfig llm_config = 4;
+  // 对话历史（正序）。窗口用 vault.plan-history-rounds=6，与答案侧 HISTORY_ROUNDS=3 故意不同：
+  // 那 3 轮是防模型顺着上文措辞跑偏（ChatServiceImpl:65-66），规划器输出 JSON 无此风险，
+  // 但"我焦虑怎么办"这类指代消解需要更多上文
+  repeated ChatMessage history = 5;
+  repeated ToolResult previous_results = 6;  // 已执行步骤的结果（循环的核心输入；首步为空）
+  int32 step = 7;                            // 第几步（1-based）
+  int32 max_steps = 8;                       // 步数预算，prompt 告知模型"还剩几步"
+  bool has_retrieval = 9;                    // RAG 本轮是否有命中（false = 检索空，让模型知道）
+}
+
+message PlanStepChunk {
+  // 思考增量：Python 用 llm.chat_stream() 捕获（Anthropic thinking_delta /
+  // OpenAI 系 reasoning_content），B 逐块转发 SSE thinking。仅非空才发
+  optional string thinking = 1;
+  repeated PlannedCall calls = 2;  // 仅 final=true 时有效；空 + done=true 表示"材料够了"
+  bool done = 3;                   // 仅 final=true 时有效：true = 别再循环
+  bool final = 4;                  // 本块是终帧（calls/done 才可读）
 }

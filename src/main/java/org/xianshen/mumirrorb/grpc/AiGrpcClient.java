@@ -594,6 +594,46 @@ public class AiGrpcClient {
     }
 
     /**
+     * 单步规划（对话 Agent 循环，chat-loop-design.md §3/§4.1）
+     *
+     * <p>服务端流式：Python 先逐块吐 {@code thinking} 增量（B 侧透传 SSE thinking，
+     * 消除"黑屏 20s"），最后吐一个 {@code final=true} 的终帧带 {@code calls}/{@code done}。
+     * 循环状态（步数/已执行结果/预算）全在 Java，Python 每次只做单步决策（无状态铁律）。</p>
+     *
+     * <p>deadline = 传入的 {@code timeoutMs}，即 {@code vault.plan-tools-timeout-ms}
+     * 的<b>单步</b>语义（§4.3：必须 &lt; mirror.sse-timeout-ms）。整轮循环的累计预算
+     * 由调用方（ToolOrchestrator）用 {@code vault.loop-budget-ms} 自己掐表，不在这里管。</p>
+     *
+     * <p>Python 未上线 / 流中断 → 抛 StatusRuntimeException，调用方按终止条件 6
+     * 不重试、带着已有结果退出循环（零回归裁决 0.4）。</p>
+     *
+     * @param userId    用户 ID（llm_config 在此补齐）
+     * @param request   已组装请求（question/glossary/tools/history/previous_results/step/max_steps/has_retrieval）
+     * @param timeoutMs 规划<b>单步</b>超时毫秒
+     * @return PlanStepChunk 流迭代器（逐块消费；final=true 的块才可读 calls/done）
+     */
+    public Iterator<MirrorChatProto.PlanStepChunk> planNextStep(UUID userId,
+                                                                MirrorChatProto.PlanNextStepRequest request,
+                                                                long timeoutMs) {
+        log.info("gRPC 调用 PlanNextStep(stream)，用户: {}, 第 {}/{} 步, 已有结果 {} 条, 检索命中: {}",
+                userId, request.getStep(), request.getMaxSteps(),
+                request.getPreviousResultsCount(), request.getHasRetrieval());
+        try {
+            // llm_config 注入口径与 planTools 完全一致（用户的 provider/model/key 由 B 侧统一补齐）
+            MirrorChatProto.PlanNextStepRequest enriched = request.toBuilder()
+                    .setLlmConfig(buildLlmConfig(userId))
+                    .build();
+            return chatStub
+                    .withDeadlineAfter(Math.max(timeoutMs, 100), TimeUnit.MILLISECONDS)
+                    .planNextStep(enriched);
+        } catch (StatusRuntimeException e) {
+            log.info("gRPC PlanNextStep 调用失败（调用方带着已有结果退出循环）: status={}, 用户: {}",
+                    e.getStatus(), userId);
+            throw e;
+        }
+    }
+
+    /**
      * 词条候选抽取（个人词典，lexicon-design.md 第 3 节）
      *
      * <p>Python 侧 ExtractTerms RPC（第 7 套 prompt）由 AI Agent 本轮实现；
