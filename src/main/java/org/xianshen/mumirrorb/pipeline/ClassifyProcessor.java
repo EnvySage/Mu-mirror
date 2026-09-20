@@ -74,8 +74,10 @@ public class ClassifyProcessor implements RecordProcessor {
         try {
             // 1. 调用 gRPC 分类服务（携带 confirmed 个人词典，lexicon-design.md 第 4 节——
             //    Classify 是最大增量注入点：错误在分类现场修最便宜）
+            //    参照日期 = record.created_at 的日期部分（不是 now()），供 AI 消解"今天/明天"等相对时间词
+            String referenceDate = TimeSubstitutionApplier.referenceDateOf(record.getCreatedAt());
             RecordProcessorProto.ClassifyResponse response =
-                    aiGrpcClient.classify(record.getUserId(), content, true);
+                    aiGrpcClient.classify(record.getUserId(), content, true, referenceDate);
 
             // 2. 检查是否跳过
             if (response.getSkip()) {
@@ -97,8 +99,11 @@ public class ClassifyProcessor implements RecordProcessor {
             for (int i = 0; i < items.size(); i++) {
                 RecordProcessorProto.ClassifyItem item = items.get(i);
 
-                // segment 片段（原文）
-                segments.add(item.getContent());
+                // segment 片段：AI 拆出的原文 + 相对时间词消解（"今天" → "9月19日"）。
+                // record.content（用户输入原文）全程不动；segment 是展示/embedding 文本，
+                // 用户在审核页可见可改。消解早于 embedding（confirm 时才 embed），故存量无需回填。
+                segments.add(TimeSubstitutionApplier.apply(item.getContent(),
+                        item.getTimeSubstitutionsList()));
 
                 // chunk 元数据（含 taskStatus，裁决 #16）
                 chunkMetadataList.add(ClassifyItemConverter.toMetadata(item));
@@ -126,4 +131,5 @@ public class ClassifyProcessor implements RecordProcessor {
             throw new RuntimeException("AI 分类服务调用失败: " + e.getStatus().getDescription(), e);
         }
     }
+
 }

@@ -16,6 +16,7 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pipeline.ClassifyItemConverter;
+import org.xianshen.mumirrorb.pipeline.TimeSubstitutionApplier;
 import org.xianshen.mumirrorb.service.ChunkService;
 
 import java.time.OffsetDateTime;
@@ -176,12 +177,18 @@ public class ChunkServiceImpl implements ChunkService {
         // 3. 同步调用单段分类（single=true）回填 metadata；失败不阻断（metadata 留空）
         try {
             // 新 chunk 尚未入库，排除所属 record 既有 chunk（避免同记录标题自污染）
-            var response = aiGrpcClient.classifySingle(userId, segmentText, recordId);
+            // 参照日期取所属 record 的 created_at（不是 now()）：隔天新增不能把"今天"锚错
+            String referenceDate = TimeSubstitutionApplier.referenceDateOf(record.getCreatedAt());
+            var response = aiGrpcClient.classifySingle(userId, segmentText, recordId, referenceDate);
             if (!response.getSkip() && response.getItemsCount() > 0) {
-                Map<String, Object> metadata = ClassifyItemConverter.toMetadata(response.getItems(0));
+                var item = response.getItems(0);
+                Map<String, Object> metadata = ClassifyItemConverter.toMetadata(item);
+                // 相对时间消解（"今天" → "9月19日"）：只改 segment，chunk.content 保持原文
+                String resolved = TimeSubstitutionApplier.apply(segmentText, item.getTimeSubstitutionsList());
                 chunk.setMetadata(metadata);
-                // AI 刚按当前文本分类过：写入当时文本，confirm 时无需再补
-                chunk.setClassifiedSegment(segmentText);
+                chunk.setSegment(resolved);
+                // AI 刚按当前文本分类过：写入当时文本（消解后），confirm 时无需再补
+                chunk.setClassifiedSegment(resolved);
                 log.info("新增片段分类回填成功，记录ID: {}", recordId);
             } else {
                 log.warn("新增片段分类跳过/空结果，metadata 留空，confirm 时兜底。记录ID: {}", recordId);

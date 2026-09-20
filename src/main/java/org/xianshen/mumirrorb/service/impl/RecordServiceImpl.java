@@ -23,6 +23,7 @@ import org.xianshen.mumirrorb.pojo.VO.CalendarDayVO;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.pipeline.ClassifyItemConverter;
+import org.xianshen.mumirrorb.pipeline.TimeSubstitutionApplier;
 import org.xianshen.mumirrorb.service.RecordService;
 
 import org.xianshen.mumirrorb.pipeline.event.RecordCreatedEvent;
@@ -240,6 +241,8 @@ public class RecordServiceImpl implements RecordService {
         // 4. 补分类（设计文档 5.4 核心裁决）：classified_segment IS NULL 的 Chunk
         //    = 文本从未被分类过，或已被用户改过 → 单段分类（single=true，禁止拆分）回填 metadata
         //    失败不阻断：保留旧 metadata 继续（5.6）
+        //    参照日期取所属 record 的 created_at（不是 now()）：隔天来确认时"今天"早已不是今天
+        String referenceDate = TimeSubstitutionApplier.referenceDateOf(record.getCreatedAt());
         for (Chunk chunk : chunks) {
             if (chunk.getClassifiedSegment() != null) {
                 continue; // 文本未变（或只改了标签），直接入库，不调 LLM
@@ -248,11 +251,16 @@ public class RecordServiceImpl implements RecordService {
             try {
                 // 传入 chunk 所属 recordId：组装近 7 天语境时排除该 record 自身旧标题，防自污染
                 RecordProcessorProto.ClassifyResponse response =
-                        aiGrpcClient.classifySingle(userId, text, chunk.getRecordId());
+                        aiGrpcClient.classifySingle(userId, text, chunk.getRecordId(), referenceDate);
                 if (!response.getSkip() && response.getItemsCount() > 0) {
-                    Map<String, Object> metadata = ClassifyItemConverter.toMetadata(response.getItems(0));
+                    RecordProcessorProto.ClassifyItem item = response.getItems(0);
+                    Map<String, Object> metadata = ClassifyItemConverter.toMetadata(item);
+                    // 相对时间消解（"今天" → "9月19日"）：只改 segment（展示/embedding 文本），
+                    // chunk.content 原文不动；classified_segment 同步记替换后文本，与"文本是否变更"判定一致
+                    String resolved = TimeSubstitutionApplier.apply(text, item.getTimeSubstitutionsList());
                     chunk.setMetadata(metadata);
-                    chunk.setClassifiedSegment(text);
+                    chunk.setSegment(resolved);
+                    chunk.setClassifiedSegment(resolved);
                     chunkMapper.updateById(chunk);
                     log.info("补分类完成，ChunkID: {}", chunk.getId());
                 } else {

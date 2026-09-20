@@ -118,7 +118,22 @@ public class AiGrpcClient {
      * @return 分类结果（标题、摘要、标签等）
      */
     public RecordProcessorProto.ClassifyResponse classify(UUID userId, String content, boolean withGlossary) {
-        log.info("gRPC 调用 Classify，用户: {}, 内容长度: {}, 词表: {}", userId, content.length(), withGlossary);
+        return classify(userId, content, withGlossary, null);
+    }
+
+    /**
+     * 调用 AI 分类服务（可选携带个人词典 + 相对时间参照日期）
+     *
+     * @param withGlossary  true=携带 confirmed top 30 词表（管道主分类）
+     * @param referenceDate 相对时间消解的参照日期 yyyy-MM-dd（取 record.created_at 的日期部分，
+     *                      <b>不是 now()</b>——隔天确认时不能把"今天"锚错）；
+     *                      null = 不要求 AI 做时间消解（退化为本次改动前的旧行为）
+     * @return 分类结果（标题、摘要、标签、时间词替换表等）
+     */
+    public RecordProcessorProto.ClassifyResponse classify(UUID userId, String content,
+                                                          boolean withGlossary, String referenceDate) {
+        log.info("gRPC 调用 Classify，用户: {}, 内容长度: {}, 词表: {}, 参照日期: {}",
+                userId, content.length(), withGlossary, referenceDate);
         try {
             CommonProto.LlmConfig llmConfig = buildLlmConfig(userId);
             log.debug("Classify LLM 配置: provider={}, model={}, protocol={}",
@@ -127,6 +142,9 @@ public class AiGrpcClient {
             RecordProcessorProto.ClassifyRequest.Builder requestBuilder = RecordProcessorProto.ClassifyRequest.newBuilder()
                     .setContent(content)
                     .setLlmConfig(llmConfig);
+            if (referenceDate != null && !referenceDate.isBlank()) {
+                requestBuilder.setReferenceDate(referenceDate);
+            }
             if (withGlossary) {
                 // 词表组装失败按无词表继续（词表错了退化为普通分类，不是灾难 #0.2）
                 requestBuilder.addAllGlossary(groundingTerms(userId));
@@ -194,17 +212,34 @@ public class AiGrpcClient {
      * @return 分类结果（应恰好 1 条；异常时抛出，由调用方决定是否阻断）
      */
     public RecordProcessorProto.ClassifyResponse classifySingle(UUID userId, String content, Long excludeRecordId) {
-        log.info("gRPC 调用 Classify(single=true)，用户: {}, 内容长度: {}, 排除记录: {}",
-                userId, content.length(), excludeRecordId);
+        return classifySingle(userId, content, excludeRecordId, null);
+    }
+
+    /**
+     * 调用 AI 分类服务（单段模式，可排除指定 record 自身，可带参照日期）
+     *
+     * @param excludeRecordId 组装 recent_context 时排除的 recordId（可空）
+     * @param referenceDate   相对时间消解参照日期 yyyy-MM-dd（该 chunk 所属 record 的 created_at
+     *                        日期部分；null = 不做时间消解）
+     * @return 分类结果（应恰好 1 条；异常时抛出，由调用方决定是否阻断）
+     */
+    public RecordProcessorProto.ClassifyResponse classifySingle(UUID userId, String content,
+                                                                Long excludeRecordId, String referenceDate) {
+        log.info("gRPC 调用 Classify(single=true)，用户: {}, 内容长度: {}, 排除记录: {}, 参照日期: {}",
+                userId, content.length(), excludeRecordId, referenceDate);
         try {
             CommonProto.LlmConfig llmConfig = buildLlmConfig(userId);
 
-            RecordProcessorProto.ClassifyRequest request = RecordProcessorProto.ClassifyRequest.newBuilder()
+            RecordProcessorProto.ClassifyRequest.Builder requestBuilder = RecordProcessorProto.ClassifyRequest.newBuilder()
                     .setContent(content)
                     .setLlmConfig(llmConfig)
                     .setSingle(true)
-                    .addAllRecentContext(recentContextHints(userId, excludeRecordId))
-                    .build();
+                    .addAllRecentContext(recentContextHints(userId, excludeRecordId));
+            if (referenceDate != null && !referenceDate.isBlank()) {
+                requestBuilder.setReferenceDate(referenceDate);
+            }
+
+            RecordProcessorProto.ClassifyRequest request = requestBuilder.build();
 
             RecordProcessorProto.ClassifyResponse response = recordStub
                     .withDeadlineAfter(180, TimeUnit.SECONDS)

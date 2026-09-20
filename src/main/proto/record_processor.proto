@@ -24,6 +24,21 @@ message ClassifyRequest {
   repeated GlossaryTerm glossary = 4; // 用户个人词典（confirmed top 30；注入点：分类现场修个人指代最便宜）
   repeated TodoHint open_todos = 5;   // 用户未完成待办清单（todo-registry 判别期；B 侧查 registry，最近优先 ≤20 条）
   repeated RecentHint recent_context = 6; // 近 7 天记录摘要（B 侧查 chunks.metadata，最近优先 ≤20 条；指代消解语境）
+  // 相对时间消解的参照日期（yyyy-MM-dd，Asia/Shanghai）——即"这条记录里的『今天』是几号"。
+  // B 侧取 record.created_at 的日期部分（不是 now()：隔天确认/审核补分类时不能锚错）。
+  // 未设计补记功能，故不存在"写入日期 ≠ 日记本体日期"的情况，直接取 created_at 即可。
+  // 周计算口径：一周从周一起算（"本周一"= 参照日期所在周的周一）。
+  string reference_date = 7;
+}
+
+// 时间词替换项（LLM 判别输出）：把片段里的相对时间词替换成绝对日期
+//
+// 分工：AI 负责"识别 + 计算"，B 侧负责"执行替换"——LLM 不直接输出改写后的全文，
+// 避免它顺手润色掉非时间内容（segment 要给用户看、要进 embedding，改坏了代价大）。
+// 校验与替换规则见 TimeSubstitutionApplier（脏值丢弃 → 不替换，绝不阻断分类）。
+message TimeSubstitution {
+  string original = 1;   // 片段原文里的时间词，如"大后天"（必须原样出现在文本中）
+  string resolved = 2;   // 消解后的日期文本，如"9月22日" / "2026-09-22"
 }
 
 // 近期语境条目（近 7 天记录摘要）：B 侧查 chunks.metadata 注入；Python 侧只渲染不查库
@@ -87,4 +102,5 @@ message ClassifyItem {
   TaskStatus status = 6;            // 状态（仅待办/计划类）
   repeated string keywords = 7;     // 关键词 3-5 个
   TodoRef refers_to_todo = 8;       // 待办引用（todo-registry 判别期；无引用不设值）
+  repeated TimeSubstitution time_substitutions = 9; // 本片段内的时间词替换（相对时间 → 绝对日期；无则不设值）
 }
