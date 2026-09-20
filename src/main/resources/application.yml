@@ -8,9 +8,11 @@ spring:
   application:
     name: Mu-mirror-B
 
-  # 激活的配置文件（默认开发环境）
+  # 激活的配置文件（打包产物默认走生产配置）
+  # 本地开发如需 dev：IDEA 运行配置的 Active profiles 填 dev，
+  # 或启动时加 --spring.profiles.active=dev
   profiles:
-    active: dev
+    active: prod
 
   servlet:
     multipart:
@@ -59,10 +61,13 @@ spring:
 
 # MyBatis-Plus 配置
 mybatis-plus:
+  # 驼峰映射等公共配置
   configuration:
     map-underscore-to-camel-case: true
     default-enum-type-handler: org.apache.ibatis.type.EnumTypeHandler
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 注意：不要在公共配置里开 SQL 日志（log-impl）
+    # 它会把 SQL、参数、以及查询结果的每一行（含用户日记原文）全部打印出来，
+    # 既淹没日志又泄露隐私。开发环境需要看 SQL 的，见 application-dev.yml。
   global-config:
     db-config:
       id-type: input

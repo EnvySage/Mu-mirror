@@ -1,4 +1,10 @@
 # ==================== 开发环境配置 ====================
+# 开发环境打印 SQL，方便本地调试。
+# 注意：会把查询结果的每一行都打出来，仅限本地，切勿用于生产。
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
 spring:
   # 数据源配置（开发环境）
   datasource:
