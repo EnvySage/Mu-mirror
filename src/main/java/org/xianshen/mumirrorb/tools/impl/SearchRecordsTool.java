@@ -40,24 +40,54 @@ public class SearchRecordsTool implements ToolExecutor {
     @Override
     public ToolDefinition definition() {
         return new ToolDefinition(name(),
-                "按条件检索用户的日记记录片段。适合\"我最近做了什么/上周学了什么\"类问题。不传 query 则按时间倒序取最近记录。",
-                "{\"query\": \"关键词（可选）\", \"days\": 7, \"moods\": [\"happy\"], \"content_type\": \"learning|todo|...\", \"limit\": 10}");
+                "按条件检索用户的日记记录片段。适合\"我最近做了什么/上周学了什么/某一天做了什么\"类问题。"
+                        + "问某一天或某段日期时用 date 或 date_from/date_to（按记录时间精确过滤，把那几天的记录全部取回，"
+                        + "此时不要再加 query）。query 是逐字匹配，只写原文里大概率出现的短词（如\"琴\"\"吉他\"），"
+                        + "不要写概括性的词组（如\"弹曲子\"）。不传 query 则按时间倒序取记录。",
+                "{\"date\": \"2026-09-12（查某一天，可选）\", \"date_from\": \"2026-09-01（可选）\", "
+                        + "\"date_to\": \"2026-09-07（可选，含当天）\", \"query\": \"逐字匹配的短词（可选）\", "
+                        + "\"days\": 7, \"moods\": [\"happy\"], \"content_type\": \"learning|todo|...\", \"limit\": 10}");
     }
 
     @Override
     public ToolExecutionResult execute(UUID userId, Map<String, Object> args) {
         int days = intOf(args.get("days"), 0);
-        int limit = Math.min(intOf(args.get("limit"), 10), MAX_LIMIT);
         String contentType = strOf(args.get("content_type"));
-        OffsetDateTime since = days > 0
-                ? LocalDate.now(ZONE).minusDays(days).atStartOfDay(ZONE).toOffsetDateTime() : null;
+
+        // 按日期精确过滤（2026-09-21 联调：问"十二号弹了什么曲子"，规划器想把那天的记录全拉出来看，
+        // 但工具只有 days=最近N天，表达不了"某一天"，只好拿 query 逐字匹配碰运气，0 条）。
+        // date 优先于 date_from/date_to；有日期时 days 不再生效。区间含首尾两天（SQL 左闭右开，故 to+1 天）
+        LocalDate from = dateOf(args.get("date_from"));
+        LocalDate to = dateOf(args.get("date_to"));
+        LocalDate day = dateOf(args.get("date"));
+        if (day != null) {
+            from = day;
+            to = day;
+        }
+        if (from != null && to != null && from.isAfter(to)) {
+            LocalDate t = from;
+            from = to;
+            to = t;
+        }
+        boolean byDate = from != null || to != null;
+        OffsetDateTime since;
+        OffsetDateTime until = null;
+        if (byDate) {
+            since = from == null ? null : from.atStartOfDay(ZONE).toOffsetDateTime();
+            until = to == null ? null : to.plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
+        } else {
+            since = days > 0
+                    ? LocalDate.now(ZONE).minusDays(days).atStartOfDay(ZONE).toOffsetDateTime() : null;
+        }
+        // 按日期查的意图是"那天的都要"，默认给到上限，不按最近 10 条截
+        int limit = Math.min(intOf(args.get("limit"), byDate ? MAX_LIMIT : 10), MAX_LIMIT);
 
         // moods 过滤：definition() 的 args_schema 一直对规划器宣称支持 moods，但此前执行时
         // 写死传 null——2026-09-21 联调实测 moods=["anxious"] 返回了 30 天全部 12 条（其中只有 1 条标了焦虑）
         List<String> moods = listOf(args.get("moods"));
         List<RetrievedChunkDTO> rows = searchMapper.searchStructured(
                 userId, emptyToNull(contentType), moods.isEmpty() ? null : moods, toPgTextArray(moods),
-                since, null, limit);
+                since, until, limit);
 
         String query = strOf(args.get("query"));
         if (query != null && !query.isBlank()) {
@@ -80,11 +110,28 @@ public class SearchRecordsTool implements ToolExecutor {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("count", items.size());
         payload.put("records", items);
+        // 按日期查时把区间写进 summary：回答模型据此知道"这就是那天的全部记录"，前端芯片也看得出查的是哪天
+        String range = !byDate ? "" : (from != null && from.equals(to)) ? "（" + from + "）"
+                : "（" + (from == null ? "…" : from) + "~" + (to == null ? "…" : to) + "）";
         return ToolExecutionResult.builder()
                 .success(true)
-                .summary(name() + ":" + items.size() + "条")
+                .summary(name() + ":" + items.size() + "条" + range)
                 .payload(payload)
                 .build();
+    }
+
+    /** date/date_from/date_to：只认 yyyy-MM-dd（取前 10 位，容忍带时间的写法）；解析失败视为未传 */
+    static LocalDate dateOf(Object o) {
+        String s = strOf(o);
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        String t = s.trim();
+        try {
+            return LocalDate.parse(t.length() > 10 ? t.substring(0, 10) : t);
+        } catch (java.time.format.DateTimeParseException e) {
+            return null;
+        }
     }
 
     /** moods 参数：接受 JSON 数组或逗号分隔字符串；统一小写去空（13 情绪英文小写，同 common.proto） */
