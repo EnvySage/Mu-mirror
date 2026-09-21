@@ -52,8 +52,12 @@ public class SearchRecordsTool implements ToolExecutor {
         OffsetDateTime since = days > 0
                 ? LocalDate.now(ZONE).minusDays(days).atStartOfDay(ZONE).toOffsetDateTime() : null;
 
+        // moods 过滤：definition() 的 args_schema 一直对规划器宣称支持 moods，但此前执行时
+        // 写死传 null——2026-09-21 联调实测 moods=["anxious"] 返回了 30 天全部 12 条（其中只有 1 条标了焦虑）
+        List<String> moods = listOf(args.get("moods"));
         List<RetrievedChunkDTO> rows = searchMapper.searchStructured(
-                userId, emptyToNull(contentType), null, null, since, null, limit);
+                userId, emptyToNull(contentType), moods.isEmpty() ? null : moods, toPgTextArray(moods),
+                since, null, limit);
 
         String query = strOf(args.get("query"));
         if (query != null && !query.isBlank()) {
@@ -81,6 +85,39 @@ public class SearchRecordsTool implements ToolExecutor {
                 .summary(name() + ":" + items.size() + "条")
                 .payload(payload)
                 .build();
+    }
+
+    /** moods 参数：接受 JSON 数组或逗号分隔字符串；统一小写去空（13 情绪英文小写，同 common.proto） */
+    static List<String> listOf(Object o) {
+        List<String> out = new ArrayList<>();
+        if (o instanceof List<?> list) {
+            for (Object v : list) {
+                String s = strOf(v);
+                if (s != null && !s.isBlank()) {
+                    out.add(s.trim().toLowerCase());
+                }
+            }
+        } else if (o != null) {
+            for (String s : String.valueOf(o).split(",")) {
+                if (!s.isBlank()) {
+                    out.add(s.trim().toLowerCase());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 同 ChatServiceImpl#toPgTextArray（searchStructured 的 moodArray 参数口径） */
+    static String toPgTextArray(List<String> moods) {
+        if (moods == null || moods.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < moods.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append('"').append(moods.get(i).replace("\"", "")).append('"');
+        }
+        return sb.append('}').toString();
     }
 
     static String preview(String s, int max) {

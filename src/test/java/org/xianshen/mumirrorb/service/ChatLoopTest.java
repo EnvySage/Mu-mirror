@@ -145,21 +145,38 @@ class ChatLoopTest {
     // ==================== 终止条件 1：done == true ====================
 
     @Test
-    @DisplayName("终止 1：终帧 done=true → 立刻停，且该帧带的 calls 不执行（模型说材料够了）")
+    @DisplayName("终止 1：终帧 done=true 且 calls 为空 → 立刻停，不再规划")
     void stops_whenDoneTrue() throws Exception {
         stubTool("get_stats", "get_stats:记录12条/30天", Map.of("record_count", 12));
-        stubTool("search_records", "search_records:3条", Map.of("count", 3));
         stubStreams(
                 List.of(finalFrame(false, "get_stats", "{\"days\":30}")),
-                // done=true 但仍带 calls：以 done 为准，search_records 不该被执行
-                List.of(finalFrame(true, "search_records", "{\"query\":\"焦虑\"}")));
+                List.of(finalFrame(true)));
 
         List<CommonProto.ToolResult> results = run();
 
         assertEquals(1, results.size());
         assertEquals("get_stats", results.get(0).getTool());
         verify(aiGrpcClient, times(2)).planNextStep(eq(USER_ID), any(), anyLong());
-        assertFalse(timeline.contains("exec:search_records"), "done=true 的终帧里的 calls 不应被执行");
+    }
+
+    @Test
+    @DisplayName("终止 1'：done=true 且带 calls → 执行完这最后一批就收尾，不再花一轮 LLM 说\"够了\"")
+    void doneWithCalls_executesFinalBatchThenStops() throws Exception {
+        stubTool("get_stats", "get_stats:记录12条/30天", Map.of("record_count", 12));
+        stubTool("search_records", "search_records:3条", Map.of("count", 3));
+        // 第 1 步就给出"最后一批"：两个互不依赖的工具 + done=true
+        stubStreams(List.of(finalFrame(true,
+                "get_stats", "{\"days\":30}",
+                "search_records", "{\"moods\":[\"anxious\"],\"days\":30}")));
+
+        List<CommonProto.ToolResult> results = run();
+
+        assertEquals(2, results.size(), "最后一批两个工具都应执行");
+        assertTrue(timeline.contains("exec:get_stats"));
+        assertTrue(timeline.contains("exec:search_records"));
+        // 关键：只规划了 1 次——没有第 2 轮 LLM 调用
+        verify(aiGrpcClient, times(1)).planNextStep(eq(USER_ID), any(), anyLong());
+        verify(auditService, times(2)).record(eq(USER_ID), eq(SESSION_ID), anyString(), any(), anyString(), eq(true), anyLong());
     }
 
     // ==================== 终止条件 2：calls 为空 ====================
@@ -454,6 +471,28 @@ class ChatLoopTest {
         verify(auditService, org.mockito.Mockito.never()).record(any(), any(), anyString(), any(),
                 org.mockito.ArgumentMatchers.startsWith(ToolOrchestrator.AUTO_BACKSTOP_PREFIX),
                 anyBoolean(), anyLong());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("recall_item 没给 id → 自动接 find_item 命中的 id（2026-09-21 联调实测：prompt 写了照抄，模型仍不给）")
+    void recallWithoutId_getsFoundItemId() throws Exception {
+        stubTool("find_item", "find_item:1个文件", findItemPayload());
+        ToolExecutor recall = stubTool("recall_item", "recall_item:开题报告.pdf",
+                Map.of("item", Map.of("vault_item_id", 11)));
+        stubStreams(
+                List.of(finalFrame(false, "find_item", "{\"query\":\"开题报告\"}")),
+                // 实测形态：第 2 步只给 query，不给 vault_item_id
+                List.of(finalFrame(true, "recall_item", "{\"query\":\"架构\"}")));
+
+        List<CommonProto.ToolResult> results = run();
+
+        org.mockito.ArgumentCaptor<Map<String, Object>> captor =
+                org.mockito.ArgumentCaptor.forClass((Class<Map<String, Object>>) (Class<?>) Map.class);
+        verify(recall).execute(eq(USER_ID), captor.capture());
+        assertEquals(11, ((Number) captor.getValue().get("vault_item_id")).intValue());
+        assertEquals("架构", captor.getValue().get("query"));
+        assertEquals(2, results.size(), "find_item + recall_item 都成功");
     }
 
     @Test

@@ -107,6 +107,38 @@ class ToolsTest {
     }
 
     @Test
+    @DisplayName("search_records：moods 参数下推到 SQL（2026-09-21 联调回归：此前写死传 null，情绪过滤失效）")
+    void searchRecords_moodsPassedToSql() {
+        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(List.of());
+
+        searchRecords.execute(USER_ID, Map.of("moods", List.of("Anxious", " exhausted "), "days", 30));
+
+        org.mockito.Mockito.verify(searchMapper).searchStructured(org.mockito.ArgumentMatchers.eq(USER_ID), any(),
+                org.mockito.ArgumentMatchers.eq(List.of("anxious", "exhausted")),
+                org.mockito.ArgumentMatchers.eq("{\"anxious\",\"exhausted\"}"),
+                any(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("search_records：moods 支持逗号串；不传 moods 时两个情绪参数都为 null（行为同改前）")
+    void searchRecords_moodsCommaStringAndAbsent() {
+        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(List.of());
+
+        searchRecords.execute(USER_ID, Map.of("moods", "sad,angry"));
+        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(),
+                org.mockito.ArgumentMatchers.eq(List.of("sad", "angry")),
+                org.mockito.ArgumentMatchers.eq("{\"sad\",\"angry\"}"), any(), any(), anyInt());
+
+        org.mockito.Mockito.clearInvocations(searchMapper);
+        searchRecords.execute(USER_ID, Map.of("days", 7));
+        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(),
+                any(), any(), anyInt());
+    }
+
+    @Test
     @DisplayName("get_stats：记录数/情绪分布/待办剩余聚合")
     void getStats_aggregates() {
         when(statsMapper.countUserRecords(any(), any(), any())).thenReturn(12L);

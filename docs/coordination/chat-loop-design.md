@@ -40,8 +40,8 @@
 与今天的差别只有一处，但是本质的：**"材料够不够"由模型每一步自己判断，
 而不是 `ChatServiceImpl:127` 在检索完那一刻一次性判死。**
 
-顺带删掉一处硬编码：`ToolOrchestrator:98-103` 给 `recall_item` 手动接 `find_item` 命中 id 的补丁
-——循环里模型看得见上一步结果，自己填 id。
+~~顺带删掉一处硬编码：`ToolOrchestrator:98-103` 给 `recall_item` 手动接 `find_item` 命中 id 的补丁——循环里模型看得见上一步结果，自己填 id。~~
+**2026-09-21 联调推翻**：prompt 明写"照抄 vault_item_id"，模型第 2 步仍只给 `{"query":"架构"}`，读正文失败。循环里已恢复 id 自动接续（见 `chat-loop-integration.md` §10 #9）。
 
 ## 2. 为什么今天是黑屏（用户体感的真因）
 
@@ -107,7 +107,7 @@ message PlanStepChunk {
 `StepListener` 回调让 `ChatServiceImpl` 即时推 SSE。旧 `planAndExecute()` 保留（开关回退用）。
 
 **终止条件（任一命中即停，缺一不可）**：
-1. 终帧 `done == true`
+1. 终帧 `done == true`——**2026-09-21 联调后修订**：若同帧带 calls，先执行完这最后一批再收尾（原先丢弃 calls，模型只能再花一整轮 LLM 调用说"够了"，实测 ~30s）
 2. 终帧 `calls` 为空
 3. `step > mirror.chat.max-loop-steps`（默认 4）
 4. 循环累计耗时 > `mirror.chat.loop-budget-ms`（默认 60000）
@@ -246,3 +246,8 @@ ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS is_fallback BOOLEAN NO
 幂等（`IF NOT EXISTS` + 有默认值），存量行自动补 `false`（即"存量兜底消息仍会进上下文"，
 只影响执行这条 DDL 之前落库的历史，不再回填）。未执行时表现：插入 assistant 消息会因
 未知列报错 —— 也就是说这条 DDL 是本轮改动的**硬前置**，不是可选优化。
+
+## 12. 联调后修订（2026-09-21）
+
+端到端联调发现并修复 10 个问题，完整记录、实测延迟与遗留见 `chat-loop-integration.md` §0 / §6 / §9 / §10。
+与本设计稿直接相关的三处修订：规划器思考预算单独配置（实测定为 0）；`done=true` 带 calls 时执行完即收尾；循环内恢复 `recall_item` 的 id 自动接续。

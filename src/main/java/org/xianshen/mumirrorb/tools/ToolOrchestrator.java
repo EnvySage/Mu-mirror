@@ -267,13 +267,13 @@ public class ToolOrchestrator {
             for (int step = 1; ; step++) {
                 // 终止 3：步数预算
                 if (step > maxSteps) {
-                    log.info("循环终止（步数上限 {}），用户: {}, 已执行 {} 步", maxSteps, userId, executedSteps);
+                    log.warn("循环终止（步数上限 {}），用户: {}, 已执行 {} 步", maxSteps, userId, executedSteps);
                     break;
                 }
                 // 终止 4：耗时预算（规划 + 工具执行合计；每步开头掐一次表）
                 long elapsed = System.currentTimeMillis() - startedAt;
                 if (elapsed > budgetMs) {
-                    log.info("循环终止（耗时预算 {}ms 用尽，已耗 {}ms），用户: {}, 已执行 {} 步",
+                    log.warn("循环终止（耗时预算 {}ms 用尽，已耗 {}ms），用户: {}, 已执行 {} 步",
                             budgetMs, elapsed, userId, executedSteps);
                     break;
                 }
@@ -284,17 +284,26 @@ public class ToolOrchestrator {
                     plan = planOneStep(userId, question, glossary, tools, safeHistory,
                             results, step, maxSteps, hasRetrieval, listener);
                 } catch (Exception e) {
-                    // 终止 6：不重试，带着已有结果正常退出
-                    log.info("循环终止（第 {} 步规划中断/解析失败，不重试），用户: {}, 原因: {}",
+                    // 终止 6：不重试，带着已有结果正常退出。
+                    // 必须是 WARN：2026-09-21 联调时第 1 步因思考预算过大撞 60s deadline，这条是 INFO，
+                    // 被 dev 的 org.xianshen.mumirrorb=WARN 吞掉，循环静默地一个工具都没执行过
+                    log.warn("循环终止（第 {} 步规划中断/解析失败，不重试），用户: {}, 原因: {}",
                             step, userId, e.getMessage());
                     break;
                 }
 
-                // 终止 1：模型自评"材料够了"
+                // 终止 1：模型自评"材料够了"。
+                // done=true 且带 calls = "执行完这最后一批就收尾"（2026-09-21 联调后改定）：
+                // 原先以 done 为准丢弃 calls，模型想查最后一批就只能先出 calls 再单独花一整轮
+                // LLM 调用来说"够了"——实测那一轮 mimo 要 ~30s，纯属浪费。
+                boolean finalBatch = false;
                 if (plan.done()) {
-                    log.info("循环终止（模型 done=true，材料够了），用户: {}, 已执行 {} 步", userId, executedSteps);
-                    normalExit = true;
-                    break;
+                    if (plan.calls().isEmpty()) {
+                        log.info("循环终止（模型 done=true，材料够了），用户: {}, 已执行 {} 步", userId, executedSteps);
+                        normalExit = true;
+                        break;
+                    }
+                    finalBatch = true;
                 }
                 // 终止 2：终帧无计划
                 if (plan.calls().isEmpty()) {
@@ -325,6 +334,15 @@ public class ToolOrchestrator {
                                 Map.of("raw", call.getArgsJson()),
                                 "args parse error", false, System.currentTimeMillis() - callStart);
                         continue;
+                    }
+                    // recall_item 没给 id → 自动接前面 find_item 命中的首个文件（同旧 planAndExecute）。
+                    // 原设想"循环里模型看得见上一步结果会自己填 id"，2026-09-21 联调实测不成立：
+                    // prompt 明写"照抄 vault_item_id"，模型第 2 步仍只给 {"query":"架构"}，读正文失败，
+                    // 回答"看不到原文"。放在指纹计算之前，指纹反映实际执行的参数。
+                    if ("recall_item".equals(toolName) && !hasPositiveVaultItemId(args) && foundItemId != null) {
+                        args.put("vault_item_id", foundItemId);
+                        log.info("循环第 {} 步 recall_item 未给 vault_item_id，自动接 find_item 命中 id={}",
+                                step, foundItemId);
                     }
                     // 终止 5：同工具 + 同参数指纹重复 → 立即中断（不执行这次重复调用）
                     String fingerprint = fingerprint(toolName, args);
@@ -370,6 +388,12 @@ public class ToolOrchestrator {
                 // 3. 每步执行完推一次累积 tools_used（前端覆盖式赋值 → 芯片自然增长）
                 notifyStepDone(listener, summaries);
                 if (loopedInPlace) {
+                    break;
+                }
+                if (finalBatch) {
+                    log.info("循环终止（模型 done=true 并附最后一批工具，执行完即收尾），用户: {}, 已执行 {} 步",
+                            userId, executedSteps);
+                    normalExit = true;
                     break;
                 }
             }
@@ -431,7 +455,7 @@ public class ToolOrchestrator {
                     userId, executedSteps, results.size(), System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             // 零回归：循环整体异常（含 glossary/registry 组装失败）→ 带着已有结果返回，绝不炸上层
-            log.info("对话循环异常（带着已有 {} 条结果继续），用户: {}, 原因: {}",
+            log.warn("对话循环异常（带着已有 {} 条结果继续），用户: {}, 原因: {}",
                     results.size(), userId, e.getMessage());
         }
         return results;
