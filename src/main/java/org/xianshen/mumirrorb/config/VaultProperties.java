@@ -37,7 +37,7 @@ public class VaultProperties {
      * 规划**单步**超时（毫秒）。chat-loop-design.md §4.3：必须 < mirror.sse-timeout-ms，
      * 否则单步跑满时 SSE 连接会先断（改造前 135s > 120s 就是这个隐患）。
      */
-    private long planToolsTimeoutMs = 60_000;
+    private long planToolsTimeoutMs = 120_000;
 
     /** PlanTools（旧单次规划路径）单次对话最多工具步数 */
     private int maxToolCalls = 2;
@@ -52,7 +52,7 @@ public class VaultProperties {
     private int maxLoopSteps = 4;
 
     /** 循环累计耗时预算（毫秒；§4.1 终止条件 4）——规划 + 工具执行合计 */
-    private long loopBudgetMs = 120_000;
+    private long loopBudgetMs = 180_000;
 
     /**
      * 规划器历史窗口（轮）。与生成答案的 ChatServiceImpl.HISTORY_ROUNDS=3 **故意不同**：

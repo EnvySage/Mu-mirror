@@ -274,8 +274,9 @@ public class AiGrpcClient {
                     .setEmbeddingConfig(embedConfig)
                     .build();
 
+            // 10s → 30s（2026-09-21 联调后整体放宽）：api 向量模型走公网，偶发慢响应不该让整轮对话报错
             EmbeddingProto.EmbedResponse response = embedStub
-                    .withDeadlineAfter(10, TimeUnit.SECONDS)
+                    .withDeadlineAfter(30, TimeUnit.SECONDS)
                     .embed(request);
 
             log.info("Embed 返回: dimension={}, model={}",
@@ -394,8 +395,10 @@ public class AiGrpcClient {
             MirrorChatProto.ChatRequest enriched = request.toBuilder()
                     .setLlmConfig(buildLlmConfig(userId))
                     .build();
+            // 60s → 180s（2026-09-21 联调）：回答阶段思考预算 2048，mimo 约 36 token/s 光思考就 ~57s，
+            // 加正文必然擦着 60s；这是整条回答流的总时长，不是块间间隔（块间由 Python 侧 60s 控制）
             return chatStub
-                    .withDeadlineAfter(60, TimeUnit.SECONDS)
+                    .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .chat(enriched);
         } catch (StatusRuntimeException e) {
             log.error("gRPC Chat(stream) 调用失败: {}", e.getStatus(), e);
@@ -432,8 +435,9 @@ public class AiGrpcClient {
                 // 未命中：top 高频词 grounding（让 Python 知道这些词的个人含义，防止误改写）
                 requestBuilder.addAllGlossary(groundingTerms(userId));
             }
+            // 35s → 60s（2026-09-21 联调后整体放宽；Python 侧非流式总超时同步放到 60s）
             MirrorChatProto.ExtractIntentResponse response = chatStub
-                    .withDeadlineAfter(35, TimeUnit.SECONDS)
+                    .withDeadlineAfter(60, TimeUnit.SECONDS)
                     .extractIntent(requestBuilder.build());
             log.info("ExtractIntent 返回: queryType={}, rewrittenQuery={}",
                     response.getQueryType(), response.getRewrittenQuery());

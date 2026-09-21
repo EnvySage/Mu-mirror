@@ -39,12 +39,12 @@ public class MirrorProperties {
 
     /**
      * 对话 SSE 连接超时（毫秒）。chat-loop-design.md §4.3 预算：
-     * 必须 ≥ vault.loop-budget-ms（循环 120s）+ chatStream deadline（60s）+ 余量。
+     * 必须 ≥ 意图 60s + 向量化 30s + vault.loop-budget-ms（180s，已开跑的一步再 +120s）+ chatStream 180s。
      *
      * <p>改造前硬编码 120s，而 vault.plan-tools-timeout-ms 给到 135s——单次规划跑满时
      * SSE 先断，属循环化之前就存在的隐患。</p>
      */
-    private long sseTimeoutMs = 240_000;
+    private long sseTimeoutMs = 600_000;
 
     /** 生成接口 meta 透出字段名（截断发生时提示前端 toast，F 侧按此字段接线） */
     public static final String TRUNCATED_FLAG = "lookback_truncated";

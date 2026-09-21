@@ -163,8 +163,26 @@ from tool_calls where session_id='…' order by created_at;
 - 想再快：回答侧 `llm.thinking_budget_tokens` 2048 也占 15~42s，可下调，但影响回答质量，需权衡
 - 换成真 Claude 时：规划器预算 0 = 规划阶段完全不思考（思考面板要等回答阶段才出现），届时可设 1024
 
-现有超时预算（`chat-loop-design.md` §4.3）：SSE 240s ≥ 循环 120s + Chat 流 60s + 余量。
-最坏情况是 `loop-budget-ms + 单步上限`，因为已经开跑的一步不会被中途掐断。
+**超时预算（2026-09-21 联调后整体放宽）**
+
+| 层 | 原值 | 现值 | 位置 |
+|---|---|---|---|
+| Python 流式"两块数据间最长等待" | 10s（沿用非流式单次尝试） | **60s**，连接仍 10s | `llm.stream_read_timeout_seconds` |
+| Python 非流式总超时 | 20s（单次尝试 10s） | 60s（单次尝试 30s） | `llm.timeout_seconds` |
+| B 向量化 deadline | 10s | 30s | `AiGrpcClient.embed` |
+| B 意图抽取 deadline | 35s | 60s | `AiGrpcClient.extractIntent` |
+| B 规划单步 | 60s | 120s | `vault.plan-tools-timeout-ms` |
+| B 循环总预算 | 120s | 180s | `vault.loop-budget-ms` |
+| B 回答流 deadline | 60s | 180s | `AiGrpcClient.chatStream` |
+| SSE 总时长 | 240s | 600s | `mirror.sse-timeout-ms` |
+
+放宽的直接原因：问"我这个月最讨厌的事情是什么"，回答模型已经在思考里找到答案（剪头被推销"烦死了"），
+思考中途停顿 >10s，Python 读超时断流，整段作废，用户看到"暂时无法回答"。放宽后复测同一问题，
+该轮最大帧间隔 10.75s（按旧值会再次断流），顺利答出。
+
+SSE 最坏情况：意图 60 + 向量化 30 + 循环 180（已开跑的一步不中途掐断，再 +120）+ 回答流 180 = 570s < 600s。
+这些都只是上限，正常 20~110s 结束。
+
 
 ## 7. 排查手册
 
