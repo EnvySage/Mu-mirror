@@ -387,6 +387,9 @@ public class GlossaryServiceImpl implements GlossaryService {
                 }
                 continue;
             }
+            // 佐证归属校验（2026-09-23）：LLM 给的 chunk_id 必须真实存在且属于该用户，
+            // 否则两列一起留空——宁可没有"查看原文"链接，不可跳到别人的记录上
+            Chunk source = ownedSourceChunk(userId, c.getSourceChunkId());
             UserTerm entity = UserTerm.builder()
                     .userId(userId)
                     .term(term)
@@ -396,8 +399,8 @@ public class GlossaryServiceImpl implements GlossaryService {
                     .queryHitCount(0)
                     .contentHitCount(1)
                     .lastSeenAt(now)
-                    .sourceChunkId(c.getSourceChunkId() > 0 ? c.getSourceChunkId() : null)
-                    .sourceRecordId(resolveSourceRecordId(c.getSourceChunkId(), 0))
+                    .sourceChunkId(source == null ? null : source.getId())
+                    .sourceRecordId(source == null ? null : source.getRecordId())
                     .createdAt(now)
                     .updatedAt(now)
                     .build();
@@ -430,9 +433,10 @@ public class GlossaryServiceImpl implements GlossaryService {
         if (c.getDescription() != null && !c.getDescription().isBlank()) {
             existing.setDescription(c.getDescription()); // 新解释建议，确认时生效（覆盖，不追加——C7）
         }
-        if (c.getSourceChunkId() > 0) {
-            existing.setSourceChunkId(c.getSourceChunkId());
-            existing.setSourceRecordId(resolveSourceRecordId(c.getSourceChunkId(), 0));
+        Chunk source = ownedSourceChunk(userId, c.getSourceChunkId());
+        if (source != null) {
+            existing.setSourceChunkId(source.getId());
+            existing.setSourceRecordId(source.getRecordId());
         }
         existing.setUpdatedAt(now);
         termMapper.updateById(existing);
@@ -453,9 +457,10 @@ public class GlossaryServiceImpl implements GlossaryService {
         }
         existing.setContentHitCount((existing.getContentHitCount() == null ? 0 : existing.getContentHitCount()) + 1);
         existing.setLastSeenAt(now);
-        if (c.getSourceChunkId() > 0) {
-            existing.setSourceChunkId(c.getSourceChunkId());
-            existing.setSourceRecordId(resolveSourceRecordId(c.getSourceChunkId(), 0));
+        Chunk source = ownedSourceChunk(userId, c.getSourceChunkId());
+        if (source != null) {
+            existing.setSourceChunkId(source.getId());
+            existing.setSourceRecordId(source.getRecordId());
         }
         existing.setUpdatedAt(now);
         termMapper.updateById(existing);
@@ -652,22 +657,23 @@ public class GlossaryServiceImpl implements GlossaryService {
     }
 
     /**
-     * 解析佐证 record id（F 契约：跳记录详情用 record id）
+     * 校验佐证 chunk：返回该用户真实存在的 Chunk，否则 null
      *
-     * <p>proto TermCandidate 只有 source_chunk_id（chunk → record 归属在 B 侧唯一真源）；
-     * 由 chunk 反查 record_id，chunk 不存在时为 null。</p>
+     * <p>2026-09-23 加。source_chunk_id 由 LLM 填，AI 侧已有"须在本次语料内"防线，此处是
+     * 第二道。模型写错数字时 chunks.id 全局自增，那个整数会命中别人的 chunk——原先只判
+     * &gt; 0 就落库，佐证会指到其他用户的记录上（F 侧"查看原文"随之跳错）。</p>
      */
-    private Long resolveSourceRecordId(long sourceChunkId, long fallbackRecordId) {
-        if (fallbackRecordId > 0) {
-            return fallbackRecordId;
+    private Chunk ownedSourceChunk(UUID userId, long sourceChunkId) {
+        if (sourceChunkId <= 0) {
+            return null;
         }
-        if (sourceChunkId > 0) {
-            Chunk chunk = chunkMapper.selectById(sourceChunkId);
-            if (chunk != null) {
-                return chunk.getRecordId();
-            }
+        Chunk chunk = chunkMapper.selectById(sourceChunkId);
+        if (chunk == null || !userId.equals(chunk.getUserId())) {
+            log.warn("佐证 chunk 校验不通过，丢弃：chunkId={}, 存在={}, 期望 userId={}",
+                    sourceChunkId, chunk != null, userId);
+            return null;
         }
-        return null;
+        return chunk;
     }
 
     private static List<String> normalizeAliases(List<String> aliases) {

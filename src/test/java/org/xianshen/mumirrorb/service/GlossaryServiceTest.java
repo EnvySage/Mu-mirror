@@ -313,7 +313,7 @@ class GlossaryServiceTest {
         org.mockito.Mockito.doReturn(List.of( term(20, evidTerm, "pending", 0, null), term(21, updTerm, "confirmed", 0, null))).when(termMapper).selectByUser(USER_ID);
         // update 候选按 (userId, term) 查已有词：返回 confirmed 的 updTerm（触发打回 pending）
         org.mockito.Mockito.doReturn(term(21, updTerm, "confirmed", 0, null)).when(termMapper).selectOne(any());
-        org.mockito.Mockito.doReturn(Chunk.builder().id(5L).recordId(7L).build()).when(chunkMapper).selectById(5L);
+        org.mockito.Mockito.doReturn(Chunk.builder().id(5L).recordId(7L).userId(USER_ID).build()).when(chunkMapper).selectById(5L);
 
         List<org.xianshen.mumirrorb.pojo.VO.GlossaryGroupVO.UserTermVO> created = glossaryService.extractForUser(USER_ID);
 
@@ -366,6 +366,89 @@ class GlossaryServiceTest {
 
         assertTrue(glossaryService.extractForUser(USER_ID).isEmpty());
         verify(termMapper, never()).insert(any(UserTerm.class));
+    }
+
+    // ==================== 佐证归属校验（2026-09-23） ====================
+
+    @Test
+    @DisplayName("佐证校验：chunk 不属于该用户 → 两列留空，不挂到别人的记录上")
+    void extract_foreignChunkId_dropped() {
+        String newTerm = nextTerm();
+        UUID otherUser = UUID.randomUUID();
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
+        org.mockito.Mockito.doReturn(List.of(Chunk.builder().id(5L).recordId(7L).userId(USER_ID).segment("语料").content("语料").build())).when(chunkMapper).selectList(any());
+        org.mockito.Mockito.doReturn(RecordProcessorProto.ExtractTermsReply.newBuilder()
+                .addCandidates(candidate(newTerm, "new", 99L)).build()).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
+        // 99 号 chunk 存在，但归别人——LLM 写错数字时会命中这种行
+        org.mockito.Mockito.doReturn(Chunk.builder().id(99L).recordId(888L).userId(otherUser).build()).when(chunkMapper).selectById(99L);
+
+        glossaryService.extractForUser(USER_ID);
+
+        ArgumentCaptor<UserTerm> captor = ArgumentCaptor.forClass(UserTerm.class);
+        verify(termMapper).insert(captor.capture());
+        assertEquals(null, captor.getValue().getSourceChunkId());
+        assertEquals(null, captor.getValue().getSourceRecordId());
+    }
+
+    @Test
+    @DisplayName("佐证校验：chunk 不存在 → 两列留空")
+    void extract_missingChunkId_dropped() {
+        String newTerm = nextTerm();
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
+        org.mockito.Mockito.doReturn(List.of(Chunk.builder().id(5L).recordId(7L).userId(USER_ID).segment("语料").content("语料").build())).when(chunkMapper).selectList(any());
+        org.mockito.Mockito.doReturn(RecordProcessorProto.ExtractTermsReply.newBuilder()
+                .addCandidates(candidate(newTerm, "new", 99L)).build()).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
+        org.mockito.Mockito.doReturn(null).when(chunkMapper).selectById(99L);
+
+        glossaryService.extractForUser(USER_ID);
+
+        ArgumentCaptor<UserTerm> captor = ArgumentCaptor.forClass(UserTerm.class);
+        verify(termMapper).insert(captor.capture());
+        assertEquals(null, captor.getValue().getSourceChunkId());
+        assertEquals(null, captor.getValue().getSourceRecordId());
+    }
+
+    @Test
+    @DisplayName("佐证校验：chunk 属于该用户 → 正常落两列（零回归）")
+    void extract_ownedChunkId_kept() {
+        String newTerm = nextTerm();
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
+        org.mockito.Mockito.doReturn(List.of(Chunk.builder().id(5L).recordId(7L).userId(USER_ID).segment("语料").content("语料").build())).when(chunkMapper).selectList(any());
+        org.mockito.Mockito.doReturn(RecordProcessorProto.ExtractTermsReply.newBuilder()
+                .addCandidates(candidate(newTerm, "new", 5L)).build()).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
+        org.mockito.Mockito.doReturn(Chunk.builder().id(5L).recordId(7L).userId(USER_ID).build()).when(chunkMapper).selectById(5L);
+
+        glossaryService.extractForUser(USER_ID);
+
+        ArgumentCaptor<UserTerm> captor = ArgumentCaptor.forClass(UserTerm.class);
+        verify(termMapper).insert(captor.capture());
+        assertEquals(5L, captor.getValue().getSourceChunkId());
+        assertEquals(7L, captor.getValue().getSourceRecordId());
+    }
+
+    @Test
+    @DisplayName("佐证校验：evidence 通道的外来 chunk 不覆盖已有正确值")
+    void evidence_foreignChunk_doesNotOverwrite() {
+        String evidTerm = nextTerm();
+        UUID otherUser = UUID.randomUUID();
+        org.mockito.Mockito.doReturn(List.of(recordOf(7L))).when(recordMapper).selectList(any());
+        org.mockito.Mockito.doReturn(List.of(Chunk.builder().id(5L).recordId(7L).userId(USER_ID).segment("语料").content("语料").build())).when(chunkMapper).selectList(any());
+        org.mockito.Mockito.doReturn(RecordProcessorProto.ExtractTermsReply.newBuilder()
+                .addCandidates(candidate(evidTerm, "evidence", 99L)).build()).when(aiGrpcClient).extractTerms(eq(USER_ID), any());
+        UserTerm existing = term(40, evidTerm, "pending", 0, null);
+        existing.setSourceChunkId(5L);
+        existing.setSourceRecordId(7L);
+        org.mockito.Mockito.doReturn(List.of(existing)).when(termMapper).selectByUser(USER_ID);
+        org.mockito.Mockito.doReturn(existing).when(termMapper).selectOne(any());
+        // 99 号 chunk 归别人
+        org.mockito.Mockito.doReturn(Chunk.builder().id(99L).recordId(888L).userId(otherUser).build()).when(chunkMapper).selectById(99L);
+
+        glossaryService.extractForUser(USER_ID);
+
+        ArgumentCaptor<UserTerm> captor = ArgumentCaptor.forClass(UserTerm.class);
+        verify(termMapper).updateById(captor.capture());
+        assertEquals(5L, captor.getValue().getSourceChunkId());   // 保留原值，没被 99 覆盖
+        assertEquals(7L, captor.getValue().getSourceRecordId());
     }
 
     // ==================== 月度维护 ====================
