@@ -117,6 +117,7 @@ class TodoRegistryServiceTest {
                 .content("全文")
                 .segment("明天要补作业")
                 .metadata(metadata)
+                .todoApproved(true)
                 .build();
     }
 

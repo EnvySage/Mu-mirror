@@ -10,14 +10,13 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 对话四路检索 Mapper（设计文档 6.6）
+ * 对话日记检索 Mapper（旧回滚路径及 search_records 工具共用）
  *
- * <p>ExtractIntent 返回 query_type 后按路由调用：</p>
+ * <p>按检索路由调用：</p>
  * <ul>
  *   <li>STRUCTURED → {@link #searchStructured}：纯 SQL 元数据过滤，不走向量</li>
  *   <li>SEMANTIC  → {@link #searchSemantic}：pgvector 余弦距离（可叠加时间衰减）</li>
  *   <li>HYBRID    → {@link #searchHybrid}：元数据预过滤 + 向量 + 时间衰减</li>
- *   <li>PROFILE   → 不走本 Mapper，查 ProfileSnapshotMapper</li>
  * </ul>
  *
  * <p>全部参数化占位符（安全约定）；过滤条件用 {@code (#{x} IS NULL OR ...)} 可选拼接。</p>
@@ -61,8 +60,8 @@ public interface ChatSearchMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.status = 'done'
-              AND r.source <> 'system'
-              AND (r.source <> 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment <> ''))
+              AND r.source &lt;&gt; 'system'
+              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
@@ -119,8 +118,8 @@ public interface ChatSearchMapper {
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
-              AND r.source <> 'system'
-              AND (r.source <> 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment <> ''))
+              AND r.source &lt;&gt; 'system'
+              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
@@ -169,8 +168,8 @@ public interface ChatSearchMapper {
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
-              AND r.source <> 'system'
-              AND (r.source <> 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment <> ''))
+              AND r.source &lt;&gt; 'system'
+              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL

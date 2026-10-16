@@ -333,6 +333,7 @@ public class RecordServiceImpl implements RecordService {
             // 已创建的待办由待办页管理；此处不因片段记忆开关变化而撤销它。
             chunk.setTodoApproved(approveTodo || Boolean.TRUE.equals(chunk.getTodoApproved()));
             chunkMapper.updateById(chunk);
+            if (!approveMemory) chunkMapper.clearEmbedding(chunk.getId(), userId);
         }
 
         if (record.getStatus() == RecordStatus.REVIEWING) record.setStatus(RecordStatus.DONE);

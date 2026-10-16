@@ -15,10 +15,8 @@ import org.xianshen.mumirrorb.grpc.gen.MirrorChatProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
 import org.xianshen.mumirrorb.mapper.ChatSessionMapper;
 import org.xianshen.mumirrorb.mapper.ConversationHistoryMapper;
-import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pojo.DO.ChatSession;
-import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
@@ -41,7 +39,7 @@ import static org.mockito.Mockito.when;
 /**
  * 对话四路检索单元测试（设计文档 6.6 / 13.1）
  *
- * <p>覆盖：路由分发（PROFILE 快照/回退 HYBRID、STRUCTURED SQL、SEMANTIC/HYBRID 衰减开关）、
+ * <p>覆盖：路由分发（画像回退 HYBRID、STRUCTURED SQL、SEMANTIC/HYBRID 衰减开关）、
  * time_range 关衰减、检索为空兜底落库。</p>
  */
 @ExtendWith(MockitoExtension.class)
@@ -54,8 +52,6 @@ class ChatRetrievalTest {
     private ConversationHistoryMapper historyMapper;
     @Mock
     private ChatSearchMapper searchMapper;
-    @Mock
-    private ProfileSnapshotMapper snapshotMapper;
     @Mock
     private SettingsMapper settingsMapper;
     @Mock
@@ -72,11 +68,12 @@ class ChatRetrievalTest {
     @BeforeEach
     void setUp() {
         toolOrchestrator = org.mockito.Mockito.mock(org.xianshen.mumirrorb.tools.ToolOrchestrator.class);
-        // 默认即线上默认值：chat-loop-enabled=true（走循环路径）
+        // 旧四路检索用例明确走回滚路径；Agent 路径的用例单独开启循环。
         vaultProperties = new org.xianshen.mumirrorb.config.VaultProperties();
+        vaultProperties.setChatLoopEnabled(false);
         statsMapper = org.mockito.Mockito.mock(org.xianshen.mumirrorb.mapper.ProfileStatsMapper.class);
         chatService = new ChatServiceImpl(sessionMapper, historyMapper, searchMapper,
-                snapshotMapper, settingsMapper, aiGrpcClient,
+                settingsMapper, aiGrpcClient,
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.GlossaryService.class),
                 toolOrchestrator,
                 new com.fasterxml.jackson.databind.ObjectMapper(),
@@ -171,11 +168,8 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("PROFILE 路由：有快照查快照；无快照回退 HYBRID")
-    void profile_fallsBackToHybrid_whenNoSnapshot() {
-        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我是什么样的人"), any())).thenReturn(intent("profile", ""));
-        when(snapshotMapper.selectRecent(USER_ID, "manual", 2)).thenReturn(List.of());
-        when(snapshotMapper.selectRecent(USER_ID, "monthly", 2)).thenReturn(List.of());
+    @DisplayName("画像不再使用独立 RAG 路由；旧 profile 路由降级为 hybrid，由 get_profile 负责快照")
+    void profileRoute_fallsBackToHybrid() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我是什么样的人"), any())).thenReturn(intent("profile", ""));
         when(searchMapper.searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), eq(30.0), any(), anyInt())).thenReturn(hit());
@@ -184,38 +178,9 @@ class ChatRetrievalTest {
 
         chatService.chat(USER_ID, ChatRequestDTO.builder().question("我是什么样的人").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(snapshotMapper).selectRecent(USER_ID, "manual", 2);
-        verify(snapshotMapper).selectRecent(USER_ID, "monthly", 2);
         verify(searchMapper).searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), eq(30.0), any(), anyInt());
-    }
-
-    @Test
-    @DisplayName("PROFILE 路由：manual+monthly 共 ≤2 份快照作上下文")
-    void profile_usesSnapshots() {
-        ProfileSnapshot monthly = ProfileSnapshot.builder()
-                .id(9L).userId(USER_ID).snapshotType("monthly")
-                .overallSummary("九月总结").createdAt(OffsetDateTime.now())
-                .build();
-        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我是什么样的人"), any())).thenReturn(intent("profile", ""));
-        when(snapshotMapper.selectRecent(USER_ID, "manual", 2)).thenReturn(List.of());
-        when(snapshotMapper.selectRecent(USER_ID, "monthly", 2)).thenReturn(List.of(monthly));
-        when(aiGrpcClient.chatStream(eq(USER_ID), any()))
-                .thenReturn(List.of(answerChunk()).iterator());
-
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("我是什么样的人").sessionId(SESSION_ID).build(), new SseEmitter());
-
-        // 未回退到 HYBRID / SEMANTIC
-        verify(searchMapper, never()).searchHybrid(any(), anyString(), any(), any(), any(), any(), any(),
-                anyBoolean(), anyDouble(), any(), anyInt());
         verify(searchMapper, never()).searchSemantic(any(), anyString(), anyBoolean(), anyDouble(), any(), anyInt());
-        // Chat 请求携带了画像伪 chunk
-        org.mockito.ArgumentCaptor<MirrorChatProto.ChatRequest> captor =
-                org.mockito.ArgumentCaptor.forClass(MirrorChatProto.ChatRequest.class);
-        verify(aiGrpcClient).chatStream(eq(USER_ID), captor.capture());
-        MirrorChatProto.ChatRequest request = captor.getValue();
-        org.junit.jupiter.api.Assertions.assertEquals(1, request.getChunksCount());
-        org.junit.jupiter.api.Assertions.assertEquals("镜子画像", request.getChunks(0).getTitle());
     }
 
     @Test
@@ -238,12 +203,8 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("检索为空但工具查到文件 → 不走兜底，chatStream 仍被调用（工具结果不被丢弃）")
     void emptyRetrieval_withUsableToolData_stillCallsLlm() {
-        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我传过的开题报告在哪"), any()))
-                .thenReturn(intent("semantic", ""));
-        when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
-                .thenReturn(List.of());
-        // 循环路径（chat-loop-enabled 默认 true）：循环跑完拿到了文件
-        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), anyBoolean(), any()))
+        vaultProperties.setChatLoopEnabled(true);
+        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any()))
                 .thenReturn(List.of(
                 org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
                         .setTool("find_item").setSummary("find_item:1个文件").setSuccess(true)
@@ -264,25 +225,22 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("检索为空且工具成功但零命中（count=0/items 空）→ 仍走兜底，不放行 LLM")
-    void emptyRetrieval_withEmptyToolPayload_fallsBack() {
-        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("说了什么"), any())).thenReturn(intent("semantic", ""));
-        when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
-                .thenReturn(List.of());
-        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), anyBoolean(), any()))
+    @DisplayName("Agent 工具零命中也交给 Chat 判断；不能把空搜索当成禁止回答")
+    void emptyRetrieval_withEmptyToolPayload_stillCallsLlm() {
+        vaultProperties.setChatLoopEnabled(true);
+        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any()))
                 .thenReturn(List.of(
                 org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
                         .setTool("find_item").setSummary("find_item:0个文件").setSuccess(true)
                         .setPayloadJson("{\"count\":0,\"items\":[]}").build()));
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
 
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(aiGrpcClient, never()).chatStream(any(), any());
-        // hasUsableToolData 口径不变：count=0 / items 空 不算材料 → 循环跑完仍无料 → 兜底
+        verify(aiGrpcClient).chatStream(eq(USER_ID), any());
         verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())));
+                "assistant".equals(h.getRole()) && !Boolean.TRUE.equals(h.getIsFallback())));
     }
 
     @Test
@@ -485,26 +443,33 @@ class ChatRetrievalTest {
                         .setPayloadJson("{\"count\":3}").build()));
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
 
+        CapturingEmitter emitter = new CapturingEmitter();
         chatService.chat(USER_ID, ChatRequestDTO.builder()
-                .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+                .question("最近学了什么").sessionId(SESSION_ID).build(), emitter);
 
         verify(toolOrchestrator).planAndExecute(eq(USER_ID), eq(SESSION_ID), eq("最近学了什么"));
-        verify(toolOrchestrator, never()).loopAndExecute(any(), any(), any(), any(), anyBoolean(), any());
+        verify(toolOrchestrator, never()).loopAndExecute(any(), any(), any(), any(), any());
     }
 
     @Test
-    @DisplayName("循环路径：has_retrieval 传 !chunks.isEmpty()，规划历史窗口用 plan-history-rounds(6)=12 条")
-    void chatLoopEnabled_passesRetrievalFlagAndPlanWindow() {
-        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
-        when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
-                .thenReturn(hit());
+    @DisplayName("Agent 路径不预先抽意图或检索；规划历史窗口与回答历史窗口独立")
+    void chatLoopEnabled_skipsPreRetrievalAndKeepsHistoryWindows() {
+        vaultProperties.setChatLoopEnabled(true);
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
 
+        CapturingEmitter emitter = new CapturingEmitter();
         chatService.chat(USER_ID, ChatRequestDTO.builder()
-                .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+                .question("最近学了什么").sessionId(SESSION_ID).build(), emitter);
 
         verify(toolOrchestrator).loopAndExecute(eq(USER_ID), eq(SESSION_ID), eq("最近学了什么"),
-                any(), eq(true), any());
+                any(), any());
+        verify(aiGrpcClient, never()).extractIntent(any(), anyString(), any());
+        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt());
+        verify(searchMapper, never()).searchSemantic(any(), anyString(), anyBoolean(), anyDouble(), any(), anyInt());
+        verify(searchMapper, never()).searchHybrid(any(), anyString(), any(), any(), any(), any(), any(),
+                anyBoolean(), anyDouble(), any(), anyInt());
+        verify(aiGrpcClient).chatStream(eq(USER_ID), any());
+        org.junit.jupiter.api.Assertions.assertTrue(emitter.sent.stream().anyMatch(e -> e.contains("回答")));
         // 两个历史窗口互不干扰：规划器 6 轮=12 条，答案侧 HISTORY_ROUNDS=3 轮=6 条
         verify(historyMapper).selectRecent(SESSION_ID, USER_ID, 12);
         verify(historyMapper).selectRecent(SESSION_ID, USER_ID, 6);
@@ -513,13 +478,11 @@ class ChatRetrievalTest {
     @Test
     @DisplayName("循环回调实时透传 SSE：thinking 逐块发 thinking 事件，每步发累积 meta.tools_used")
     void loopCallbacks_streamThinkingAndToolChips() {
-        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
-        when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
-                .thenReturn(hit());
+        vaultProperties.setChatLoopEnabled(true);
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
-        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), anyBoolean(), any()))
+        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> {
-                    org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener listener = inv.getArgument(5);
+                    org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener listener = inv.getArgument(4);
                     listener.onThinking("先看看");
                     listener.onThinking("他写过什么");
                     listener.onStepDone(List.of("get_stats:记录12条/30天"));

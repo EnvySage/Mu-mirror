@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 
 import java.util.List;
@@ -22,6 +23,14 @@ import java.util.UUID;
  */
 @Mapper
 public interface ChunkMapper extends BaseMapper<Chunk> {
+
+    /** Explicitly remove a previously stored vector when memory authorization is revoked. */
+    @Update("UPDATE chunks SET embedding = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
+    int clearEmbedding(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
+
+    /** Clear classification provenance when the user changes the segment text. */
+    @Update("UPDATE chunks SET classified_segment = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
+    int clearClassifiedSegment(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
 
     /**
      * 向量相似度检索（余弦距离）
@@ -149,7 +158,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -179,7 +188,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''
@@ -219,7 +228,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''

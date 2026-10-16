@@ -165,10 +165,21 @@ mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev   # Windows
 ### 测试
 
 ```bash
-./mvnw test     # 248 个测试，18 个测试类
+./mvnw test
 ```
 
 绝大多数是 Mockito 纯单测。`MuMirrorBApplicationTests` 会起 Spring 上下文（继承 `prod` profile），需要可达的 PostgreSQL 与 gRPC 端。
+
+记录 AI 授权的 PostgreSQL/MyBatis 联调测试使用 `RecordAiAuthorizationDatabaseTest`。测试库需先执行 `src/main/resources/db/schema.sql` 和 `migration-v3-record-ai-authorization.sql`，测试方法通过事务回滚清理自己写入的数据。设置以下环境变量后运行：
+
+```powershell
+$env:MIRROR_TEST_DB_URL = "jdbc:postgresql://127.0.0.1:5432/mu_mirror"
+$env:MIRROR_TEST_DB_USERNAME = "postgres"
+# 在本地环境中设置 MIRROR_TEST_DB_PASSWORD，不要提交凭据
+.\mvnw.cmd -Dtest=RecordAiAuthorizationDatabaseTest test
+```
+
+未设置 `MIRROR_TEST_DB_URL` 时，联调测试会跳过；普通单测不需要数据库。
 
 ## 部署
 

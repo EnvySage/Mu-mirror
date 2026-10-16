@@ -119,6 +119,8 @@ public class ChunkServiceImpl implements ChunkService {
 
         chunk.setMetadata(metadata);
         chunkMapper.updateById(chunk);
+        if (textChanged) chunkMapper.clearClassifiedSegment(chunkId, userId);
+        if (textChanged || metadataChanged) chunkMapper.clearEmbedding(chunkId, userId);
         log.info("Chunk 已更新，ID: {}, 用户: {}, 文本变更: {}, 元数据变更: {}",
                 chunkId, userId, textChanged, metadataChanged);
 

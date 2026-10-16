@@ -1,8 +1,14 @@
 package org.xianshen.mumirrorb.tools.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.xianshen.mumirrorb.config.MirrorProperties;
+import org.xianshen.mumirrorb.grpc.AiGrpcClient;
+import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
+import org.xianshen.mumirrorb.mapper.SettingsMapper;
+import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
 import org.xianshen.mumirrorb.tools.ToolDefinition;
 import org.xianshen.mumirrorb.tools.ToolExecutionResult;
@@ -18,10 +24,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * search_records 工具（工具表第 1 行）：四路检索的 STRUCTURED 通道复用（SQL 元数据过滤，免 Embed）
- *
- * <p>PlanTools 场景优先走纯 SQL（快、不依赖 Embedding 可用性）；query 关键词过滤由
- * Structured SQL 已支持 contentType/moods/time_range——关键词检索在此版用 segment ILIKE 补充。</p>
+ * 日记记录检索：由 Agent 根据问题选择结构化过滤、语义检索或组合检索。
  */
 @Component
 @RequiredArgsConstructor
@@ -29,8 +32,12 @@ public class SearchRecordsTool implements ToolExecutor {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int MAX_LIMIT = 20;
+    private static final double DEFAULT_HALF_LIFE = 30.0;
 
     private final ChatSearchMapper searchMapper;
+    private final AiGrpcClient aiGrpcClient;
+    private final SettingsMapper settingsMapper;
+    private final MirrorProperties mirrorProperties;
 
     @Override
     public String name() {
@@ -40,19 +47,24 @@ public class SearchRecordsTool implements ToolExecutor {
     @Override
     public ToolDefinition definition() {
         return new ToolDefinition(name(),
-                "按条件检索用户的日记记录片段。适合\"我最近做了什么/上周学了什么/某一天做了什么\"类问题。"
-                        + "问某一天或某段日期时用 date 或 date_from/date_to（按记录时间精确过滤，把那几天的记录全部取回，"
-                        + "此时不要再加 query）。query 是逐字匹配，只写原文里大概率出现的短词（如\"琴\"\"吉他\"），"
-                        + "不要写概括性的词组（如\"弹曲子\"）。不传 query 则按时间倒序取记录。",
-                "{\"date\": \"2026-09-12（查某一天，可选）\", \"date_from\": \"2026-09-01（可选）\", "
-                        + "\"date_to\": \"2026-09-07（可选，含当天）\", \"query\": \"逐字匹配的短词（可选）\", "
-                        + "\"days\": 7, \"moods\": [\"happy\"], \"content_type\": \"learning|todo|...\", \"limit\": 10}");
+                "检索用户已授权的日记片段。按问题选择 mode：structured 用日期/情绪/类型等明确条件；"
+                        + "semantic 用自然语言含义找记录；hybrid 在语义检索上叠加明确过滤条件。"
+                        + "semantic/hybrid 的 query 写用户问题的核心意思，不要求复用原文词语。"
+                        + "问某一天或明确日期范围时填写 date/date_from/date_to；问画像快照使用 get_profile。",
+                "{\"mode\": \"structured|semantic|hybrid（必填）\", \"query\": \"自然语言检索意图（语义/组合检索必填）\", "
+                        + "\"date\": \"2026-09-12（可选）\", \"date_from\": \"2026-09-01（可选）\", "
+                        + "\"date_to\": \"2026-09-07（可选，含当天）\", \"days\": 7, "
+                        + "\"moods\": [\"happy\"], \"content_type\": \"learning|todo|...\", \"limit\": 10}");
     }
 
     @Override
     public ToolExecutionResult execute(UUID userId, Map<String, Object> args) {
+        args = args == null ? Map.of() : args;
         int days = intOf(args.get("days"), 0);
         String contentType = strOf(args.get("content_type"));
+        String query = strOf(args.get("query"));
+        String requestedMode = strOf(args.get("mode"));
+        boolean explicitMode = requestedMode != null && !requestedMode.isBlank();
 
         // 按日期精确过滤（2026-09-21 联调：问"十二号弹了什么曲子"，规划器想把那天的记录全拉出来看，
         // 但工具只有 days=最近N天，表达不了"某一天"，只好拿 query 逐字匹配碰运气，0 条）。
@@ -85,12 +97,33 @@ public class SearchRecordsTool implements ToolExecutor {
         // moods 过滤：definition() 的 args_schema 一直对规划器宣称支持 moods，但此前执行时
         // 写死传 null——2026-09-21 联调实测 moods=["anxious"] 返回了 30 天全部 12 条（其中只有 1 条标了焦虑）
         List<String> moods = listOf(args.get("moods"));
-        List<RetrievedChunkDTO> rows = searchMapper.searchStructured(
-                userId, emptyToNull(contentType), moods.isEmpty() ? null : moods, toPgTextArray(moods),
-                since, until, limit);
+        String normalizedType = emptyToNull(contentType);
+        boolean hasFilters = normalizedType != null || !moods.isEmpty() || byDate || days > 0;
+        String mode = normalizeMode(requestedMode, query, hasFilters);
+        List<String> normalizedMoods = moods.isEmpty() ? null : moods;
+        List<RetrievedChunkDTO> rows;
+        if ("structured".equals(mode)) {
+            rows = searchMapper.searchStructured(userId, normalizedType, normalizedMoods,
+                    toPgTextArray(moods), since, until, limit);
+        } else {
+            String vector = embedQueryVector(userId, query);
+            Double maxDistance = mirrorProperties.getRagMaxCosineDistance() <= 0
+                    ? null : mirrorProperties.getRagMaxCosineDistance();
+            boolean decay = !byDate;
+            double halfLife = halfLife(userId);
+            if ("semantic".equals(mode)) {
+                rows = searchMapper.searchSemantic(userId, vector, decay, halfLife, maxDistance, limit);
+            } else {
+                rows = searchMapper.searchHybrid(userId, vector, normalizedType, normalizedMoods,
+                        toPgTextArray(moods), since, until, decay, halfLife, maxDistance, limit);
+            }
+        }
 
-        String query = strOf(args.get("query"));
-        if (query != null && !query.isBlank()) {
+        // 文件正文与元信息由 find_item/recall_item 提供 [F] 来源卡；search_records 只回日记记录，
+        // 避免把 vault 资产伪装成可点击的日记来源。
+        rows = rows.stream().filter(r -> r.getVaultItemId() == null).toList();
+
+        if ("structured".equals(mode) && query != null && !query.isBlank()) {
             String q = query.trim();
             rows = rows.stream().filter(r ->
                     (r.getContent() != null && r.getContent().contains(q))
@@ -105,6 +138,9 @@ public class SearchRecordsTool implements ToolExecutor {
             m.put("quote", preview(r.getContent(), 120));
             m.put("date", r.getCreatedAt());
             m.put("content_type", r.getContentType());
+            if (r.getScore() != null) {
+                m.put("score", r.getScore());
+            }
             items.add(m);
         }
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -115,9 +151,42 @@ public class SearchRecordsTool implements ToolExecutor {
                 : "（" + (from == null ? "…" : from) + "~" + (to == null ? "…" : to) + "）";
         return ToolExecutionResult.builder()
                 .success(true)
-                .summary(name() + ":" + items.size() + "条" + range)
+                .summary(name() + ":" + items.size() + "条"
+                        + (explicitMode ? "（" + mode + "）" : "") + range)
                 .payload(payload)
                 .build();
+    }
+
+    private String normalizeMode(String requested, String query, boolean hasFilters) {
+        String mode = requested == null ? "structured" : requested.trim().toLowerCase();
+        if (!List.of("structured", "semantic", "hybrid").contains(mode)) {
+            mode = "structured";
+        }
+        if (!"structured".equals(mode) && (query == null || query.isBlank())) {
+            return "structured";
+        }
+        // 语义查询与明确过滤条件同时出现时，切到可叠加过滤条件的 SQL + 向量路径。
+        return "semantic".equals(mode) && hasFilters ? "hybrid" : mode;
+    }
+
+    private String embedQueryVector(UUID userId, String query) {
+        EmbeddingProto.EmbedResponse response = aiGrpcClient.embed(userId, query.trim());
+        if (response.getVectorCount() == 0) {
+            throw new IllegalStateException("Embedding 服务未返回检索向量");
+        }
+        StringBuilder vector = new StringBuilder("[");
+        for (int i = 0; i < response.getVectorCount(); i++) {
+            if (i > 0) vector.append(',');
+            vector.append(response.getVector(i));
+        }
+        return vector.append(']').toString();
+    }
+
+    private double halfLife(UUID userId) {
+        UserSettings settings = settingsMapper.selectOne(
+                new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
+        Integer days = settings == null ? null : settings.getRagHalfLife();
+        return days == null || days <= 0 ? DEFAULT_HALF_LIFE : days;
     }
 
     /** date/date_from/date_to：只认 yyyy-MM-dd（取前 10 位，容忍带时间的写法）；解析失败视为未传 */

@@ -49,7 +49,7 @@ class VaultRefsParseTest {
     @BeforeEach
     void setUp() {
         chatService = new ChatServiceImpl(sessionMapper, historyMapper, searchMapper,
-                snapshotMapper, settingsMapper, aiGrpcClient,
+                settingsMapper, aiGrpcClient,
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.GlossaryService.class),
                 org.mockito.Mockito.mock(org.xianshen.mumirrorb.tools.ToolOrchestrator.class),
                 MAPPER,

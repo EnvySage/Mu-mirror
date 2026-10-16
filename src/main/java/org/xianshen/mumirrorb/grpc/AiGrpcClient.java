@@ -263,13 +263,20 @@ public class AiGrpcClient {
      * @return 向量化结果
      */
     public EmbeddingProto.EmbedResponse embed(UUID userId, String text) {
+        return embed(userId, text, null);
+    }
+
+    /**
+     * 调用指定 API Embedding 模型；供离线向量重建使用，避免在重建成功前切换用户配置。
+     */
+    public EmbeddingProto.EmbedResponse embed(UUID userId, String text, String apiModelOverride) {
         // 防御：query 为空直接抛业务异常（调用方兜底），避免 NPE 打穿 SSE 流
         if (text == null || text.isBlank()) {
             throw new IllegalArgumentException("embed 入参 text 为空");
         }
         log.info("gRPC 调用 Embed，用户: {}, 文本长度: {}", userId, text.length());
         try {
-            CommonProto.EmbeddingConfig embedConfig = buildEmbeddingConfig(userId);
+            CommonProto.EmbeddingConfig embedConfig = buildEmbeddingConfig(userId, apiModelOverride);
 
             EmbeddingProto.EmbedRequest request = EmbeddingProto.EmbedRequest.newBuilder()
                     .setText(text)
@@ -299,6 +306,11 @@ public class AiGrpcClient {
      * @return 模型信息（model_name / source / dimension / available）
      */
     public EmbeddingProto.ModelInfoResponse getModelInfo(UUID userId) {
+        return getModelInfo(userId, null);
+    }
+
+    /** 查询指定 API 模型的信息；供离线向量重建在写库前探测新模型。 */
+    public EmbeddingProto.ModelInfoResponse getModelInfo(UUID userId, String apiModelOverride) {
         log.info("gRPC 调用 GetModelInfo，用户: {}", userId);
         try {
             EmbeddingProto.ModelInfoRequest.Builder reqBuilder = EmbeddingProto.ModelInfoRequest.newBuilder();
@@ -306,7 +318,9 @@ public class AiGrpcClient {
             // Python 端按用户配置的模型返回维度，维度校验（裁决 #18）不再失真；
             // local 模式不携带（Python 默认本地 BGE-m3=1024）。
             if ("api".equalsIgnoreCase(buildEmbeddingConfigSource(userId))) {
-                reqBuilder.setEmbeddingConfig(buildEmbeddingConfig(userId));
+                reqBuilder.setEmbeddingConfig(buildEmbeddingConfig(userId, apiModelOverride));
+            } else if (apiModelOverride != null && !apiModelOverride.isBlank()) {
+                throw new IllegalArgumentException("仅 API Embedding 支持指定模型探测");
             }
             return embedStub
                     .withDeadlineAfter(10, TimeUnit.SECONDS)
@@ -411,7 +425,7 @@ public class AiGrpcClient {
     /**
      * 意图抽取（对话第一步路由，设计文档 6.6）
      *
-     * <p>返回 query_type（profile/structured/semantic/hybrid）+ 过滤条件 + 改写 query。
+     * <p>返回 query_type（structured/semantic/hybrid）+ 过滤条件 + 改写 query。
      * 超时 15s（7.4）。失败由调用方兜底：route 回退 HYBRID。</p>
      *
      * <p>词表注入（lexicon-design.md 第 4 节）：B 侧 query 匹配命中的词条随请求携带
@@ -614,16 +628,16 @@ public class AiGrpcClient {
      * 不重试、带着已有结果退出循环（零回归裁决 0.4）。</p>
      *
      * @param userId    用户 ID（llm_config 在此补齐）
-     * @param request   已组装请求（question/glossary/tools/history/previous_results/step/max_steps/has_retrieval）
+     * @param request   已组装请求（question/glossary/tools/history/previous_results/step/max_steps）
      * @param timeoutMs 规划<b>单步</b>超时毫秒
      * @return PlanStepChunk 流迭代器（逐块消费；final=true 的块才可读 calls/done）
      */
     public Iterator<MirrorChatProto.PlanStepChunk> planNextStep(UUID userId,
                                                                 MirrorChatProto.PlanNextStepRequest request,
                                                                 long timeoutMs) {
-        log.info("gRPC 调用 PlanNextStep(stream)，用户: {}, 第 {}/{} 步, 已有结果 {} 条, 检索命中: {}",
+        log.info("gRPC 调用 PlanNextStep(stream)，用户: {}, 第 {}/{} 步, 已有结果 {} 条",
                 userId, request.getStep(), request.getMaxSteps(),
-                request.getPreviousResultsCount(), request.getHasRetrieval());
+                request.getPreviousResultsCount());
         try {
             // llm_config 注入口径与 planTools 完全一致（用户的 provider/model/key 由 B 侧统一补齐）
             MirrorChatProto.PlanNextStepRequest enriched = request.toBuilder()
@@ -735,6 +749,10 @@ public class AiGrpcClient {
      * 从 user_settings 构建 EmbeddingConfig
      */
     private CommonProto.EmbeddingConfig buildEmbeddingConfig(UUID userId) {
+        return buildEmbeddingConfig(userId, null);
+    }
+
+    private CommonProto.EmbeddingConfig buildEmbeddingConfig(UUID userId, String apiModelOverride) {
         UserSettings settings = settingsMapper.selectOne(
                 new LambdaQueryWrapper<UserSettings>()
                         .eq(UserSettings::getUserId, userId)
@@ -746,9 +764,11 @@ public class AiGrpcClient {
             if (settings.getEmbeddingSource() != null) {
                 builder.setSource(settings.getEmbeddingSource());
             }
-            if (settings.getEmbeddingModel() != null) {
-                builder.setLocalModel(settings.getEmbeddingModel());
-                builder.setApiModel(settings.getEmbeddingModel());
+            String model = apiModelOverride != null && !apiModelOverride.isBlank()
+                    ? apiModelOverride : settings.getEmbeddingModel();
+            if (model != null) {
+                builder.setLocalModel(model);
+                builder.setApiModel(model);
             }
             if (settings.getAiProvider() != null) {
                 builder.setApiProvider(settings.getAiProvider());
