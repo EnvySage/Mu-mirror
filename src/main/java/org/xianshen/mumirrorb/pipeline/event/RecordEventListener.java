@@ -1,6 +1,5 @@
 package org.xianshen.mumirrorb.pipeline.event;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -8,21 +7,16 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
-import org.xianshen.mumirrorb.config.ReviewProperties;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
-import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pipeline.RecordPipeline;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
-import org.xianshen.mumirrorb.pojo.DO.UserSettings;
-import org.xianshen.mumirrorb.service.RecordService;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 记录事件监听器
@@ -47,10 +41,7 @@ public class RecordEventListener {
     private final RecordPipeline pipeline;
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
-    private final RecordService recordService;
-    private final SettingsMapper settingsMapper;
     private final org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
-    private final ReviewProperties reviewProperties;
 
     /**
      * 记录创建后，异步执行管道处理
@@ -64,7 +55,9 @@ public class RecordEventListener {
 
         // 1. 查出记录
         Record record = recordMapper.selectById(recordId);
-        if (record == null) {
+        if (record == null || !Boolean.TRUE.equals(record.getAiProcessingAuthorized()) ||
+                record.getStatus() != RecordStatus.PROCESSING ||
+                !java.util.Objects.equals(record.getProcessingVersion(), event.getProcessingVersion())) {
             log.error("记录不存在，ID: {}", recordId);
             return;
         }
@@ -72,6 +65,16 @@ public class RecordEventListener {
         // 2. 跑管道（清洗 → 分类）
         try {
             List<Record> results = pipeline.execute(record);
+
+            // 用户可能在模型调用期间删除记录或撤回本次处理；旧结果不得写回。
+            Record current = recordMapper.selectById(recordId);
+            if (current == null || current.getDeletedAt() != null ||
+                    !Boolean.TRUE.equals(current.getAiProcessingAuthorized()) ||
+                    !java.util.Objects.equals(current.getProcessingVersion(), event.getProcessingVersion()) ||
+                    current.getStatus() != RecordStatus.PROCESSING) {
+                log.info("记录授权已变化，丢弃异步结果，ID: {}", recordId);
+                return;
+            }
 
             if (results.isEmpty()) {
                 log.error("管道返回空结果，记录ID: {}", recordId);
@@ -89,6 +92,8 @@ public class RecordEventListener {
 
             // 4. 保存 Record（segment 数组）
             processed.setId(recordId);
+            processed.setAiProcessingAuthorized(true);
+            processed.setProcessingVersion(event.getProcessingVersion());
             processed.setStatus(RecordStatus.REVIEWING);
             processed.setUpdatedAt(OffsetDateTime.now());
             recordMapper.updateById(processed);
@@ -112,6 +117,8 @@ public class RecordEventListener {
                             // AI 刚分类过：classified_segment = 当时文本；非用户编辑（设计文档 5.3）
                             .classifiedSegment(segments.get(i))
                             .userEdited(false)
+                            .aiMemoryApproved(false)
+                            .todoApproved(false)
                             .createdAt(OffsetDateTime.now())
                             .build();
                     chunkMapper.insert(chunk);
@@ -133,47 +140,23 @@ public class RecordEventListener {
                 }
             }
 
-            // 6. auto 审核模式接线（设计文档 5.5）：无审核窗口，直接执行 confirm 流程
-            String reviewMode = getReviewMode(record.getUserId());
-            if ("auto".equals(reviewMode)) {
-                log.info("review_mode=auto，记录ID: {} 直接确认", recordId);
-                recordService.confirmReview(recordId, record.getUserId());
-            }
+            // 记忆和待办授权必须由用户逐项确认；旧 auto-review 设置不再自动放行。
 
             log.info("============ 异步管道结束 ============");
 
         } catch (Exception e) {
-            record.setStatus(RecordStatus.FAILED);
+            Record current = recordMapper.selectById(recordId);
+            if (current == null || current.getDeletedAt() != null ||
+                    !java.util.Objects.equals(current.getProcessingVersion(), event.getProcessingVersion())) return;
+            current.setStatus(RecordStatus.FAILED);
             // fail_reason 透出（前端 failed 卡片显示具体原因）；截断防超长堆栈
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            record.setFailReason(reason.length() > 500 ? reason.substring(0, 500) : reason);
-            record.setUpdatedAt(OffsetDateTime.now());
-            recordMapper.updateById(record);
+            current.setFailReason(reason.length() > 500 ? reason.substring(0, 500) : reason);
+            current.setUpdatedAt(OffsetDateTime.now());
+            recordMapper.updateById(current);
             log.error("异步管道失败，记录ID: {}，原因: {}", recordId, e.getMessage(), e);
             log.info("============ 异步管道结束(失败) ============");
         }
-    }
-
-    /**
-     * 读取用户审核模式（manual / auto；缺省 manual）
-     *
-     * <p><strong>两级判定：</strong></p>
-     * <ol>
-     *   <li>总闸 {@code review.auto-enabled=false} → 恒返回 manual（忽略 user_settings 存量值，
-     *       不查库；auto 分支整体软禁用）；</li>
-     *   <li>总闸开启 → 原逻辑：读 user_settings.review_mode，缺省 manual。</li>
-     * </ol>
-     */
-    private String getReviewMode(UUID userId) {
-        if (!reviewProperties.isAutoEnabled()) {
-            log.debug("auto 审核已禁用（review.auto-enabled=false），用户: {} 强制 manual", userId);
-            return "manual";
-        }
-        UserSettings settings = settingsMapper.selectOne(
-                new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
-        return settings != null && settings.getReviewMode() != null
-                ? settings.getReviewMode()
-                : "manual";
     }
 
     /**

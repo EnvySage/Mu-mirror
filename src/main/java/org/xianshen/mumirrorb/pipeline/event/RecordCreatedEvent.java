@@ -23,9 +23,13 @@ public class RecordCreatedEvent extends ApplicationEvent {
      */
     private final UUID userId;
 
-    public RecordCreatedEvent(Object source, Long recordId, UUID userId) {
+    /** 防止用户撤回/删除后的旧异步任务回写。 */
+    private final int processingVersion;
+
+    public RecordCreatedEvent(Object source, Long recordId, UUID userId, int processingVersion) {
         super(source);
         this.recordId = recordId;
         this.userId = userId;
+        this.processingVersion = processingVersion;
     }
 }

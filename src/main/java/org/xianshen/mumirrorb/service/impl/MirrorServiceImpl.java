@@ -680,7 +680,7 @@ public class MirrorServiceImpl implements MirrorService {
         for (Chunk c : chunks) {
             OffsetDateTime at = c.getCreatedAt() == null ? null : c.getCreatedAt().atZoneSameInstant(ZONE).toOffsetDateTime();
             String day = at == null ? "" : at.format(dayFmt);
-            String body = c.getSegment() == null || c.getSegment().isBlank() ? c.getContent() : c.getSegment();
+            String body = c.getSegment();
             if (body == null) {
                 body = "";
             }
@@ -761,6 +761,7 @@ public class MirrorServiceImpl implements MirrorService {
                 new QueryWrapper<ProfileSnapshot>()
                         .eq("user_id", userId)
                         .eq("snapshot_type", "monthly")
+                        .eq("invalidated", false)
                         .orderByAsc("period_month"));
         if (monthly.isEmpty()) {
             // 无 monthly 时回退最新 manual（首月 genesis 的常见形态：只有手动画像）
@@ -963,6 +964,7 @@ public class MirrorServiceImpl implements MirrorService {
                         new QueryWrapper<ProfileSnapshot>()
                                 .eq("user_id", snapshot.getUserId())
                                 .eq("snapshot_type", "monthly")
+                        .eq("invalidated", false)
                                 .lt("created_at", snapshot.getCreatedAt())
                                 .orderByDesc("created_at")
                                 .last("LIMIT 1"))

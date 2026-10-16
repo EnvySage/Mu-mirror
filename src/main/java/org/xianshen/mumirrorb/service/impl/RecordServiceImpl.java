@@ -14,6 +14,7 @@ import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
+import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
@@ -48,6 +49,7 @@ public class RecordServiceImpl implements RecordService {
 
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
+    private final ProfileSnapshotMapper profileSnapshotMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final AiGrpcClient aiGrpcClient;
     private final org.springframework.context.ApplicationContext applicationContext;
@@ -77,18 +79,61 @@ public class RecordServiceImpl implements RecordService {
                 .userId(userId)
                 .content(dto.getContent())
                 .source("user")
-                .status(RecordStatus.PROCESSING)
+                .status(dto.isRequestAiProcessing() ? RecordStatus.PROCESSING : RecordStatus.RECORD_ONLY)
+                .aiProcessingAuthorized(dto.isRequestAiProcessing())
+                .processingVersion(dto.isRequestAiProcessing() ? 1 : 0)
                 .userReviewed(false)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
                 .build();
         recordMapper.insert(record);
-        log.info("记录已入库，ID: {}, 状态: processing", record.getId());
+        log.info("记录已入库，ID: {}, 状态: {}", record.getId(), record.getStatus().getValue());
 
-        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
-        log.info("已发布 RecordCreatedEvent，记录ID: {}", record.getId());
+        if (dto.isRequestAiProcessing()) {
+            eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId,
+                    record.getProcessingVersion()));
+            log.info("用户请求本次 AI 整理，已发布 RecordCreatedEvent，记录ID: {}", record.getId());
+        }
 
         log.info("============ 创建记录结束 ============");
+        return toVO(record);
+    }
+
+    @Override
+    @Transactional
+    public RecordVO organize(Long recordId, UUID userId) {
+        Record record = recordMapper.selectOne(new LambdaQueryWrapper<Record>()
+                .eq(Record::getId, recordId).eq(Record::getUserId, userId)
+                .eq(Record::getSource, "user").isNull(Record::getDeletedAt));
+        if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
+        if (record.getStatus() != RecordStatus.RECORD_ONLY) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有仅记录状态可以请求 AI 整理");
+        }
+        int version = (record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1;
+        record.setAiProcessingAuthorized(true);
+        record.setProcessingVersion(version);
+        record.setStatus(RecordStatus.PROCESSING);
+        record.setFailReason(null);
+        record.setUpdatedAt(OffsetDateTime.now());
+        recordMapper.updateById(record);
+        eventPublisher.publishEvent(new RecordCreatedEvent(this, recordId, userId, version));
+        return toVO(record);
+    }
+
+    @Override
+    @Transactional
+    public RecordVO updateRaw(Long recordId, String content, UUID userId) {
+        if (content == null || content.isBlank())
+            throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
+        Record record = recordMapper.selectOne(new LambdaQueryWrapper<Record>()
+                .eq(Record::getId, recordId).eq(Record::getUserId, userId)
+                .eq(Record::getSource, "user").isNull(Record::getDeletedAt));
+        if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
+        if (record.getStatus() != RecordStatus.RECORD_ONLY || Boolean.TRUE.equals(record.getAiProcessingAuthorized()))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有未授权 AI 的仅记录可以编辑原文");
+        record.setContent(content);
+        record.setUpdatedAt(OffsetDateTime.now());
+        recordMapper.updateById(record);
         return toVO(record);
     }
 
@@ -158,12 +203,12 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         }
 
-        if (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.FAILED) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查或失败的记录才能删除");
-        }
-
+        if (!"user".equals(record.getSource()))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "仅支持删除用户记录");
         record.setDeletedAt(OffsetDateTime.now());
+        record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
         recordMapper.updateById(record);
+        profileSnapshotMapper.invalidateForUser(userId);
         log.info("记录已软删除，ID: {}, 用户: {}", recordId, userId);
     }
 
@@ -187,13 +232,17 @@ public class RecordServiceImpl implements RecordService {
         if (record.getStatus() != RecordStatus.FAILED) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有处理失败的记录才能重试");
         }
+        if (!Boolean.TRUE.equals(record.getAiProcessingAuthorized())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "该记录尚未获得 AI 整理授权");
+        }
 
         record.setStatus(RecordStatus.PROCESSING);
+        record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
         record.setFailReason(null); // 清除上次失败原因
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
 
-        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId));
+        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId, record.getProcessingVersion()));
         log.info("记录已重置为 processing 并重新发布管道事件，ID: {}", recordId);
         return toVO(record);
     }
@@ -201,100 +250,96 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO confirmReview(Long recordId, UUID userId) {
-        return confirmReview(recordId, userId, null);
+        return confirmReview(recordId, userId, List.of(), List.of(), null);
     }
 
     @Override
     @Transactional
-    public RecordVO confirmReview(Long recordId, UUID userId, List<TodoResolutionDTO> resolutions) {
-        log.info("============ confirmReview 开始 ============");
-        log.info("记录ID: {}, 用户ID: {}, 待办决议: {} 条",
-                recordId, userId, resolutions == null ? 0 : resolutions.size());
-
-        // 1. 查询记录并验证所有权
+    public RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                                  List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions) {
         Record record = recordMapper.selectOne(
                 new LambdaQueryWrapper<Record>()
                         .eq(Record::getId, recordId)
                         .eq(Record::getUserId, userId)
+                        .eq(Record::getSource, "user")
                         .isNull(Record::getDeletedAt)
         );
-
-        if (record == null) {
-            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
+        if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
+        if (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.DONE) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有已完成 AI 整理的记录才能确认片段");
         }
 
-        if (record.getStatus() != RecordStatus.REVIEWING) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能确认完成");
-        }
-
-        // 2. 查询所有 Chunk
         List<Chunk> chunks = chunkMapper.selectList(
                 new LambdaQueryWrapper<Chunk>()
                         .eq(Chunk::getRecordId, recordId)
         );
-
-        // 3. 校验至少保留 1 个 Chunk（设计文档 5.2）
         if (chunks.isEmpty()) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "记录至少需要保留一个片段才能确认");
+            throw new BusinessException(ResultCode.PARAM_ERROR, "至少需要一个片段才能确认记录");
+        }
+        java.util.Set<Long> validIds = chunks.stream().map(Chunk::getId).collect(java.util.stream.Collectors.toSet());
+        java.util.Set<Long> approvedIds = aiMemoryChunkIds == null ? java.util.Set.of() :
+                aiMemoryChunkIds.stream().filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        java.util.Set<Long> approvedTodoIds = todoChunkIds == null ? java.util.Set.of() :
+                todoChunkIds.stream().filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        if (!validIds.containsAll(approvedIds) || !validIds.containsAll(approvedTodoIds)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "片段不属于该记录");
         }
 
-        // 4. 补分类（设计文档 5.4 核心裁决）：classified_segment IS NULL 的 Chunk
-        //    = 文本从未被分类过，或已被用户改过 → 单段分类（single=true，禁止拆分）回填 metadata
-        //    失败不阻断：保留旧 metadata 继续（5.6）
-        //    参照日期取所属 record 的 created_at（不是 now()）：隔天来确认时"今天"早已不是今天
         String referenceDate = TimeSubstitutionApplier.referenceDateOf(record.getCreatedAt());
+        boolean authorizationChanged = false;
         for (Chunk chunk : chunks) {
-            if (chunk.getClassifiedSegment() != null) {
-                continue; // 文本未变（或只改了标签），直接入库，不调 LLM
+            boolean approveMemory = approvedIds.contains(chunk.getId());
+            boolean approveTodo = approvedTodoIds.contains(chunk.getId());
+            boolean wasApproved = Boolean.TRUE.equals(chunk.getAiMemoryApproved());
+            authorizationChanged |= wasApproved != approveMemory;
+            if ((approveMemory || approveTodo) && (chunk.getSegment() == null || chunk.getSegment().isBlank())) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "空片段不能授权给 AI 或登记为待办");
             }
-            String text = chunk.getSegment() != null ? chunk.getSegment() : chunk.getContent();
-            try {
-                // 传入 chunk 所属 recordId：组装近 7 天语境时排除该 record 自身旧标题，防自污染
-                RecordProcessorProto.ClassifyResponse response =
-                        aiGrpcClient.classifySingle(userId, text, chunk.getRecordId(), referenceDate);
-                if (!response.getSkip() && response.getItemsCount() > 0) {
-                    RecordProcessorProto.ClassifyItem item = response.getItems(0);
-                    Map<String, Object> metadata = ClassifyItemConverter.toMetadata(item);
-                    // 相对时间消解（"今天" → "9月19日"）：只改 segment（展示/embedding 文本），
-                    // chunk.content 原文不动；classified_segment 同步记替换后文本，与"文本是否变更"判定一致
-                    String resolved = TimeSubstitutionApplier.apply(text, item.getTimeSubstitutionsList());
-                    chunk.setMetadata(metadata);
-                    chunk.setSegment(resolved);
-                    chunk.setClassifiedSegment(resolved);
-                    chunkMapper.updateById(chunk);
-                    log.info("补分类完成，ChunkID: {}", chunk.getId());
-                } else {
-                    log.warn("补分类跳过/空结果，ChunkID: {}，保留旧 metadata 继续", chunk.getId());
+            if (approveTodo) {
+                Object type = chunk.getMetadata() == null ? null : chunk.getMetadata().get("contentType");
+                if (!"todo".equals(type) && !"plan".equals(type)) {
+                    throw new BusinessException(ResultCode.PARAM_ERROR, "只有待办或计划片段可以单独登记为待办");
                 }
-            } catch (Exception e) {
-                log.warn("补分类失败，ChunkID: {}，保留旧 metadata 继续。原因: {}", chunk.getId(), e.getMessage());
             }
+            if (approveMemory && chunk.getClassifiedSegment() == null) {
+                String text = chunk.getSegment(); // 永不以整篇原文作为片段授权的回退值
+                if (text != null && !text.isBlank()) {
+                    try {
+                        RecordProcessorProto.ClassifyResponse response =
+                                aiGrpcClient.classifySingle(userId, text, chunk.getRecordId(), referenceDate);
+                        if (!response.getSkip() && response.getItemsCount() > 0) {
+                            RecordProcessorProto.ClassifyItem item = response.getItems(0);
+                            chunk.setMetadata(ClassifyItemConverter.toMetadata(item));
+                            String resolved = TimeSubstitutionApplier.apply(text, item.getTimeSubstitutionsList());
+                            chunk.setSegment(resolved);
+                            chunk.setClassifiedSegment(resolved);
+                        }
+                    } catch (Exception e) {
+                        log.warn("片段补分类失败，保留待确认文本，chunk={}: {}", chunk.getId(), e.getMessage());
+                    }
+                }
+            }
+            if (approveMemory && chunk.getSegment() != null && !chunk.getSegment().isBlank() &&
+                    (!wasApproved || chunk.getEmbedding() == null || chunk.getEmbedding().isEmpty())) {
+                try {
+                    EmbeddingProto.EmbedResponse embedded = aiGrpcClient.embed(userId, chunk.getSegment());
+                    chunk.setEmbedding(embedded.getVectorList());
+                } catch (Exception e) {
+                    log.warn("片段向量生成失败，后续可补录，chunk={}: {}", chunk.getId(), e.getMessage());
+                }
+            }
+            if (!approveMemory) chunk.setEmbedding(null);
+            chunk.setAiMemoryApproved(approveMemory);
+            // 已创建的待办由待办页管理；此处不因片段记忆开关变化而撤销它。
+            chunk.setTodoApproved(approveTodo || Boolean.TRUE.equals(chunk.getTodoApproved()));
+            chunkMapper.updateById(chunk);
         }
 
-        // 5. 标记已审核
+        if (record.getStatus() == RecordStatus.REVIEWING) record.setStatus(RecordStatus.DONE);
         record.setUserReviewed(true);
-
-        // 6. 遍历所有 Chunk，逐个做 embedding（文本 = segment，回退 content）
-        log.info("开始 Embedding，记录ID: {}, Chunk 数量: {}", recordId, chunks.size());
-
-        for (Chunk chunk : chunks) {
-            String embeddingText = chunk.getSegment() != null ? chunk.getSegment() : chunk.getContent();
-            try {
-                EmbeddingProto.EmbedResponse embedResult = aiGrpcClient.embed(userId, embeddingText);
-                chunk.setEmbedding(embedResult.getVectorList());
-                chunkMapper.updateById(chunk);
-                log.info("Chunk Embedding 完成，ChunkID: {}, 维度: {}", chunk.getId(), embedResult.getDimension());
-            } catch (Exception e) {
-                log.error("Chunk Embedding 失败，ChunkID: {}，原因: {}", chunk.getId(), e.getMessage(), e);
-                // 单个 chunk 失败不影响其他 chunk（裁决 #5：失败不阻断，向量后续补录）
-            }
-        }
-
-        // 7. 更新 Record 状态为 DONE
-        record.setStatus(RecordStatus.DONE);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
-        log.info("记录审查已确认完成，ID: {}, 状态: DONE", recordId);
+        if (authorizationChanged) profileSnapshotMapper.invalidateForUser(userId);
 
         // 8. 待办窗口决议（todo-status-removal-design.md §5）：审核页选的待办状态随本次入库一起生效。
         //    处理本记录 evidence 的 pending 建议：body.todoResolutions 中 confirmed 走 doConfirm
@@ -310,9 +355,7 @@ public class RecordServiceImpl implements RecordService {
             log.warn("待办决议处理失败（不阻断确认主流程），记录ID: {}，原因: {}", recordId, e.getMessage());
         }
 
-        // 9. 待办登记钩子（todo-registry-design.md §3.1 登记期，零门禁）：
-        //    记录含 todo/plan 片段 → 幂等登记 todo_registry + origin link。
-        //    登记失败不阻断确认主流程（登记无风险，错了退化为无跨日记跟踪）。
+        // 9. 只有用户单独确认作为待办的片段才进入待办账本。
         try {
             int registered = todoRegistryService().registerFromRecord(recordId, userId);
             if (registered > 0) {
@@ -322,7 +365,6 @@ public class RecordServiceImpl implements RecordService {
             log.warn("待办登记失败（不阻断确认主流程），记录ID: {}，原因: {}", recordId, e.getMessage());
         }
 
-        log.info("============ confirmReview 结束 ============");
         return toVO(record);
     }
 
@@ -345,6 +387,7 @@ public class RecordServiceImpl implements RecordService {
                 .content(record.getContent())
                 .segments(chunkVOs.stream().map(ChunkVO::getSegment).toList())
                 .status(record.getStatus())
+                .aiProcessingAuthorized(record.getAiProcessingAuthorized())
                 .userReviewed(record.getUserReviewed())
                 .failReason(record.getFailReason())
                 .chunks(chunkVOs)
@@ -363,6 +406,8 @@ public class RecordServiceImpl implements RecordService {
                 .segment(chunk.getSegment())
                 .metadata(chunk.getMetadata())
                 .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
+                .aiMemoryApproved(Boolean.TRUE.equals(chunk.getAiMemoryApproved()))
+                .todoApproved(Boolean.TRUE.equals(chunk.getTodoApproved()))
                 .build();
     }
 

@@ -132,6 +132,6 @@ record-context:
   max-query: 50                        # SQL 查询上限（去重前多查兜底）
   max-keywords: 5                      # 每条条目携带 keywords 上限
 
-# 审核模式总闸（false 时强制 manual，前端隐藏 auto 开关）
+# 旧配置兼容项（auto 审核已永久停用，运行时忽略）
 review:
   auto-enabled: false

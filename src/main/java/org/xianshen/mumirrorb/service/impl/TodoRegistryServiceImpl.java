@@ -92,6 +92,7 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                 .eq(Chunk::getRecordId, recordId));
         int created = 0;
         for (Chunk chunk : chunks) {
+            if (!Boolean.TRUE.equals(chunk.getTodoApproved())) continue;
             Map<String, Object> metadata = chunk.getMetadata();
             String contentType = metadata == null ? null : str(metadata.get("contentType"));
             // 只登记 todo/plan 片段（裁决口径：待办/计划类才进登记表）
@@ -104,6 +105,7 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
             if (existing != null && existing > 0) {
                 continue;
             }
+            if (chunk.getSegment() == null || chunk.getSegment().isBlank()) continue;
             String title = firstNonBlank(
                     metadata == null ? null : str(metadata.get("title")),
                     trunc(chunk.getSegment(), 40), "未命名待办");
@@ -292,9 +294,8 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                     .title(todo == null ? "（已删除的待办）" : todo.getTitle())
                     .currentStatus(todo == null ? null : todo.getCurrentStatus())
                     .suggestedStatus(s.getSuggestedStatus())
-                    .evidenceExcerpt(evidence == null ? null
-                            : trunc(firstNonBlank(evidence.getSegment(), evidence.getContent()),
-                            CARD_EXCERPT_LIMIT))
+                    .evidenceExcerpt(evidence == null ? null : trunc(
+                            evidence.getSegment() == null ? "" : evidence.getSegment(), CARD_EXCERPT_LIMIT))
                     .evidenceRecordId(evidence == null ? null : evidence.getRecordId())
                     .createdAt(s.getCreatedAt() == null ? null : s.getCreatedAt().format(TS))
                     .build());

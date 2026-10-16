@@ -51,6 +51,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.todo_approved = TRUE
             ORDER BY r.created_at DESC
             LIMIT 50
             """)
@@ -74,6 +75,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.todo_approved = TRUE
             GROUP BY 1
             """)
     List<java.util.Map<String, Object>> selectTodoStatusCounts(@Param("userId") java.util.UUID userId);
@@ -97,6 +99,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND c.metadata->>'contentType' = 'learning'
             ORDER BY r.created_at DESC
             LIMIT 30
@@ -123,6 +126,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -152,6 +156,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -179,6 +184,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -203,6 +209,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -228,6 +235,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -250,6 +258,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -261,7 +270,7 @@ public interface ProfileStatsMapper {
                                                                   @Param("until") OffsetDateTime until);
 
     /**
-     * 统计范围内用户记录总数（含无 chunk 的记录）。窗口 [since, until)（until 可空=不限）。
+     * 统计范围内至少有一个已授权片段的用户记录数。窗口 [since, until)（until 可空=不限）。
      */
     @Select("""
             <script>
@@ -270,6 +279,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             </script>

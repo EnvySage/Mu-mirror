@@ -111,6 +111,12 @@ public class Chunk {
     @Schema(description = "用户是否编辑过（文本或元数据）", example = "false")
     private Boolean userEdited;
 
+    /** 用户是否确认该片段可供后续 AI 记忆、检索、摘要和画像使用。 */
+    private Boolean aiMemoryApproved;
+
+    /** 用户是否单独确认将该片段作为待办登记。 */
+    private Boolean todoApproved;
+
     /**
      * vault 资产挂链（toolcalling-vault-design.md 3.3 全消化）
      *

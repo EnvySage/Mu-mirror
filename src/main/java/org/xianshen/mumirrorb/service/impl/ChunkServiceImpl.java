@@ -11,6 +11,7 @@ import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
+import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
@@ -35,6 +36,7 @@ public class ChunkServiceImpl implements ChunkService {
 
     private final ChunkMapper chunkMapper;
     private final RecordMapper recordMapper;
+    private final ProfileSnapshotMapper profileSnapshotMapper;
     private final AiGrpcClient aiGrpcClient;
 
     @Override
@@ -51,10 +53,10 @@ public class ChunkServiceImpl implements ChunkService {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "Chunk 不存在");
         }
 
-        // 3. 检查 Record 状态（只有 REVIEWING 允许修改）
+        // 3. 允许审核中或已完成的用户记录编辑；编辑会撤回该片段已有的 AI 记忆授权。
         Record record = recordMapper.selectById(chunk.getRecordId());
-        if (record == null || record.getStatus() != RecordStatus.REVIEWING) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能修改 Chunk");
+        if (record == null || (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.DONE)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有已完成整理的记录才能修改片段");
         }
 
         boolean textChanged = false;
@@ -109,6 +111,10 @@ public class ChunkServiceImpl implements ChunkService {
         }
         if (textChanged || metadataChanged) {
             chunk.setUserEdited(true);
+            boolean hadMemoryApproval = Boolean.TRUE.equals(chunk.getAiMemoryApproved());
+            chunk.setAiMemoryApproved(false);
+            chunk.setEmbedding(null);
+            if (hadMemoryApproval) profileSnapshotMapper.invalidateForUser(userId);
         }
 
         chunk.setMetadata(metadata);
@@ -209,6 +215,8 @@ public class ChunkServiceImpl implements ChunkService {
                 .segment(chunk.getSegment())
                 .metadata(chunk.getMetadata())
                 .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
+                .aiMemoryApproved(Boolean.TRUE.equals(chunk.getAiMemoryApproved()))
+                .todoApproved(Boolean.TRUE.equals(chunk.getTodoApproved()))
                 .build();
     }
 }

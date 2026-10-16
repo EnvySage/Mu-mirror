@@ -81,6 +81,9 @@ public class ProfileSnapshot {
     @Schema(description = "五维拼接向量（1024 维，漂移检测用）")
     private List<Float> embedding;
 
+    /** 用户记忆授权变化后置为 true；保留展示历史，但不再参与 AI 推断。 */
+    private Boolean invalidated;
+
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;
 

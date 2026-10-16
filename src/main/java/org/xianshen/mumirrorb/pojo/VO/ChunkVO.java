@@ -59,4 +59,10 @@ public class ChunkVO {
      */
     @Schema(description = "是否已生成embedding", example = "false")
     private Boolean hasEmbedding;
+
+    @Schema(description = "用户是否确认此片段可进入后续AI记忆")
+    private Boolean aiMemoryApproved;
+
+    @Schema(description = "用户是否单独确认此片段作为待办")
+    private Boolean todoApproved;
 }

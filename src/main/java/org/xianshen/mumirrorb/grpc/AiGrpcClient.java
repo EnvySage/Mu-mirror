@@ -141,6 +141,7 @@ public class AiGrpcClient {
 
             RecordProcessorProto.ClassifyRequest.Builder requestBuilder = RecordProcessorProto.ClassifyRequest.newBuilder()
                     .setContent(content)
+                    .setProcessingAuthorized(true)
                     .setLlmConfig(llmConfig);
             if (referenceDate != null && !referenceDate.isBlank()) {
                 requestBuilder.setReferenceDate(referenceDate);
@@ -232,6 +233,7 @@ public class AiGrpcClient {
 
             RecordProcessorProto.ClassifyRequest.Builder requestBuilder = RecordProcessorProto.ClassifyRequest.newBuilder()
                     .setContent(content)
+                    .setProcessingAuthorized(true)
                     .setLlmConfig(llmConfig)
                     .setSingle(true)
                     .addAllRecentContext(recentContextHints(userId, excludeRecordId));

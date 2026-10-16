@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 
 import java.util.List;
@@ -33,6 +34,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
         return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .eq(ProfileSnapshot::getInvalidated, false)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 1"));
     }
@@ -50,6 +52,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
         return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .eq(ProfileSnapshot::getInvalidated, false)
                 .ge(ProfileSnapshot::getCreatedAt, start)
                 .lt(ProfileSnapshot::getCreatedAt, end)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
@@ -68,6 +71,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                     .eq(ProfileSnapshot::getUserId, userId)
                     .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                     .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                    .eq(ProfileSnapshot::getInvalidated, false)
                     .orderByDesc(ProfileSnapshot::getCreatedAt)
                     .last("LIMIT 1"));
         }
@@ -81,6 +85,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .eq(ProfileSnapshot::getInvalidated, false)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT " + limit));
     }
@@ -95,20 +100,30 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, "monthly")
                 .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                .eq(ProfileSnapshot::getInvalidated, false)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 1"));
     }
 
     /**
-     * 指定用户全量快照（快照历史列表用，manual + monthly 合并，时间倒序）
+     * 指定用户有效快照（历史页和 AI 对比使用；失效快照不再参与后续推断）
      *
      * <p>上限 14 = manual 保 2 + monthly 保 12（分层保留后总量），无需分页。</p>
      */
     default List<ProfileSnapshot> selectAllByUser(java.util.UUID userId) {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getInvalidated, false)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 14"));
+    }
+
+    default ProfileSnapshot selectActiveById(java.util.UUID userId, Long snapshotId) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getId, snapshotId)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .last("LIMIT 1"));
     }
 
     /**
@@ -123,13 +138,18 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 SELECT embedding FROM profile_snapshots
                 WHERE user_id = cur.user_id::uuid
                   AND snapshot_type = 'monthly'
+                  AND invalidated = FALSE
                   AND created_at < cur.created_at
                   AND embedding IS NOT NULL
                 ORDER BY created_at DESC
                 LIMIT 1
             ) prev ON true
             WHERE cur.id = #{snapshotId}
+              AND cur.invalidated = FALSE
               AND cur.embedding IS NOT NULL
             """)
     Double selectDriftDistance(@Param("snapshotId") Long snapshotId);
+
+    @Update("UPDATE profile_snapshots SET invalidated = TRUE WHERE user_id = #{userId}::uuid AND invalidated = FALSE")
+    int invalidateForUser(@Param("userId") java.util.UUID userId);
 }

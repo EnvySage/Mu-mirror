@@ -20,6 +20,12 @@ import java.util.List;
 @Schema(description = "记录确认审查请求体（可选）")
 public class RecordConfirmDTO {
 
+    @Schema(description = "最终允许后续AI使用的片段ID集合；省略时视为空集合")
+    private List<Long> aiMemoryChunkIds;
+
+    @Schema(description = "最终单独确认为待办的片段ID集合")
+    private List<Long> todoChunkIds;
+
     @Schema(description = "待办决议列表（缺省 = 本记录未处理建议一律作废）")
     private List<TodoResolutionDTO> todoResolutions;
 }

@@ -69,7 +69,7 @@ public interface TodoRegistryLinkMapper extends BaseMapper<TodoRegistryLink> {
                    l.relation AS relation,
                    c.id AS chunkId,
                    c.record_id AS recordId,
-                   LEFT(COALESCE(NULLIF(c.segment, ''), c.content), 200) AS excerpt,
+                   LEFT(COALESCE(NULLIF(c.segment, ''), ''), 200) AS excerpt,
                    TO_CHAR(c.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS date,
                    TO_CHAR(l.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS confirmedAt
             FROM todo_registry_links l

@@ -52,8 +52,11 @@ public class RecordVO {
      * 处理状态
      */
     @Schema(description = "处理状态", example = "reviewing",
-            allowableValues = {"processing", "reviewing", "done", "failed"})
+            allowableValues = {"record_only", "processing", "reviewing", "done", "failed"})
     private RecordStatus status;
+
+    @Schema(description = "用户是否主动请求过本次AI整理")
+    private Boolean aiProcessingAuthorized;
 
     /**
      * 用户是否已审核

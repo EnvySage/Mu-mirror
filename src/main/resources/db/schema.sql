@@ -6,7 +6,8 @@
 -- 执行顺序（docker-entrypoint-initdb.d 按文件名字典序）：
 --   1. schema.sql        ← 本文件，唯一权威基准（chunks 已并入）
 --   2. migration-v2.sql  ← 仅存量旧库迁移用；空库执行为无害空操作
---   3. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
+--   3. migration-v3-record-ai-authorization.sql ← 授权字段迁移；空库执行为无害空操作
+--   4. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
 -- 对应设计文档：Mu-mirror-B/docs/2026-09-03-system-design-v2.md 第三章、3.4、裁决 #2/#6/#8/#9/#14/#17/#18/#20
 -- ============================================================
 
@@ -31,8 +32,10 @@ CREATE TABLE IF NOT EXISTS records (
     user_id UUID NOT NULL REFERENCES users(id),
     content TEXT NOT NULL,                              -- 原始输入，不可修改
     source VARCHAR(20) DEFAULT 'user',                  -- user=用户输入 / system=系统生成（每日总结，裁决 #17）
-    status VARCHAR(20) DEFAULT 'processing',            -- processing/reviewing/done/failed
+    status VARCHAR(20) DEFAULT 'processing',            -- record_only/processing/reviewing/done/failed
     user_reviewed BOOLEAN DEFAULT FALSE,
+    ai_processing_authorized BOOLEAN NOT NULL DEFAULT FALSE,
+    processing_version INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,                             -- 软删除
@@ -57,6 +60,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     metadata JSONB,                     -- AI 元数据（title/summary/contentType/mood/keywords/taskStatus）
     classified_segment TEXT,            -- 生成当前 metadata 时所用的 segment 文本；NULL = 未分类/文本已改
     user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
+    ai_memory_approved BOOLEAN NOT NULL DEFAULT FALSE, -- 用户逐片段确认后才进入后续 AI 记忆
+    todo_approved BOOLEAN NOT NULL DEFAULT FALSE,       -- 待办需另行确认
     vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE,  -- vault 全消化产物挂链（vault 删除时级联清，向量库无孤儿）
     embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -108,6 +113,7 @@ CREATE TABLE IF NOT EXISTS profile_snapshots (
     user_tags JSONB,                      -- ["技术学习", "夜猫子"]
     overall_summary TEXT,
     embedding vector(1024),               -- 漂移检测用（五维文本按固定顺序拼接后向量化）
+    invalidated BOOLEAN NOT NULL DEFAULT FALSE, -- 来源授权变化后不再进入后续AI推断
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_user ON profile_snapshots(user_id, snapshot_type, created_at DESC);

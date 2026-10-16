@@ -8,13 +8,14 @@
 | Proto | 服务 | RPC | 状态 |
 |-------|------|-----|------|
 | common.proto | — | MoodType 13 / ContentType 8 / TaskStatus 3 / AiProtocol 2、LlmConfig、EmbeddingConfig、GlossaryTerm、ChunkDTO（词典轮 2026-09-05/06） | 双方一致（B 侧已对齐字段号并编译） |
-| record_processor.proto | RecordProcessor | Classify（含 single 标志 + glossary=4 注入）、ExtractTerms（词典候选抽取，2026-09-05/06） | proto 双方一致；AI 实现 RPC、B 已接线调度 |
+| record_processor.proto | RecordProcessor | Classify（single、glossary=4、open_todos=5、recent_context=6、reference_date=7、processing_authorized=8）、ExtractTerms（词典候选抽取，2026-09-05/06） | proto 双方一致；processing_authorized 缺省拒绝；AI 实现 RPC、B 已接线调度 |
 | embedding.proto | EmbeddingService | Embed、GetModelInfo（ModelInfoRequest 含 embedding_config，2026-09-04） | 双方一致 |
 | mirror_chat.proto | MirrorChat | ExtractIntent（query_type + glossary=3）、Chat（流式 + glossary=5 + tool_results=6）、PlanTools（ToolSpec/ToolResult/PlannedCall，2026-09-06） | B 侧 proto 已落地并编译；AI 侧对账字段号 |
 | mirror_profile.proto | MirrorProfile | GenerateProfile | proto 已定义，实现待核实 |
 | common.proto | — | GlossaryTerm / ChunkDTO 消息（词典轮，2026-09-05） | AI 已落地，B 对齐字段号 |
 
 ## 变更登记
+| 2026-10-16 | agent-B / AI | ClassifyRequest 增加 `bool processing_authorized = 8`，两仓 proto 同步。Java 仅在用户主动请求本次整理或确认片段的分类调用中设为 true；Python 对缺省/false 请求在创建 LLM 前返回 PERMISSION_DENIED。字段缺省为 false，旧客户端 fail-closed。 | 双端重跑/编译 proto；AI 侧补未授权拒绝测试。 |
 | 日期 | 改动方 | 内容 | 对方动作 |
 |------|--------|------|----------|
 | 2026-09-03 | 总指挥 | 初始登记。ClassifyRequest.single 为首个待同步项：Java 侧加字段（field 3），Python 侧实现 single 模式 + classify-single prompt | 双方对照实现 |
