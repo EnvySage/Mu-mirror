@@ -121,6 +121,14 @@ class ChatRetrievalTest {
                 .build();
     }
 
+    /** 指定文本、无 sources 的 done 块——无材料路径用（没有资料可引用） */
+    private MirrorChatProto.ChatChunk answerChunk(String text) {
+        return MirrorChatProto.ChatChunk.newBuilder()
+                .setContent(text)
+                .setDone(true)
+                .build();
+    }
+
     @Test
     @DisplayName("SEMANTIC 路由：无 time_range → 开衰减（halfLife=30）")
     void semantic_appliesDecay() {
@@ -219,16 +227,36 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("检索为空 → 兜底文案落库 assistant 消息（6.6）")
-    void emptyRetrieval_fallbackPersisted() {
+    @DisplayName("检索为空 → 仍调 LLM（无材料也交给模型，2026-09-23 起不再直接吐模板）")
+    void emptyRetrieval_stillCallsLlm() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("说了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
                 .thenReturn(List.of());
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk("在的，今天想聊什么？")).iterator());
 
         chatService.chat(USER_ID, ChatRequestDTO.builder().question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(aiGrpcClient, never()).chatStream(any(), any());
-        // 文案改为三档中的"有记录但没匹配上"（§6.1），且打 is_fallback=true 不进后续上下文（§6.2）
+        // 无材料不再短路：模型照常被调用，由 prompt 决定怎么自然回应
+        verify(aiGrpcClient).chatStream(eq(USER_ID), any());
+        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
+                "assistant".equals(h.getRole())
+                        && "在的，今天想聊什么？".equals(h.getContent())
+                        && !Boolean.TRUE.equals(h.getIsFallback())));
+    }
+
+    @Test
+    @DisplayName("检索为空 + LLM 返回空流 → 回落到分档兜底文案（最后一道网）")
+    void emptyRetrieval_llmEmptyStream_stillFallsBack() {
+        when(aiGrpcClient.extractIntent(eq(USER_ID), eq("说了什么"), any())).thenReturn(intent("semantic", ""));
+        when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
+                .thenReturn(List.of());
+        // LLM 一个字都没吐（流为空）→ streamAnswer 内部兜底
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.<MirrorChatProto.ChatChunk>of().iterator());
+
+        chatService.chat(USER_ID, ChatRequestDTO.builder().question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+
+        verify(aiGrpcClient).chatStream(eq(USER_ID), any());
+        // 文案 = 分档里的"有记录但没匹配上"（§6.1），且打 is_fallback=true 不进后续上下文（§6.2）
         verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
                 "assistant".equals(h.getRole())
                         && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())
@@ -264,8 +292,8 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("检索为空且工具成功但零命中（count=0/items 空）→ 仍走兜底，不放行 LLM")
-    void emptyRetrieval_withEmptyToolPayload_fallsBack() {
+    @DisplayName("检索为空 + 工具成功但零命中（count=0/items 空）→ 仍调 LLM，空流才回落兜底")
+    void emptyRetrieval_withEmptyToolPayload_emptyStreamFallsBack() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("说了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
                 .thenReturn(List.of());
@@ -274,33 +302,35 @@ class ChatRetrievalTest {
                 org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
                         .setTool("find_item").setSummary("find_item:0个文件").setSuccess(true)
                         .setPayloadJson("{\"count\":0,\"items\":[]}").build()));
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.<MirrorChatProto.ChatChunk>of().iterator());
 
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(aiGrpcClient, never()).chatStream(any(), any());
-        // hasUsableToolData 口径不变：count=0 / items 空 不算材料 → 循环跑完仍无料 → 兜底
+        // 无材料不再短路：照样问模型；这一例模型也没给内容 → 回落分档文案
+        verify(aiGrpcClient).chatStream(eq(USER_ID), any());
         verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
                 "assistant".equals(h.getRole())
                         && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())));
     }
 
     @Test
-    @DisplayName("相关性下限（余弦距离 0.35）下推到 SQL；全被滤掉 → 兜底不调 LLM")
-    void relevanceThreshold_passedToSqlAndFallsBack() {
+    @DisplayName("相关性下限（余弦距离 0.35）下推到 SQL；全被滤掉 → 仍调 LLM（阈值 0.35 不动）")
+    void relevanceThreshold_passedToSqlAndStillCallsLlm() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), eq(0.35), anyInt()))
                 .thenReturn(List.of());
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk("这阵子没翻到相关的")).iterator());
 
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), eq(0.35), anyInt());
-        // 不相关就别答：直接兜底，不喂噪声给 LLM（阈值 0.35 是红线，不动）
-        verify(aiGrpcClient, never()).chatStream(any(), any());
+        // 阈值仍是红线（下推到 SQL 不放松）；但阈值滤空不等于不回答——交给模型自然回应
+        verify(aiGrpcClient).chatStream(eq(USER_ID), any());
         verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
                 "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())));
+                        && "这阵子没翻到相关的".equals(h.getContent())));
     }
 
     @Test
@@ -399,15 +429,18 @@ class ChatRetrievalTest {
     }
 
     // ==================== 兜底文案三档（chat-loop-design.md §6.1）====================
+    // 2026-09-23 起：无材料也先问模型，这三档退为"模型一个字都没吐"时的最后一道网。
+    // 故这些用例统一桩空流，验证的是"选档对不对"，而非"内容有没有被短路返回"。
 
     @Test
-    @DisplayName("兜底第 1 档：零记录新用户 → 情绪引导文案，不是\"查无此记录\"口吻")
+    @DisplayName("兜底第 1 档：零记录新用户 + 模型空流 → 情绪引导文案，不是\"查无此记录\"口吻")
     void fallbackTier1_zeroRecordUser_getsInvite() {
         when(statsMapper.countUserRecords(eq(USER_ID), any(), any())).thenReturn(0L);
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我最近特别焦虑怎么办"), any()))
                 .thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
                 .thenReturn(List.of());
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.<MirrorChatProto.ChatChunk>of().iterator());
 
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("我最近特别焦虑怎么办").sessionId(SESSION_ID).build(), new SseEmitter());
@@ -418,12 +451,13 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("兜底第 3 档：有记录 + 情绪倾诉（关键词/moods）→ 有人情味的回应")
+    @DisplayName("兜底第 3 档：有记录 + 情绪倾诉（关键词/moods）+ 模型空流 → 有人情味的回应")
     void fallbackTier3_emotionalTalk_getsEmpathy() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我最近特别焦虑怎么办"), any()))
                 .thenReturn(intent("semantic", "").toBuilder().addMoods("anxious").build());
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
                 .thenReturn(List.of());
+        when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.<MirrorChatProto.ChatChunk>of().iterator());
 
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("我最近特别焦虑怎么办").sessionId(SESSION_ID).build(), new SseEmitter());

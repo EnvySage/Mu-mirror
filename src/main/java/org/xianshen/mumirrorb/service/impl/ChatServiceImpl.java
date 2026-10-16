@@ -196,19 +196,24 @@ public class ChatServiceImpl implements ChatService {
             // 工具轨迹落库（[{tool, summary}]）：历史回放时前端据此还原工具轨迹芯片
             java.util.List<Map<String, Object>> toolsUsedRecords = toolsUsedRecords(toolResults);
 
-            // 5. 兜底（chat-loop-design.md §4.2）：判据从"这次检索空且工具无料"改为
-            // "**循环跑完仍无任何材料**"——材料够不够不再由检索完那一刻一次性判死，
-            // 而是等模型把该查的都查完（循环自己会终止）才认输。hasUsableToolData 口径不变：
-            // find_item 的 {"count":0,"items":[]}（成功但没找到）照旧不算材料。
-            if (chunks.isEmpty() && !hasUsableToolData(toolResults)) {
-                finishWithFallback(emitter, userId, session.getId(), route,
-                        fallbackText(userId, question, intent));
-                return;
-            }
-
-            // 6. 流式 Chat 透传（带工具结果）
+            // 5. 无材料也交给模型（2026-09-23 改）。
+            //
+            // 原实现：chunks 空 && 工具无料 → 直接 return 分档写死文案，模型一句话都不说。
+            // 后果是"你好""在吗"这类不指向任何记录的寒暄、以及主题没有对应记录的闲聊，全部
+            // 撞上同一段模板——同一个问题永远同一个回答，读起来像查询系统而不是认识你的人。
+            //
+            // 现在照常流式调用，由 prompt 决定"这轮没有资料时怎么自然回应"（chat.txt 有专节）；
+            // 真答不出（AI 挂了 / 流里一个字都没有）时，streamAnswer 内部仍回落到兜底文案——
+            // 兜底没丢，只是从"默认路径"退成"最后一道网"。
+            //
+            // 兜底文案按"这轮本来有没有材料"分两种说辞，别把两种失败混成一句：
+            //   有材料却没答出来（AI 挂了）→ "暂时无法回答"，用户知道是系统问题
+            //   本来就没材料（寒暄/查无此事）→ 分档文案，说清"没翻到"并给抓手
+            // 若不分，AI 抽风时会对着一堆命中记录说"我这边没对上"，比不说还糟。
+            boolean hasMaterial = !chunks.isEmpty() || hasUsableToolData(toolResults);
             streamAnswer(emitter, userId, session.getId(), route, question, intent, chunks,
-                    toolResults, toolsUsedRecords);
+                    toolResults, toolsUsedRecords,
+                    hasMaterial ? null : fallbackText(userId, question, intent));
         } catch (Exception e) {
             log.error("对话处理失败，用户: {}", userId, e);
             try {
@@ -226,12 +231,17 @@ public class ChatServiceImpl implements ChatService {
 
     /**
      * 流式回答：gRPC Chat 服务端流逐块转发为 SSE delta，结束后落库 assistant 消息 + 触碰 session
+     *
+     * @param emptyAnswerText 流里一个字都没拿到时的兜底文案（分档给出）。正常有料时是不传的
+     *                        （取 {@link #FALLBACK_NO_ANSWER}）；无材料的寒暄路径会传分档文案，
+     *                        让"AI 真挂了"和"这轮没资料"两种失败各说各话。
      */
     private void streamAnswer(SseEmitter emitter, UUID userId, UUID sessionId, String route,
                               String question, MirrorChatProto.ExtractIntentResponse intent,
                               List<RetrievedChunkDTO> chunks,
                               List<CommonProto.ToolResult> toolResults,
-                              List<Map<String, Object>> toolsUsedRecords) {
+                              List<Map<String, Object>> toolsUsedRecords,
+                              String emptyAnswerText) {
         MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, intent, chunks, sessionId, toolResults);
         StringBuilder answer = new StringBuilder();
         List<Map<String, Object>> sources = null;
@@ -259,7 +269,8 @@ public class ChatServiceImpl implements ChatService {
 
         if (answer.isEmpty()) {
             // AI 失败兜底（6.6）：仍落库，保证会话连续
-            finishWithFallback(emitter, userId, sessionId, route, FALLBACK_NO_ANSWER);
+            finishWithFallback(emitter, userId, sessionId, route,
+                    emptyAnswerText == null ? FALLBACK_NO_ANSWER : emptyAnswerText);
             return;
         }
 
