@@ -20,7 +20,7 @@ import java.util.UUID;
 /**
  * 画像快照实体（对应 profile_snapshots 表，设计文档 3.3 / 6.5）
  *
- * <p>取代旧 mirror_profiles。分层保留：manual 保最近 2 份，monthly 保 12 份。</p>
+ * <p>取代旧 mirror_profiles。快照是长期归档；上下文失效不会删除正文。</p>
  * <p>embedding：五维文本按固定顺序（mood→learning→todo→rhythm→overall）拼接后向量化，用于漂移检测。</p>
  * <p>不建向量索引：每用户仅 ~14 份快照，顺序扫描更快（裁决 #14）。</p>
  */
@@ -83,6 +83,21 @@ public class ProfileSnapshot {
 
     /** 用户记忆授权变化后置为 true；保留展示历史，但不再参与 AI 推断。 */
     private Boolean invalidated;
+
+    /** 同一月度归属的历史版本号；manual 快照固定为 1。 */
+    private Integer versionNo;
+
+    /** 当前月度版本标记；失效只影响上下文资格，不改变归档版本关系。 */
+    private Boolean isCurrent;
+
+    /** 是否保存了本快照完整的输入来源依赖。 */
+    private Boolean lineageTracked;
+
+    /** 退出后续 AI 上下文的时间。 */
+    private OffsetDateTime invalidatedAt;
+
+    /** 退出上下文的原因。 */
+    private String invalidatedReason;
 
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;

@@ -21,9 +21,11 @@ import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
+import org.xianshen.mumirrorb.mapper.SnapshotInputMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.Record;
+import org.xianshen.mumirrorb.pojo.DO.SnapshotInput;
 import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.service.impl.ChunkServiceImpl;
@@ -68,6 +70,9 @@ class RecordAiAuthorizationDatabaseTest {
 
     @Autowired
     private ProfileSnapshotMapper profileSnapshotMapper;
+
+    @Autowired
+    private SnapshotInputMapper snapshotInputMapper;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -182,6 +187,36 @@ class RecordAiAuthorizationDatabaseTest {
         assertFalse(persisted.getAiMemoryApproved());
         assertNull(persisted.getEmbedding());
         assertTrue(chunkMapper.searchBySimilarity(userId, vectorLiteral(), 10).isEmpty());
+    }
+
+    @Test
+    void archivedSnapshotKeepsBodyAndDependencyTombstoneWithoutSourceForeignKey() {
+        UUID userId = createUser();
+        ProfileSnapshot snapshot = ProfileSnapshot.builder()
+                .userId(userId)
+                .snapshotType("monthly")
+                .periodMonth("2026-09")
+                .overallSummary("archive body")
+                .embedding(embeddingValues())
+                .invalidated(true)
+                .createdAt(OffsetDateTime.now())
+                .build();
+        profileSnapshotMapper.insert(snapshot);
+
+        long physicallyRemovedRecordId = Long.MAX_VALUE;
+        snapshotInputMapper.insertAll(snapshot.getId(), List.of(SnapshotInput.builder()
+                .inputKind("record")
+                .inputId(physicallyRemovedRecordId)
+                .inputRole("stats")
+                .build()));
+
+        ProfileSnapshot persisted = profileSnapshotMapper.selectById(snapshot.getId());
+        assertEquals("archive body", persisted.getOverallSummary());
+        assertTrue(persisted.getInvalidated());
+        assertEquals(1024, persisted.getEmbedding().size());
+        List<SnapshotInput> inputs = snapshotInputMapper.selectBySnapshotId(snapshot.getId());
+        assertEquals(1, inputs.size());
+        assertEquals(physicallyRemovedRecordId, inputs.get(0).getInputId());
     }
 
     private UUID createUser() {

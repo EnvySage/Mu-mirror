@@ -7,7 +7,8 @@
 --   1. schema.sql        ← 本文件，唯一权威基准（chunks 已并入）
 --   2. migration-v2.sql  ← 仅存量旧库迁移用；空库执行为无害空操作
 --   3. migration-v3-record-ai-authorization.sql ← 授权字段迁移；空库执行为无害空操作
---   4. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
+--   4. migration-v4-mirror-archive-lineage.sql ← 镜子归档/依赖迁移；空库执行为无害空操作
+--   5. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
 -- 对应设计文档：Mu-mirror-B/docs/2026-09-03-system-design-v2.md 第三章、3.4、裁决 #2/#6/#8/#9/#14/#17/#18/#20
 -- ============================================================
 
@@ -114,13 +115,31 @@ CREATE TABLE IF NOT EXISTS profile_snapshots (
     overall_summary TEXT,
     embedding vector(1024),               -- 漂移检测用（五维文本按固定顺序拼接后向量化）
     invalidated BOOLEAN NOT NULL DEFAULT FALSE, -- 来源授权变化后不再进入后续AI推断
+    version_no INT NOT NULL DEFAULT 1,    -- 同一归属月份的历史版本号
+    is_current BOOLEAN NOT NULL DEFAULT TRUE, -- monthly 每月最多一个当前版本；旧版本仍归档
+    lineage_tracked BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE 表示已记录生成输入依赖
+    invalidated_at TIMESTAMPTZ,            -- 退出后续 AI 上下文的时间
+    invalidated_reason VARCHAR(80),        -- 退出上下文的原因
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_user ON profile_snapshots(user_id, snapshot_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_snapshots_period ON profile_snapshots(user_id, snapshot_type, period_month);
--- 同一 (user, monthly, 归属月份) 唯一：幂等重生成即替换（部分唯一索引，NULL 不参与约束）
-CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshots_user_period
-    ON profile_snapshots(user_id, period_month) WHERE snapshot_type = 'monthly' AND period_month IS NOT NULL;
+DROP INDEX IF EXISTS uq_snapshots_user_period;
+-- 同一 (user, monthly, 归属月份) 只允许一个当前版，旧版本保留为只读归档。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshots_user_period_current
+    ON profile_snapshots(user_id, period_month)
+    WHERE snapshot_type = 'monthly' AND period_month IS NOT NULL AND is_current = TRUE;
+
+CREATE TABLE IF NOT EXISTS snapshot_inputs (
+    snapshot_id BIGINT NOT NULL REFERENCES profile_snapshots(id) ON DELETE CASCADE,
+    input_kind VARCHAR(16) NOT NULL,       -- snapshot / record / chunk
+    input_id BIGINT NOT NULL,              -- 不设来源外键，物理清除后保留墓碑
+    input_role VARCHAR(24) NOT NULL,        -- parent / stats / todo / learning / lookback / correction_index
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (snapshot_id, input_kind, input_id, input_role)
+);
+CREATE INDEX IF NOT EXISTS idx_snapshot_inputs_source ON snapshot_inputs(input_kind, input_id, snapshot_id);
+COMMENT ON TABLE snapshot_inputs IS '快照实际使用的父快照与原始来源 ID；不存正文，来源删除后保留归档墓碑';
 
 -- ============================================================
 -- 会话（6.6；无 last_message_at，统一用 updated_at，裁决 #9）
