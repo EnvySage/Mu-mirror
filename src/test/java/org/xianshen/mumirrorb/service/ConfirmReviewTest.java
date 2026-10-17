@@ -22,6 +22,7 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.service.impl.RecordServiceImpl;
 import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
 import org.xianshen.mumirrorb.service.TodoRegistryService;
+import org.xianshen.mumirrorb.service.ChunkEmbeddingJobService;
 
 import java.util.List;
 import java.util.Collections;
@@ -63,6 +64,9 @@ class ConfirmReviewTest {
 
     @Mock
     private TodoRegistryService todoRegistryService;
+
+    @Mock
+    private ChunkEmbeddingJobService chunkEmbeddingJobService;
 
     @InjectMocks
     private RecordServiceImpl recordService;
@@ -158,8 +162,6 @@ class ConfirmReviewTest {
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
         when(aiGrpcClient.classifySingle(eq(USER_ID), any(), eq(RECORD_ID), any()))
                 .thenThrow(new RuntimeException("gRPC down"));
-        when(aiGrpcClient.embed(eq(USER_ID), any())).thenReturn(embedResponse());
-
         recordService.confirmReview(RECORD_ID, USER_ID, List.of(10L), List.of(), null);
 
         // 参照日期为 null：本测试 record 未设 createdAt（AI 侧按无参照日期处理，退化为不消解）
@@ -178,9 +180,6 @@ class ConfirmReviewTest {
                 .content("原文").segment("片段").classifiedSegment("片段") // 文本未变，无需补分类
                 .build();
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
-        when(aiGrpcClient.embed(eq(USER_ID), any()))
-                .thenThrow(new RuntimeException("embed down"));
-
         recordService.confirmReview(RECORD_ID, USER_ID, List.of(10L), List.of(), null);
 
         // 文本未变 → 不调 LLM
@@ -188,6 +187,9 @@ class ConfirmReviewTest {
         assertEquals(RecordStatus.DONE, record.getStatus());
         assertTrue(record.getUserReviewed());
         assertNull(chunk.getEmbedding());
+        assertEquals("pending", chunk.getEmbeddingStatus());
+        verify(chunkEmbeddingJobService).enqueue(chunk);
+        verify(aiGrpcClient, never()).embed(any(), any());
     }
 
     @Test
@@ -200,8 +202,6 @@ class ConfirmReviewTest {
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
         when(aiGrpcClient.classifySingle(eq(USER_ID), eq("新文本"), eq(RECORD_ID), any()))
                 .thenReturn(singleResponse("学Spring Boot"));
-        when(aiGrpcClient.embed(eq(USER_ID), any())).thenReturn(embedResponse());
-
         recordService.confirmReview(RECORD_ID, USER_ID, List.of(10L), List.of(), null);
 
         ArgumentCaptor<Chunk> captor = ArgumentCaptor.forClass(Chunk.class);
@@ -210,6 +210,9 @@ class ConfirmReviewTest {
         assertEquals("learning", saved.getMetadata().get("contentType"));
         assertEquals("新文本", saved.getClassifiedSegment());
         assertEquals(RecordStatus.DONE, record.getStatus());
+        assertEquals("pending", saved.getEmbeddingStatus());
+        verify(chunkEmbeddingJobService).enqueue(saved);
+        verify(aiGrpcClient, never()).embed(any(), any());
     }
 
     @Test
@@ -224,8 +227,6 @@ class ConfirmReviewTest {
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
         when(aiGrpcClient.classifySingle(eq(USER_ID), eq("今天学了 Spring Boot"), eq(RECORD_ID), any()))
                 .thenReturn(singleResponseWithTimeSub("今天", "9月19日"));
-        when(aiGrpcClient.embed(eq(USER_ID), any())).thenReturn(embedResponse());
-
         recordService.confirmReview(RECORD_ID, USER_ID, List.of(11L), List.of(), null);
 
         ArgumentCaptor<Chunk> captor = ArgumentCaptor.forClass(Chunk.class);
@@ -236,8 +237,12 @@ class ConfirmReviewTest {
         assertEquals("9月19日学了 Spring Boot", saved.getClassifiedSegment());
         // content 原文不动（红线：用户输入不可修改）
         assertEquals("今天学了 Spring Boot", saved.getContent());
-        // 关键：embedding 发生在消解之后，吃到的是带真日期的文本
-        verify(aiGrpcClient).embed(eq(USER_ID), eq("9月19日学了 Spring Boot"));
+        // 任务使用已消解的 segment，embedding RPC 留给后台 worker。
+        ArgumentCaptor<Chunk> jobChunk = ArgumentCaptor.forClass(Chunk.class);
+        verify(chunkEmbeddingJobService).enqueue(jobChunk.capture());
+        assertEquals("9月19日学了 Spring Boot", jobChunk.getValue().getSegment());
+        assertEquals("pending", jobChunk.getValue().getEmbeddingStatus());
+        verify(aiGrpcClient, never()).embed(any(), any());
     }
 
     @Test

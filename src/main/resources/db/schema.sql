@@ -62,6 +62,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     classified_segment TEXT,            -- 生成当前 metadata 时所用的 segment 文本；NULL = 未分类/文本已改
     user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
     ai_memory_approved BOOLEAN NOT NULL DEFAULT FALSE, -- 用户逐片段确认后才进入后续 AI 记忆
+    embedding_status VARCHAR(24) NOT NULL DEFAULT 'not_requested', -- 持久 embedding 工作状态
+    content_version BIGINT NOT NULL DEFAULT 1,          -- segment 变化时递增，屏蔽迟到向量
+    embedding_error TEXT,                                -- 最近一次向量失败摘要
     todo_approved BOOLEAN NOT NULL DEFAULT FALSE,       -- 待办需另行确认
     vault_item_id BIGINT,               -- 外键在 vault_items 建表后补齐，解决两表循环引用
     embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
@@ -71,6 +74,31 @@ CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_vault_item ON chunks(vault_item_id);  -- vault 消化 chunks 溯源/级联清
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS chunk_embedding_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content_version BIGINT NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'ready', 'failed', 'cancelled')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    lease_until TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_embedding_jobs_due
+    ON chunk_embedding_jobs(status, available_at, id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_chunk_embedding_jobs_expired_lease
+    ON chunk_embedding_jobs(lease_until, id) WHERE status = 'processing';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_chunk_embedding_job_active_version
+    ON chunk_embedding_jobs(chunk_id, content_version)
+    WHERE status IN ('pending', 'processing');
+CREATE INDEX IF NOT EXISTS idx_chunk_embedding_jobs_chunk
+    ON chunk_embedding_jobs(chunk_id, created_at DESC);
 
 -- ============================================================
 -- 用户配置表（AI 模型配置，每个用户一条）

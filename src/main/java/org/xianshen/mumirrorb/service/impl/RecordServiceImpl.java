@@ -10,7 +10,6 @@ import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
-import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
@@ -25,6 +24,7 @@ import org.xianshen.mumirrorb.pojo.VO.RecordVO;
 import org.xianshen.mumirrorb.pipeline.ClassifyItemConverter;
 import org.xianshen.mumirrorb.pipeline.TimeSubstitutionApplier;
 import org.xianshen.mumirrorb.service.RecordService;
+import org.xianshen.mumirrorb.service.ChunkEmbeddingJobService;
 
 import org.xianshen.mumirrorb.pipeline.event.RecordCreatedEvent;
 
@@ -52,6 +52,7 @@ public class RecordServiceImpl implements RecordService {
     private final ApplicationEventPublisher eventPublisher;
     private final AiGrpcClient aiGrpcClient;
     private final org.springframework.context.ApplicationContext applicationContext;
+    private final ChunkEmbeddingJobService chunkEmbeddingJobService;
 
     /**
      * 待办登记服务（todo-registry-design.md §3.1）
@@ -290,6 +291,7 @@ public class RecordServiceImpl implements RecordService {
             boolean approveMemory = approvedIds.contains(chunk.getId());
             boolean approveTodo = approvedTodoIds.contains(chunk.getId());
             boolean wasApproved = Boolean.TRUE.equals(chunk.getAiMemoryApproved());
+            boolean segmentResolved = false;
             if (wasApproved && !approveMemory) revokedMemoryChunkIds.add(chunk.getId());
             if ((approveMemory || approveTodo) && (chunk.getSegment() == null || chunk.getSegment().isBlank())) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "空片段不能授权给 AI 或登记为待办");
@@ -310,6 +312,10 @@ public class RecordServiceImpl implements RecordService {
                             RecordProcessorProto.ClassifyItem item = response.getItems(0);
                             chunk.setMetadata(ClassifyItemConverter.toMetadata(item));
                             String resolved = TimeSubstitutionApplier.apply(text, item.getTimeSubstitutionsList());
+                            if (!java.util.Objects.equals(chunk.getSegment(), resolved)) {
+                                chunk.setContentVersion((chunk.getContentVersion() == null ? 1L : chunk.getContentVersion()) + 1L);
+                                segmentResolved = true;
+                            }
                             chunk.setSegment(resolved);
                             chunk.setClassifiedSegment(resolved);
                         }
@@ -318,20 +324,29 @@ public class RecordServiceImpl implements RecordService {
                     }
                 }
             }
-            if (approveMemory && chunk.getSegment() != null && !chunk.getSegment().isBlank() &&
-                    (!wasApproved || chunk.getEmbedding() == null || chunk.getEmbedding().isEmpty())) {
-                try {
-                    EmbeddingProto.EmbedResponse embedded = aiGrpcClient.embed(userId, chunk.getSegment());
-                    chunk.setEmbedding(embedded.getVectorList());
-                } catch (Exception e) {
-                    log.warn("片段向量生成失败，后续可补录，chunk={}: {}", chunk.getId(), e.getMessage());
-                }
+            boolean needsEmbedding = approveMemory && chunk.getSegment() != null && !chunk.getSegment().isBlank()
+                    && (segmentResolved || !wasApproved || chunk.getEmbedding() == null || chunk.getEmbedding().isEmpty());
+            if (!approveMemory) {
+                chunk.setEmbedding(null);
+                chunk.setEmbeddingStatus("not_requested");
+                chunk.setEmbeddingError(null);
+                chunkEmbeddingJobService.cancel(chunk.getId(), userId);
+            } else if (needsEmbedding) {
+                chunk.setEmbedding(null);
+                chunk.setEmbeddingStatus("pending");
+                chunk.setEmbeddingError(null);
+            } else if (chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty()) {
+                chunk.setEmbeddingStatus("ready");
             }
-            if (!approveMemory) chunk.setEmbedding(null);
             chunk.setAiMemoryApproved(approveMemory);
             // 已创建的待办由待办页管理；此处不因片段记忆开关变化而撤销它。
             chunk.setTodoApproved(approveTodo || Boolean.TRUE.equals(chunk.getTodoApproved()));
+            if (needsEmbedding) chunkMapper.clearEmbedding(chunk.getId(), userId);
             chunkMapper.updateById(chunk);
+            if (needsEmbedding) {
+                if (chunk.getContentVersion() == null) chunk.setContentVersion(1L);
+                chunkEmbeddingJobService.enqueue(chunk);
+            }
             if (!approveMemory) chunkMapper.clearEmbedding(chunk.getId(), userId);
         }
 
@@ -410,6 +425,11 @@ public class RecordServiceImpl implements RecordService {
                 .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
                 .aiMemoryApproved(Boolean.TRUE.equals(chunk.getAiMemoryApproved()))
                 .todoApproved(Boolean.TRUE.equals(chunk.getTodoApproved()))
+                .contentVersion(chunk.getContentVersion())
+                .embeddingStatus(chunk.getEmbeddingStatus() == null
+                        ? (chunk.getEmbedding() == null ? "not_requested" : "ready")
+                        : chunk.getEmbeddingStatus())
+                .embeddingError(chunk.getEmbeddingError())
                 .build();
     }
 

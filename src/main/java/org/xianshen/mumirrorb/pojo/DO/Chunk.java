@@ -135,6 +135,15 @@ public class Chunk {
     @Schema(description = "向量嵌入（1024 维）")
     private List<Float> embedding;
 
+    /** 向量输入正文版本；正文变化时递增，拒绝迟到任务写入。 */
+    private Long contentVersion;
+
+    /** not_requested / pending / ready / failed。 */
+    private String embeddingStatus;
+
+    /** 最近一次向量重建错误摘要，仅用于当前用户自己的状态提示。 */
+    private String embeddingError;
+
     /**
      * 相似度（检索 SQL 计算列，非表列）
      *

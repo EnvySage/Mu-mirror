@@ -13,7 +13,7 @@ import java.util.UUID;
  * 记录服务接口
  *
  * <p>Record 是用户输入日志，AI 元数据在 Chunk 上。</p>
- * <p>审核时通过 Chunk 接口修改元数据，确认后对 Chunk 做 embedding。</p>
+ * <p>审核时通过 Chunk 接口修改片段；确认授权后将 embedding 写入后台持久任务队列。</p>
  */
 public interface RecordService {
 

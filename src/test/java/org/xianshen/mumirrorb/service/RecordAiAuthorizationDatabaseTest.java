@@ -19,6 +19,7 @@ import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
+import org.xianshen.mumirrorb.mapper.ChunkEmbeddingJobMapper;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
@@ -31,8 +32,10 @@ import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.SnapshotSourceRef;
 import org.xianshen.mumirrorb.service.impl.ChunkServiceImpl;
+import org.xianshen.mumirrorb.service.impl.ChunkEmbeddingJobServiceImpl;
 import org.xianshen.mumirrorb.service.impl.RecordServiceImpl;
 import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
+import org.xianshen.mumirrorb.maintenance.ChunkEmbeddingWorker;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -67,6 +70,9 @@ class RecordAiAuthorizationDatabaseTest {
 
     @Autowired
     private ChunkMapper chunkMapper;
+
+    @Autowired
+    private ChunkEmbeddingJobMapper chunkEmbeddingJobMapper;
 
     @Autowired
     private ChatSearchMapper chatSearchMapper;
@@ -133,6 +139,14 @@ class RecordAiAuthorizationDatabaseTest {
         service.confirmReview(record.getId(), userId,
                 List.of(memoryChunk.getId()), List.of(todoChunk.getId()), List.of());
 
+        Chunk pendingMemory = chunkMapper.selectById(memoryChunk.getId());
+        assertTrue(pendingMemory.getAiMemoryApproved());
+        assertNull(pendingMemory.getEmbedding());
+        assertEquals("pending", pendingMemory.getEmbeddingStatus());
+        verify(aiGrpcClient, never()).embed(any(), any());
+        new ChunkEmbeddingWorker(new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper), aiGrpcClient)
+                .processDueJobs();
+
         Chunk approvedMemory = chunkMapper.selectById(memoryChunk.getId());
         Chunk approvedTodo = chunkMapper.selectById(todoChunk.getId());
         assertTrue(approvedMemory.getAiMemoryApproved());
@@ -185,17 +199,22 @@ class RecordAiAuthorizationDatabaseTest {
         profileSnapshotMapper.insert(snapshot);
         snapshotInputMapper.insertAll(snapshot.getId(), List.of(SnapshotInput.builder()
                 .inputKind("chunk").inputId(chunk.getId()).inputRole("stats").build()));
+        Chunk beforeEdit = chunkMapper.selectById(chunk.getId());
+        chunkEmbeddingJobMapper.insertIfNoActiveVersion(chunk.getId(), userId,
+                beforeEdit.getContentVersion(), "pending-fixture-hash");
 
         ChunkDTO edit = new ChunkDTO();
         edit.setSegment("edited segment");
         new ChunkServiceImpl(chunkMapper, recordMapper, new SnapshotLineageService(profileSnapshotMapper),
-                mock(AiGrpcClient.class)).update(chunk.getId(), edit, userId);
+                mock(AiGrpcClient.class), new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper))
+                .update(chunk.getId(), edit, userId);
 
         Chunk persisted = chunkMapper.selectById(chunk.getId());
         assertEquals("edited segment", persisted.getSegment());
         assertNull(persisted.getClassifiedSegment());
         assertFalse(persisted.getAiMemoryApproved());
         assertNull(persisted.getEmbedding());
+        assertEquals("cancelled", chunkEmbeddingJobMapper.findLatest(chunk.getId(), userId).getStatus());
         assertTrue(chunkMapper.searchBySimilarity(userId, vectorLiteral(), 10).isEmpty());
         ProfileSnapshot invalidated = profileSnapshotMapper.selectById(snapshot.getId());
         assertTrue(invalidated.getInvalidated());
@@ -221,7 +240,8 @@ class RecordAiAuthorizationDatabaseTest {
                 .inputKind("chunk").inputId(chunk.getId()).inputRole("stats").build()));
 
         new ChunkServiceImpl(chunkMapper, recordMapper, new SnapshotLineageService(profileSnapshotMapper),
-                mock(AiGrpcClient.class)).delete(chunk.getId(), userId);
+                mock(AiGrpcClient.class), new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper))
+                .delete(chunk.getId(), userId);
 
         assertNull(chunkMapper.selectById(chunk.getId()));
         ProfileSnapshot invalidated = profileSnapshotMapper.selectById(snapshot.getId());
@@ -408,7 +428,8 @@ class RecordAiAuthorizationDatabaseTest {
         TodoRegistryService todoRegistryService = mock(TodoRegistryService.class);
         when(applicationContext.getBean(TodoRegistryService.class)).thenReturn(todoRegistryService);
         return new RecordServiceImpl(recordMapper, chunkMapper, new SnapshotLineageService(profileSnapshotMapper),
-                mock(ApplicationEventPublisher.class), aiGrpcClient, applicationContext);
+                mock(ApplicationEventPublisher.class), aiGrpcClient, applicationContext,
+                new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper));
     }
 
     private String vectorLiteral() {

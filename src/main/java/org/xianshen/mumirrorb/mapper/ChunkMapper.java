@@ -24,9 +24,33 @@ import java.util.UUID;
 @Mapper
 public interface ChunkMapper extends BaseMapper<Chunk> {
 
-    /** Explicitly remove a previously stored vector when memory authorization is revoked. */
-    @Update("UPDATE chunks SET embedding = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
+    /** Explicitly remove a previously stored vector when its text or authorization changes. */
+    @Update("UPDATE chunks SET embedding = NULL, embedding_status = 'not_requested', embedding_error = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
     int clearEmbedding(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
+
+    @Update("UPDATE chunks SET embedding_status = 'pending', embedding_error = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid AND ai_memory_approved = TRUE AND content_version = #{contentVersion}")
+    int markEmbeddingPending(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                             @Param("contentVersion") Long contentVersion);
+
+    @Update("""
+            UPDATE chunks c SET embedding = #{embedding,typeHandler=org.xianshen.mumirrorb.common.handler.VectorTypeHandler},
+                embedding_status = 'ready', embedding_error = NULL
+            WHERE c.id = #{chunkId} AND c.user_id = #{userId}::uuid
+              AND c.ai_memory_approved = TRUE AND c.content_version = #{contentVersion}
+              AND EXISTS (SELECT 1 FROM chunk_embedding_jobs j
+                          WHERE j.id = #{jobId} AND j.chunk_id = c.id
+                            AND j.user_id = c.user_id AND j.content_version = c.content_version
+                            AND j.status = 'processing')
+            """)
+    int saveEmbeddingIfCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                               @Param("contentVersion") Long contentVersion,
+                               @Param("jobId") Long jobId,
+                               @Param("embedding") List<Float> embedding);
+
+    @Update("UPDATE chunks SET embedding_status = 'failed', embedding_error = #{error} WHERE id = #{chunkId} AND user_id = #{userId}::uuid AND ai_memory_approved = TRUE AND content_version = #{contentVersion}")
+    int markEmbeddingFailedIfCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                                     @Param("contentVersion") Long contentVersion,
+                                     @Param("error") String error);
 
     /** Clear classification provenance when the user changes the segment text. */
     @Update("UPDATE chunks SET classified_segment = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")

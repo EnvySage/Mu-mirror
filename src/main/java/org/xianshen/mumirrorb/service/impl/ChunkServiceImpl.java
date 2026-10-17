@@ -18,6 +18,7 @@ import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.pipeline.ClassifyItemConverter;
 import org.xianshen.mumirrorb.pipeline.TimeSubstitutionApplier;
 import org.xianshen.mumirrorb.service.ChunkService;
+import org.xianshen.mumirrorb.service.ChunkEmbeddingJobService;
 
 import java.time.OffsetDateTime;
 import java.util.HashMap;
@@ -37,6 +38,7 @@ public class ChunkServiceImpl implements ChunkService {
     private final RecordMapper recordMapper;
     private final SnapshotLineageService snapshotLineageService;
     private final AiGrpcClient aiGrpcClient;
+    private final ChunkEmbeddingJobService chunkEmbeddingJobService;
 
     @Override
     @Transactional
@@ -107,21 +109,30 @@ public class ChunkServiceImpl implements ChunkService {
         //    改文本 → classified_segment 置 NULL（confirm 时补分类）；改元数据 → 不影响它
         if (textChanged) {
             chunk.setClassifiedSegment(null);
+            chunk.setContentVersion((chunk.getContentVersion() == null ? 1L : chunk.getContentVersion()) + 1L);
         }
-        if (textChanged || metadataChanged) {
+        if (textChanged) {
             chunk.setUserEdited(true);
             boolean hadMemoryApproval = Boolean.TRUE.equals(chunk.getAiMemoryApproved());
             chunk.setAiMemoryApproved(false);
             chunk.setEmbedding(null);
+            chunk.setEmbeddingStatus("not_requested");
+            chunk.setEmbeddingError(null);
             if (hadMemoryApproval) {
                 snapshotLineageService.invalidateSource(userId, "chunk", chunkId, "approved_chunk_edited");
             }
+            chunkEmbeddingJobService.cancel(chunkId, userId);
+        } else if (metadataChanged) {
+            // 元数据不参与向量文本；只记录用户编辑，不撤销正文记忆授权。
+            chunk.setUserEdited(true);
         }
 
         chunk.setMetadata(metadata);
-        chunkMapper.updateById(chunk);
-        if (textChanged) chunkMapper.clearClassifiedSegment(chunkId, userId);
-        if (textChanged || metadataChanged) chunkMapper.clearEmbedding(chunkId, userId);
+        if (textChanged || metadataChanged) chunkMapper.updateById(chunk);
+        if (textChanged) {
+            chunkMapper.clearClassifiedSegment(chunkId, userId);
+            chunkMapper.clearEmbedding(chunkId, userId);
+        }
         log.info("Chunk 已更新，ID: {}, 用户: {}, 文本变更: {}, 元数据变更: {}",
                 chunkId, userId, textChanged, metadataChanged);
 
@@ -223,6 +234,11 @@ public class ChunkServiceImpl implements ChunkService {
                 .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
                 .aiMemoryApproved(Boolean.TRUE.equals(chunk.getAiMemoryApproved()))
                 .todoApproved(Boolean.TRUE.equals(chunk.getTodoApproved()))
+                .contentVersion(chunk.getContentVersion())
+                .embeddingStatus(chunk.getEmbeddingStatus() == null
+                        ? (chunk.getEmbedding() == null ? "not_requested" : "ready")
+                        : chunk.getEmbeddingStatus())
+                .embeddingError(chunk.getEmbeddingError())
                 .build();
     }
 }

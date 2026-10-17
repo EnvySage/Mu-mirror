@@ -54,8 +54,9 @@
 
 ### 状态接口与前端刷新
 
-- 编辑/授权 API 快速返回当前 chunk 与 embedding 状态；授权接口不等待 AI gRPC。
-- chunk 查询响应携带 `embedding_status`、最近任务更新时间和必要的错误摘要。失败重试接口以 chunk 和当前内容版本为幂等边界。
+- embedding 授权接口不等待 embedding gRPC；chunk 查询响应携带 `embedding_status`、`content_version` 和必要的错误摘要。失败重试接口以 chunk 和当前内容版本为幂等边界。
+- 重新排队入口为 `POST /chunks/{id}/embedding/retry`，只允许当前用户拥有且仍获记忆授权的片段。
+- `PUT /records/{id}/confirm` 仍可能为新改文本同步补分类；本次只将 embedding RPC 移出该请求。若分类本身需要远程 AI 调用，确认仍可能等待分类，但不再等待向量生成。
 - 前端在当前记录详情可见期间轻量轮询 pending 状态；离开页面停止轮询，但不停止服务端任务。轮询发现版本变化时更新状态；失败时停止高频轮询并展示重试。
 - 如现有状态推送设施成熟，可后续换成 SSE/WebSocket；本次不引入新推送依赖。
 

@@ -65,4 +65,13 @@ public class ChunkVO {
 
     @Schema(description = "用户是否单独确认此片段作为待办")
     private Boolean todoApproved;
+
+    @Schema(description = "向量输入正文版本")
+    private Long contentVersion;
+
+    @Schema(description = "向量状态：not_requested / pending / ready / failed")
+    private String embeddingStatus;
+
+    @Schema(description = "最近一次向量重建错误摘要")
+    private String embeddingError;
 }
