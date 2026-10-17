@@ -13,7 +13,7 @@ import java.util.UUID;
  * 记录服务接口
  *
  * <p>Record 是用户输入日志，AI 元数据在 Chunk 上。</p>
- * <p>审核时通过 Chunk 接口修改元数据，确认后对 Chunk 做 embedding。</p>
+ * <p>审核时通过 Chunk 接口修改片段；确认授权后将 embedding 写入后台持久任务队列。</p>
  */
 public interface RecordService {
 
@@ -21,6 +21,12 @@ public interface RecordService {
      * 创建记录
      */
     RecordVO create(RecordDTO dto, UUID userId);
+
+    /** 用户对已保存原文明确请求 AI 整理。 */
+    RecordVO organize(Long recordId, UUID userId);
+
+    /** 仅记录状态下编辑原文。 */
+    RecordVO updateRaw(Long recordId, String content, UUID userId);
 
     /**
      * 查询记录列表
@@ -33,13 +39,12 @@ public interface RecordService {
     RecordVO getById(Long recordId, UUID userId);
 
     /**
-     * 确认审查完成（遍历 Chunk 做 embedding；不含待办决议，等价
-     * {@code confirmReview(recordId, userId, null)}——本记录未处理 pending 建议一律作废）
+     * 兼容旧客户端的确认入口（未提供授权 ID 时按空集合处理，fail closed）
      */
     RecordVO confirmReview(Long recordId, UUID userId);
 
     /**
-     * 确认审查完成 + 应用待办决议（审核页唯一状态变更入口，todo-status-removal-design.md §5）
+     * 保存片段记忆授权、独立待办授权并应用待办决议
      *
      * <p>body.todoResolutions 处理：confirmed 随入库一起生效（回写源头/证据 chunk taskStatus +
      * registry 状态 + evidence link + 建议 confirmed）；dismissed 静默；未出现在 body 中的
@@ -47,7 +52,8 @@ public interface RecordService {
      *
      * @param resolutions 待办决议列表（可空）
      */
-    RecordVO confirmReview(Long recordId, UUID userId, List<TodoResolutionDTO> resolutions);
+    RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                           List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions);
 
     /**
      * 软删除记录

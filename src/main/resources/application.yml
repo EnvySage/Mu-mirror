@@ -114,6 +114,13 @@ vault:
 
 # 递归累计镜子（rolling-mirror-design.md §2/§3：四道防洪闸全配置化）
 mirror:
+  embedding:
+    worker:
+      fixed-delay-ms: 2000
+      batch-size: 4
+      lease-seconds: 180
+      max-attempts: 5
+      retry-base-seconds: 10
   lookback-max-chunks: 600             # 条数闸，超限取最近的
   lookback-max-chars: 150000           # 总字符闸（与条数闸先触发者生效），旧→新裁剪直到塞下
   per-chunk-max-chars: 2000            # 单条日记渲染截断
@@ -132,6 +139,6 @@ record-context:
   max-query: 50                        # SQL 查询上限（去重前多查兜底）
   max-keywords: 5                      # 每条条目携带 keywords 上限
 
-# 审核模式总闸（false 时强制 manual，前端隐藏 auto 开关）
+# 旧配置兼容项（auto 审核已永久停用，运行时忽略）
 review:
   auto-enabled: false

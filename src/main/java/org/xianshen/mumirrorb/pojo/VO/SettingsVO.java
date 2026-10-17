@@ -63,16 +63,15 @@ public class SettingsVO {
     @Schema(description = "Embedding 模型名称", example = "BAAI/bge-m3")
     private String embeddingModel;
 
-    @Schema(description = "审核模式（实际生效值：总闸 review.auto-enabled=false 时恒为 manual，"
-            + "不回显存量 auto；总闸开启时为用户偏好值）", example = "manual")
+    @Schema(description = "审核模式（固定 manual；长期记忆与待办需分别授权）", example = "manual")
     private String reviewMode;
 
     /**
-     * auto 审核模式是否可用（只读，来自后端总闸 review.auto-enabled）
+     * auto 审核模式是否可用（当前固定关闭）
      *
-     * <p>false 时前端隐藏 auto 开关（字段名固定为 autoReviewAvailable，前端契约）。</p>
+     * <p>字段保留兼容旧客户端，当前始终为 false。</p>
      */
-    @Schema(description = "auto 审核模式是否可用（false 时前端隐藏 auto 开关）", example = "false")
+    @Schema(description = "自动审核是否可用（兼容旧客户端，固定 false）", example = "false")
     private boolean autoReviewAvailable;
 
     @Schema(description = "RAG时间衰减半衰期（天，7-365）", example = "30")

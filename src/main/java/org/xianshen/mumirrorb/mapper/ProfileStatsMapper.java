@@ -2,8 +2,11 @@ package org.xianshen.mumirrorb.mapper;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
+import org.xianshen.mumirrorb.pojo.DTO.SnapshotSourceRef;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -51,10 +54,41 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-            ORDER BY r.created_at DESC
+              AND c.todo_approved = TRUE
+            ORDER BY r.created_at DESC, c.id DESC
             LIMIT 50
             """)
     List<ProfileStatsDTO.TodoItemDTO> selectOpenTodos(@Param("userId") java.util.UUID userId);
+
+    @Select("""
+            SELECT 'record' AS "inputKind", r.id AS "inputId", 'todo' AS "inputRole"
+            FROM todo_registry t
+            JOIN chunks c ON c.id = t.source_chunk_id
+            JOIN records r ON r.id = c.record_id
+            WHERE t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status = 'done'
+              AND c.todo_approved = TRUE
+            UNION
+            SELECT 'chunk' AS "inputKind", c.id AS "inputId", 'todo' AS "inputRole"
+            FROM todo_registry t
+            JOIN chunks c ON c.id = t.source_chunk_id
+            JOIN records r ON r.id = c.record_id
+            WHERE t.user_id = #{userId}::uuid
+              AND t.deleted_at IS NULL
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status = 'done'
+              AND c.todo_approved = TRUE
+            """)
+    @Results({
+            @Result(column = "inputKind", property = "inputKind"),
+            @Result(column = "inputId", property = "inputId"),
+            @Result(column = "inputRole", property = "inputRole")
+    })
+    List<SnapshotSourceRef> selectTodoSourceRefs(@Param("userId") java.util.UUID userId);
 
     /**
      * 待办状态计数（<b>registry 口径</b>：todo-status-removal-design.md §11）
@@ -74,6 +108,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.todo_approved = TRUE
             GROUP BY 1
             """)
     List<java.util.Map<String, Object>> selectTodoStatusCounts(@Param("userId") java.util.UUID userId);
@@ -97,11 +132,85 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND c.metadata->>'contentType' = 'learning'
-            ORDER BY r.created_at DESC
+            ORDER BY r.created_at DESC, c.id DESC
             LIMIT 30
             """)
     List<java.util.Map<String, Object>> selectRecentLearningsRaw(@Param("userId") java.util.UUID userId);
+
+    @Select("""
+            WITH eligible AS (
+                SELECT r.id AS record_id, c.id AS chunk_id
+                FROM chunks c
+                JOIN records r ON r.id = c.record_id
+                WHERE c.user_id = #{userId}::uuid
+                  AND r.deleted_at IS NULL
+                  AND r.source = 'user'
+                  AND r.status = 'done'
+                  AND c.ai_memory_approved = TRUE
+                  AND c.metadata->>'contentType' = 'learning'
+                ORDER BY r.created_at DESC, c.id DESC
+                LIMIT 30
+            )
+            SELECT 'record' AS "inputKind", record_id AS "inputId", 'learning' AS "inputRole"
+            FROM eligible
+            UNION
+            SELECT 'chunk' AS "inputKind", chunk_id AS "inputId", 'learning' AS "inputRole"
+            FROM eligible
+            """)
+    @Results({
+            @Result(column = "inputKind", property = "inputKind"),
+            @Result(column = "inputId", property = "inputId"),
+            @Result(column = "inputRole", property = "inputRole")
+    })
+    List<SnapshotSourceRef> selectRecentLearningSourceRefs(@Param("userId") java.util.UUID userId);
+
+    @Select("""
+            <script>
+            WITH eligible AS (
+                SELECT r.id AS record_id, c.id AS chunk_id
+                FROM records r
+                JOIN chunks c ON c.record_id = r.id
+                WHERE r.user_id = #{userId}::uuid
+                  AND r.deleted_at IS NULL
+                  AND r.source = 'user'
+                  AND r.status = 'done'
+                  AND c.ai_memory_approved = TRUE
+                  <if test="since != null">AND r.created_at &gt;= #{since}</if>
+                  <if test="until != null">AND r.created_at &lt; #{until}</if>
+            )
+            SELECT 'record' AS "inputKind", record_id AS "inputId", 'stats' AS "inputRole"
+            FROM eligible
+            UNION
+            SELECT 'chunk' AS "inputKind", chunk_id AS "inputId", 'stats' AS "inputRole"
+            FROM eligible
+            </script>
+            """)
+    @Results({
+            @Result(column = "inputKind", property = "inputKind"),
+            @Result(column = "inputId", property = "inputId"),
+            @Result(column = "inputRole", property = "inputRole")
+    })
+    List<SnapshotSourceRef> selectStatsSourceRefs(@Param("userId") java.util.UUID userId,
+                                                  @Param("since") OffsetDateTime since,
+                                                  @Param("until") OffsetDateTime until);
+
+    /** Distinct history months containing at least one AI-authorized record. */
+    @Select("""
+            SELECT DISTINCT TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM') AS month
+            FROM records r
+            WHERE r.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status = 'done'
+              AND EXISTS (
+                  SELECT 1 FROM chunks c
+                  WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              )
+            ORDER BY month
+            """)
+    List<String> selectAuthorizedRecordMonths(@Param("userId") java.util.UUID userId);
 
     /**
      * 情绪分布（metadata.mood 数组展开计数）
@@ -123,6 +232,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -152,6 +262,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -179,6 +290,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -203,6 +315,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -228,6 +341,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -250,6 +364,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -261,7 +376,7 @@ public interface ProfileStatsMapper {
                                                                   @Param("until") OffsetDateTime until);
 
     /**
-     * 统计范围内用户记录总数（含无 chunk 的记录）。窗口 [since, until)（until 可空=不限）。
+     * 统计范围内至少有一个已授权片段的用户记录数。窗口 [since, until)（until 可空=不限）。
      */
     @Select("""
             <script>
@@ -270,6 +385,7 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             </script>

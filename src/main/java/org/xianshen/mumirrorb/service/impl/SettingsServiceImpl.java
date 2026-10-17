@@ -8,7 +8,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.common.utils.CryptoUtils;
-import org.xianshen.mumirrorb.config.ReviewProperties;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
@@ -32,7 +31,6 @@ public class SettingsServiceImpl implements SettingsService {
 
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
-    private final ReviewProperties reviewProperties;
 
     @Override
     @Transactional(readOnly = true)
@@ -82,9 +80,9 @@ public class SettingsServiceImpl implements SettingsService {
                     && !"auto".equals(reviewMode)) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "非法的审核模式: " + reviewMode);
             }
-            // 总闸设防：auto 已禁用时拒绝置为 auto（防 API 绕过；前端正常流程不会触发）
-            if ("auto".equals(reviewMode) && !reviewProperties.isAutoEnabled()) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "自动审核模式已禁用");
+            // 长期记忆与待办必须分开确认；auto 模式不再允许绕过逐片段授权。
+            if ("auto".equals(reviewMode)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "自动审核已停用，记忆与待办需分别确认");
             }
             settings.setReviewMode(reviewMode);
         }
@@ -237,10 +235,9 @@ public class SettingsServiceImpl implements SettingsService {
                 .embeddingBaseUrl(settings.getEmbeddingBaseUrl())
                 .embeddingApiKey(settings.getEmbeddingApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getEmbeddingApiKey())) : null)
                 .embeddingModel(settings.getEmbeddingModel())
-                // GET 回显归一化：总闸关闭时 reviewMode 回显实际生效值 "manual"（只归一化响应，
-                // 不改写 user_settings 存量值——总闸重新打开后用户原偏好自动恢复）
-                .reviewMode(reviewProperties.isAutoEnabled() ? settings.getReviewMode() : "manual")
-                .autoReviewAvailable(reviewProperties.isAutoEnabled())
+                // 自动审核永久停用：存量偏好不再影响片段记忆与待办授权。
+                .reviewMode("manual")
+                .autoReviewAvailable(false)
                 .ragHalfLife(settings.getRagHalfLife())
                 .mirrorLookback(settings.getMirrorLookback() == null ? 1 : settings.getMirrorLookback())
                 .createdAt(settings.getCreatedAt())

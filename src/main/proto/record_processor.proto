@@ -29,6 +29,7 @@ message ClassifyRequest {
   // 未设计补记功能，故不存在"写入日期 ≠ 日记本体日期"的情况，直接取 created_at 即可。
   // 周计算口径：一周从周一起算（"本周一"= 参照日期所在周的周一）。
   string reference_date = 7;
+  bool processing_authorized = 8;
 }
 
 // 时间词替换项（LLM 判别输出）：把片段里的相对时间词替换成绝对日期

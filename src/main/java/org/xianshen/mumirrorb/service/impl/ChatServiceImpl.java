@@ -17,11 +17,9 @@ import org.xianshen.mumirrorb.grpc.gen.MirrorChatProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
 import org.xianshen.mumirrorb.mapper.ChatSessionMapper;
 import org.xianshen.mumirrorb.mapper.ConversationHistoryMapper;
-import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pojo.DO.ChatSession;
 import org.xianshen.mumirrorb.pojo.DO.ConversationHistory;
-import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
@@ -33,7 +31,6 @@ import org.xianshen.mumirrorb.service.GlossaryService;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -45,15 +42,13 @@ import java.util.UUID;
 /**
  * 对话服务实现（设计文档 6.6）
  *
- * <p>流程：ExtractIntent（query_type 四选一）→ 四路检索（PROFILE 快照 / STRUCTURED SQL /
- * SEMANTIC pgvector / HYBRID 预过滤+向量+时间衰减）→ 上下文截断（快照 ≤2、日记 ≤5、
- * 历史最近 3 轮）→ 流式 Chat 透传（SSE）→ 消息落库（assistant 带 sources）→
- * 触碰 session.updated_at。</p>
+ * <p>Agent 路径由循环规划器选择工具，再由 Chat 流式回答；旧开关关闭时保留 ExtractIntent
+ * 与结构化/语义/组合检索回滚路径。</p>
  *
  * <p>时间衰减：final_score = (embedding &lt;=&gt; query) × 1/(1 + 天数差/half_life)，
  * half_life 读 user_settings.rag_half_life；ExtractIntent 返回 time_range 时关衰减。</p>
  *
- * <p>对话 Agent 循环（chat-loop-design.md §4.2）：检索之后进 {@code ToolOrchestrator.loopAndExecute}，
+ * <p>对话 Agent 循环（chat-loop-design.md §4.2）：先进入 {@code ToolOrchestrator.loopAndExecute}，
  * 规划思考逐块透传 SSE {@code thinking}、每步推累积 {@code meta.tools_used}；
  * "材料够不够"由模型每步自己判断，不再由检索完那一刻一次性判死。
  * {@code vault.chat-loop-enabled=false} 时退回旧 {@code planAndExecute} 单次规划（回滚路径）。</p>
@@ -65,7 +60,6 @@ public class ChatServiceImpl implements ChatService {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int CONTEXT_CHUNK_LIMIT = 5;      // 日记 ≤5 条
-    private static final int SNAPSHOT_LIMIT = 2;           // 快照 ≤2 份
     private static final int HISTORY_ROUNDS = 3;           // 对话历史最近 3 轮（设计 6.2：6 条消息）
     // ↑ 早期放到 20 轮（实际送 40 条）反而有害：模型会顺着上文的结论和措辞继续说，
     //   上一轮跑偏的因果会被"接着上文"放大；同时挤占 prompt token。追问所需的上文 3 轮足够。
@@ -110,7 +104,6 @@ public class ChatServiceImpl implements ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ConversationHistoryMapper historyMapper;
     private final ChatSearchMapper searchMapper;
-    private final ProfileSnapshotMapper snapshotMapper;
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
     private final GlossaryService glossaryService;
@@ -133,14 +126,23 @@ public class ChatServiceImpl implements ChatService {
             // 2. user 消息落库（先落，失败重试时历史不丢）
             insertMessage(userId, session.getId(), "user", question, null);
 
-            // 3. 意图抽取（失败兜底 HYBRID）；query 侧词表命中随请求注入（第 4 节）
-            List<UserTermVO> matchedTerms = matchQueryTermsSafely(userId, question);
-            MirrorChatProto.ExtractIntentResponse intent =
-                    extractIntentSafely(userId, question, GlossaryProtoMapper.toProtoList(matchedTerms));
-            String route = normalizeRoute(intent.getQueryType());
-
             boolean loopEnabled = vaultProperties.isChatLoopEnabled();
+            MirrorChatProto.ExtractIntentResponse intent = null;
+            String route;
+            List<RetrievedChunkDTO> chunks;
             List<CommonProto.ToolResult> toolResults = List.of();
+
+            // Agent 路径不先做 ExtractIntent/RAG：规划器依据问题与工具注册表自行决定
+            // 零个、一个或多个工具。旧路径保留用于配置回滚。
+            if (loopEnabled) {
+                route = "agent";
+                chunks = List.of();
+            } else {
+                List<UserTermVO> matchedTerms = matchQueryTermsSafely(userId, question);
+                intent = extractIntentSafely(userId, question, GlossaryProtoMapper.toProtoList(matchedTerms));
+                route = normalizeRoute(intent.getQueryType());
+                chunks = null;
+            }
 
             // 3.5 旧 PlanTools 单次规划（chat-loop-design.md 裁决 0.4 的回滚路径）：
             // 顺序、事件序都保持改造前原样——检索之前一次性规划，失败/空计划 → 空列表走纯 RAG
@@ -161,9 +163,11 @@ public class ChatServiceImpl implements ChatService {
                     "sessionId", session.getId().toString(),
                     "route", route.toUpperCase()));
 
-            // 4. 四路检索（循环路径必须先检索：has_retrieval 要告诉规划器"检索空了"）
-            List<RetrievedChunkDTO> chunks = retrieve(userId, route, intent);
-            log.info("对话检索完成，路由: {}，命中: {}", route, chunks.size());
+            // 4. 回滚路径保留旧检索；Agent 路径的记录检索由 search_records 工具负责。
+            if (!loopEnabled) {
+                chunks = retrieve(userId, route, intent);
+                log.info("对话检索完成，路由: {}，命中: {}", route, chunks.size());
+            }
 
             // 4.5 对话 Agent 循环（chat-loop-design.md §1）：模型每步自己判断材料够不够。
             // thinking 逐块透传（消除黑屏）、每步推累积 tools_used（芯片实时增长）；
@@ -172,7 +176,7 @@ public class ChatServiceImpl implements ChatService {
                 final String routeUpper = route.toUpperCase();
                 final UUID sid = session.getId();
                 toolResults = toolOrchestrator.loopAndExecute(userId, sid, question,
-                        planHistory(sid, userId), !chunks.isEmpty(),
+                        planHistory(sid, userId),
                         new org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener() {
                             @Override
                             public void onThinking(String delta) {
@@ -211,7 +215,7 @@ public class ChatServiceImpl implements ChatService {
             //   本来就没材料（寒暄/查无此事）→ 分档文案，说清"没翻到"并给抓手
             // 若不分，AI 抽风时会对着一堆命中记录说"我这边没对上"，比不说还糟。
             boolean hasMaterial = !chunks.isEmpty() || hasUsableToolData(toolResults);
-            streamAnswer(emitter, userId, session.getId(), route, question, intent, chunks,
+            streamAnswer(emitter, userId, session.getId(), route, question, chunks,
                     toolResults, toolsUsedRecords,
                     hasMaterial ? null : fallbackText(userId, question, intent));
         } catch (Exception e) {
@@ -237,12 +241,11 @@ public class ChatServiceImpl implements ChatService {
      *                        让"AI 真挂了"和"这轮没资料"两种失败各说各话。
      */
     private void streamAnswer(SseEmitter emitter, UUID userId, UUID sessionId, String route,
-                              String question, MirrorChatProto.ExtractIntentResponse intent,
-                              List<RetrievedChunkDTO> chunks,
+                              String question, List<RetrievedChunkDTO> chunks,
                               List<CommonProto.ToolResult> toolResults,
                               List<Map<String, Object>> toolsUsedRecords,
                               String emptyAnswerText) {
-        MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, intent, chunks, sessionId, toolResults);
+        MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, chunks, sessionId, toolResults);
         StringBuilder answer = new StringBuilder();
         List<Map<String, Object>> sources = null;
         try {
@@ -430,16 +433,15 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 四路检索路由（设计文档 6.6）
+     * 三种日记检索路由（画像快照由 get_profile 工具处理）
      */
     private List<RetrievedChunkDTO> retrieve(UUID userId, String route,
                                              MirrorChatProto.ExtractIntentResponse intent) {
         return switch (route) {
-            case "profile" -> retrieveProfile(userId, intent);
             case "structured" -> {
                 // 结构化路由必须真带元数据条件，否则就退化成"按时间倒序端最近 N 条"
                 // （与问题内容完全无关，等于强行喂噪声）。无任何条件时回退 HYBRID
-                // 走向量+相关性阈值（同 PROFILE 无快照回退 HYBRID 的口径）。
+                // 走向量+相关性阈值，避免按时间倒序喂入无关记录。
                 boolean hasMetaFilter = emptyToNull(intent.getContentType()) != null
                         || !intent.getMoodsList().isEmpty()
                         || hasTimeRange(intent.getTimeRange());
@@ -466,49 +468,6 @@ public class ChatServiceImpl implements ChatService {
     private Double maxCosineDistance() {
         double configured = mirrorProperties.getRagMaxCosineDistance();
         return configured > 0 ? configured : null;
-    }
-
-    /**
-     * PROFILE：查最新 2 份快照作上下文；查不到 fallback HYBRID（6.6）
-     */
-    private List<RetrievedChunkDTO> retrieveProfile(UUID userId,
-                                                    MirrorChatProto.ExtractIntentResponse intent) {
-        List<ProfileSnapshot> snapshots = new ArrayList<>();
-        List<ProfileSnapshot> manual = snapshotMapper.selectRecent(userId, "manual", SNAPSHOT_LIMIT);
-        snapshots.addAll(manual);
-        if (snapshots.size() < SNAPSHOT_LIMIT) {
-            snapshots.addAll(snapshotMapper.selectRecent(userId, "monthly",
-                    SNAPSHOT_LIMIT - snapshots.size()));
-        }
-        if (snapshots.isEmpty()) {
-            log.info("无画像快照，PROFILE 回退 HYBRID");
-            return searchHybrid(userId, intent);
-        }
-        List<RetrievedChunkDTO> result = new ArrayList<>();
-        for (ProfileSnapshot snapshot : snapshots) {
-            StringBuilder text = new StringBuilder();
-            text.append("画像快照（").append(snapshot.getSnapshotType()).append("，")
-                    .append(snapshot.getCreatedAt() == null ? ""
-                            : snapshot.getCreatedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")))
-                    .append("）：");
-            if (notBlank(snapshot.getOverallSummary())) text.append(snapshot.getOverallSummary());
-            if (notBlank(snapshot.getMoodAnalysis())) text.append(" 情绪：").append(snapshot.getMoodAnalysis());
-            if (notBlank(snapshot.getLearningAnalysis())) text.append(" 学习：").append(snapshot.getLearningAnalysis());
-            if (notBlank(snapshot.getTodoAnalysis())) text.append(" 待办：").append(snapshot.getTodoAnalysis());
-            if (notBlank(snapshot.getRhythmAnalysis())) text.append(" 节奏：").append(snapshot.getRhythmAnalysis());
-            // record_id=0 表示画像伪 chunk：不进 sources（前端点击溯源只针对真实记录）
-            // score=-1：画像快照是整段上下文而非检索命中，无相似度可言（哨兵值约定见 ChatSearchMapper）
-            result.add(RetrievedChunkDTO.builder()
-                    .recordId(0L)
-                    .content(text.toString())
-                    .title("镜子画像")
-                    .createdAt(snapshot.getCreatedAt() == null ? ""
-                            : snapshot.getCreatedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
-                    .contentType("profile")
-                    .score(-1.0)
-                    .build());
-        }
-        return result;
     }
 
     /**
@@ -539,10 +498,9 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 组装 ChatRequest：question + 截断后的 history（最近 3 轮）+ chunks + profile 伪 chunk 排除
+     * 组装 ChatRequest：question + 截断后的 history（最近 3 轮）+ 授权 chunks
      */
     private MirrorChatProto.ChatRequest buildChatRequest(UUID userId, String question,
-                                                         MirrorChatProto.ExtractIntentResponse intent,
                                                          List<RetrievedChunkDTO> chunks,
                                                          UUID sessionId,
                                                          List<CommonProto.ToolResult> toolResults) {
@@ -853,7 +811,7 @@ public class ChatServiceImpl implements ChatService {
     private String normalizeRoute(String queryType) {
         String route = queryType == null ? "" : queryType.trim().toLowerCase();
         return switch (route) {
-            case "profile", "structured", "semantic" -> route;
+            case "structured", "semantic" -> route;
             default -> "hybrid";
         };
     }
@@ -993,7 +951,7 @@ public class ChatServiceImpl implements ChatService {
         List<Map<String, Object>> result = new ArrayList<>();
         for (MirrorChatProto.Source s : chunk.getSourcesList()) {
             if (s.getRecordId() <= 0) {
-                continue; // 画像伪 chunk 不进 sources
+                continue; // 非日记上下文没有可打开的记录来源
             }
             if (isVaultRecord(chunks, s.getRecordId())) {
                 continue; // vault 文件记录不是"日记来源"，由 vault_refs 文件卡承载

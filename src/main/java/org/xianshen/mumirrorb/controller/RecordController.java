@@ -34,11 +34,11 @@ import java.util.UUID;
  * - 创建记录（用户提交原始内容）
  * - 查询记录列表（支持按日期范围筛选）
  * - 获取单条记录详情
- * - 更新记录（仅在人工审查状态下允许修改 AI 生成的标签）
- * - 确认审查完成（将状态从"人工审查"改为"已完成"）
- * - 软删除记录（仅在人工审查状态下允许）
+ * - 编辑尚未授权 AI 的原文、更新 AI 片段与授权
+ * - 分别确认记忆片段与待办建议
+ * - 软删除当前用户自己的记录
  *
- * 状态流转：PROCESSING → REVIEWING → DONE
+ * 状态流转：RECORD_ONLY →（用户请求整理）PROCESSING → REVIEWING → DONE
  */
 @Tag(name = "记录管理", description = "日记记录的增删改查操作")
 @RestController
@@ -62,17 +62,15 @@ public class RecordController {
     /**
      * 创建记录
      *
-     * 用户提交原始内容，系统将创建一条新记录，状态为"处理中"（PROCESSING）。
-     * AI 服务会异步处理内容，生成标题、摘要、标签等信息。
-     * 处理完成后，记录状态变为"人工审查"（REVIEWING），等待用户审核。
+     * 默认创建为仅记录（RECORD_ONLY）；仅在用户本次主动请求 AI 整理时触发异步处理。
+     * AI 服务生成的内容仅为候选，长期记忆与待办仍需分别确认。
      *
      * @param dto 记录数据（只需提供 content 字段）
-     * @return 创建成功的记录（状态为 PROCESSING）
+     * @return 创建成功的记录（RECORD_ONLY 或 PROCESSING）
      */
     @Operation(
             summary = "创建记录",
-            description = "用户提交原始内容，系统创建新记录并触发 AI 处理。" +
-                    "创建后记录状态为'处理中'，AI 处理完成后变为'人工审查'状态。"
+            description = "默认仅保存原文；requestAiProcessing=true 时才触发本次 AI 整理。AI 结果需用户确认后进入长期记忆。"
     )
     @ApiResponses(value = {
             @ApiResponse(
@@ -95,7 +93,19 @@ public class RecordController {
     public R<RecordVO> create(@Valid @RequestBody RecordDTO dto) {
         UUID userId = getCurrentUserId();
         RecordVO record = recordService.create(dto, userId);
-        return R.ok("记录已提交", record);
+        return R.ok(dto.isRequestAiProcessing() ? "已保存，Mirror 正在整理" : "已保存，仅供自己记录", record);
+    }
+
+    @PostMapping("/{id}/organize")
+    @Operation(summary = "请求 AI 整理", description = "用户主动请求对已保存的仅记录原文进行本次 AI 整理。")
+    public R<RecordVO> organize(@PathVariable Long id) {
+        return R.ok("已请求 Mirror 整理", recordService.organize(id, getCurrentUserId()));
+    }
+
+    @PutMapping("/{id}/content")
+    @Operation(summary = "编辑仅记录原文", description = "仅允许编辑未授权 AI 的 record_only 原文。")
+    public R<RecordVO> updateRaw(@PathVariable Long id, @Valid @RequestBody RecordDTO dto) {
+        return R.ok("原文已更新", recordService.updateRaw(id, dto.getContent(), getCurrentUserId()));
     }
 
     /**
@@ -140,7 +150,7 @@ public class RecordController {
     /**
      * 获取单条记录详情
      *
-     * 根据记录 ID 获取详细信息，包括 AI 生成的标签、情绪等。
+     * 根据记录 ID 获取详细信息，包括原文、AI 候选片段和各自授权状态。
      * 只能查看自己的记录，自动过滤已删除的记录。
      *
      * @param id 记录ID
@@ -186,16 +196,17 @@ public class RecordController {
      * 确认审查完成
      *
      * 将记录状态从"人工审查"（REVIEWING）改为"已完成"（DONE）。
-     * 调用此接口表示用户已确认 AI 生成的标签无误，或已完成修改。
+     * 调用此接口分别保存用户选择的长期记忆片段和待办片段。
      *
-     * 只有处于"人工审查"状态的记录才能调用此接口。
+     * REVIEWING 用于首次确认；DONE 用于调整既有片段授权。
      *
      * @param id 记录ID
      * @return 状态更新后的记录
      */
     @Operation(
-            summary = "确认审查完成（携带待办决议）",
-            description = "将记录状态从'人工审查'改为'已完成'。" +
+            summary = "确认片段记忆授权（携带待办决议）",
+            description = "首次确认时将记录状态从'人工审查'改为'已完成'，也可在已完成记录中调整记忆授权。" +
+                    "aiMemoryChunkIds 与 todoChunkIds 分别列出同意进入长期记忆和登记为待办的片段。" +
                     "可选 body：{\"todoResolutions\":[{\"suggestionId\":123,\"action\":\"confirmed\"," +
                     "\"status\":\"completed\"},{\"suggestionId\":124,\"action\":\"dismissed\"}," +
                     "{\"todoId\":6,\"action\":\"confirmed\",\"status\":\"in_progress\"}]}。" +
@@ -203,7 +214,7 @@ public class RecordController {
                     "action=confirmed 时 status 必填（not_started/in_progress/completed），状态随入库一起生效；" +
                     "todoId 分支 action 仅允许 confirmed。" +
                     "该记录下未出现在 body 中的 pending 建议一律作废。body 缺省 = 全部未处理建议作废。" +
-                    "只有'人工审查'状态的记录才能调用此接口。"
+                    "仅 REVIEWING 或 DONE 状态可调用此接口。"
     )
     @ApiResponses(value = {
             @ApiResponse(
@@ -213,7 +224,7 @@ public class RecordController {
             ),
             @ApiResponse(
                     responseCode = "400",
-                    description = "记录状态不允许确认（非'人工审查'状态）或 todoResolutions 参数非法",
+                    description = "记录状态不允许授权（非 REVIEWING/DONE）或片段/待办决议参数非法",
                     content = @Content
             ),
             @ApiResponse(
@@ -234,8 +245,10 @@ public class RecordController {
             @RequestBody(required = false) RecordConfirmDTO body) {
         UUID userId = getCurrentUserId();
         List<TodoResolutionDTO> resolutions = body == null ? null : body.getTodoResolutions();
-        RecordVO record = recordService.confirmReview(id, userId, resolutions);
-        return R.ok("审查已完成", record);
+        RecordVO record = recordService.confirmReview(id, userId,
+                body == null ? null : body.getAiMemoryChunkIds(),
+                body == null ? null : body.getTodoChunkIds(), resolutions);
+        return R.ok("片段授权已更新", record);
     }
 
     /**

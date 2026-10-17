@@ -27,4 +27,8 @@ public class RecordDTO {
             requiredMode = Schema.RequiredMode.REQUIRED
     )
     private String content;
+
+    /** 显式授权本次 AI 整理；缺省为 false，保存记录本身不触发 AI。 */
+    @Schema(description = "是否请求本次AI整理；缺省false", example = "false")
+    private boolean requestAiProcessing = false;
 }

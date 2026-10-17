@@ -13,7 +13,6 @@ import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
-import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.tools.ToolExecutionResult;
 import org.junit.jupiter.api.BeforeAll;
 
@@ -29,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -142,15 +142,14 @@ class GetProfileMonthTest {
     // ==================== B2：get_coverage 语料收口 ====================
 
     @Test
-    @DisplayName("get_coverage：只统计 user+done 记录的 chunks（record 白名单预过滤先发生）")
+    @DisplayName("get_coverage：只统计已授权的 user+done 片段")
     void coverage_recordWhitelist() {
-        doReturn(List.of(Record.builder().id(1L).build(), Record.builder().id(2L).build()))
-                .when(recordMapper).selectList(any());
         doReturn(List.of(
                 org.xianshen.mumirrorb.pojo.DO.Chunk.builder().id(10L).recordId(1L)
                         .segment("论文进展顺利").content("论文进展顺利")
+                        .aiMemoryApproved(true)
                         .createdAt(OffsetDateTime.now(ZONE)).build()))
-                .when(chunkMapper).selectList(any());
+                .when(chunkMapper).selectLookbackChunks(eq(USER_ID), isNull(), isNull(), eq(0));
 
         ToolExecutionResult r = getCoverage.execute(USER_ID, Map.of("query", "论文"));
 
@@ -162,9 +161,10 @@ class GetProfileMonthTest {
     }
 
     @Test
-    @DisplayName("get_coverage：无 user 记录 → 直接无覆盖（不扫 chunk）")
+    @DisplayName("get_coverage：无已授权记录 → 无覆盖")
     void coverage_noUserRecords() {
-        doReturn(List.of()).when(recordMapper).selectList(any());
+        doReturn(List.of()).when(chunkMapper)
+                .selectLookbackChunks(eq(USER_ID), isNull(), isNull(), eq(0));
         ToolExecutionResult r = getCoverage.execute(USER_ID, Map.of("query", "论文"));
         assertEquals(false, ((Map<?, ?>) r.getPayload()).get("covered"));
         verify(chunkMapper, org.mockito.Mockito.never()).selectList(any());

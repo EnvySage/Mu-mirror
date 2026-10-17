@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 
 import java.util.List;
@@ -23,12 +24,44 @@ import java.util.UUID;
 @Mapper
 public interface ChunkMapper extends BaseMapper<Chunk> {
 
+    /** Explicitly remove a previously stored vector when its text or authorization changes. */
+    @Update("UPDATE chunks SET embedding = NULL, embedding_status = 'not_requested', embedding_error = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
+    int clearEmbedding(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
+
+    @Update("UPDATE chunks SET embedding_status = 'pending', embedding_error = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid AND ai_memory_approved = TRUE AND content_version = #{contentVersion}")
+    int markEmbeddingPending(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                             @Param("contentVersion") Long contentVersion);
+
+    @Update("""
+            UPDATE chunks c SET embedding = #{embedding,typeHandler=org.xianshen.mumirrorb.common.handler.VectorTypeHandler},
+                embedding_status = 'ready', embedding_error = NULL
+            WHERE c.id = #{chunkId} AND c.user_id = #{userId}::uuid
+              AND c.ai_memory_approved = TRUE AND c.content_version = #{contentVersion}
+              AND EXISTS (SELECT 1 FROM chunk_embedding_jobs j
+                          WHERE j.id = #{jobId} AND j.chunk_id = c.id
+                            AND j.user_id = c.user_id AND j.content_version = c.content_version
+                            AND j.status = 'processing')
+            """)
+    int saveEmbeddingIfCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                               @Param("contentVersion") Long contentVersion,
+                               @Param("jobId") Long jobId,
+                               @Param("embedding") List<Float> embedding);
+
+    @Update("UPDATE chunks SET embedding_status = 'failed', embedding_error = #{error} WHERE id = #{chunkId} AND user_id = #{userId}::uuid AND ai_memory_approved = TRUE AND content_version = #{contentVersion}")
+    int markEmbeddingFailedIfCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                                     @Param("contentVersion") Long contentVersion,
+                                     @Param("error") String error);
+
+    /** Clear classification provenance when the user changes the segment text. */
+    @Update("UPDATE chunks SET classified_segment = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
+    int clearClassifiedSegment(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
+
     /**
      * 向量相似度检索（余弦距离）
      *
      * <p>使用 pgvector 的 <=> 操作符计算余弦距离，返回最相似的 chunks。</p>
-     * <p>JOIN records 排除软删除记录（技术债"检索排除软删除"）；
-     *    软删除记录的 chunks 物理保留，由 SQL 关联过滤。</p>
+     * <p>只返回用户逐片段确认的日记内容；原始全文不进入记忆检索。JOIN records 同时排除
+     *    软删除记录，vault 资产走独立查询路径。</p>
      *
      * @param userId      用户ID（隔离不同用户的数据）
      * @param queryVector 查询向量（由 Python Embedding 服务生成）
@@ -36,12 +69,16 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * @return 相似的 chunks 列表（按相似度排序）
      */
     @Select("""
-            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.created_at,
+            SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, c.created_at,
                    1 - (c.embedding <=> #{queryVector}::vector) AS similarity
             FROM chunks c
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND c.ai_memory_approved = TRUE
+              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.vault_item_id IS NULL
               AND c.embedding IS NOT NULL
             ORDER BY c.embedding <=> #{queryVector}::vector
             LIMIT #{limit}
@@ -107,12 +144,16 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      * @return 相似的 chunks 列表
      */
     @Select("""
-            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.created_at,
+            SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, c.created_at,
                    1 - (c.embedding <=> #{queryVector}::vector) AS similarity
             FROM chunks c
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND c.ai_memory_approved = TRUE
+              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.vault_item_id IS NULL
               AND c.embedding IS NOT NULL
               AND (#{contentType} IS NULL OR c.metadata->>'contentType' = #{contentType})
             ORDER BY c.embedding <=> #{queryVector}::vector
@@ -140,6 +181,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
+              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -161,6 +204,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     @Select("""
             <script>
             SELECT c.metadata->>'title' AS title,
+                   r.id AS "recordId",
+                   c.id AS "chunkId",
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS record_date
             FROM chunks c
             JOIN records r ON r.id = c.record_id
@@ -168,6 +213,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
+              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''
@@ -206,6 +253,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
+              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''

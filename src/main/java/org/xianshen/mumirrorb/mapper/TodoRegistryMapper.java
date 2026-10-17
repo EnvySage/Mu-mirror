@@ -48,6 +48,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             WHERE t.user_id = #{userId}::uuid
               AND t.current_status != 'completed'
               AND t.deleted_at IS NULL
+              AND c.todo_approved = TRUE
             ORDER BY t.created_at DESC, t.id DESC
             LIMIT #{limit}
             """)
@@ -78,6 +79,7 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
             WHERE t.user_id = #{userId}::uuid
               AND t.current_status != 'completed'
               AND t.deleted_at IS NULL
+              AND c.todo_approved = TRUE
             ORDER BY t.created_at DESC, t.id DESC
             LIMIT #{limit}
             """)

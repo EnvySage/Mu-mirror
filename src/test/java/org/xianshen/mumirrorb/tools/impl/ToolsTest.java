@@ -253,11 +253,12 @@ class ToolsTest {
     void compareSnapshots_ownedOnly() {
         ProfileSnapshot mine = ProfileSnapshot.builder().id(4L).userId(USER_ID)
                 .snapshotType("manual").overallSummary("新总结")
-                .createdAt(OffsetDateTime.now()).build();
+                .createdAt(OffsetDateTime.parse("2025-09-15T12:00:00+08:00")).build();
         when(snapshotMapper.selectById(4L)).thenReturn(mine);
         when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of(mine,
                 ProfileSnapshot.builder().id(3L).userId(USER_ID).snapshotType("monthly")
-                        .overallSummary("旧总结").createdAt(OffsetDateTime.now().minusMonths(1)).build()));
+                        .overallSummary("旧总结")
+                        .createdAt(OffsetDateTime.parse("2025-08-15T12:00:00+08:00")).build()));
 
         ToolExecutionResult r = compareSnapshots.execute(USER_ID, Map.of("a_id", 4, "b_id", 3));
         assertEquals("compare_snapshots:9月 vs 8月", r.getSummary());

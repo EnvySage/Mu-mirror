@@ -72,8 +72,7 @@ public class CompareSnapshotsTool implements ToolExecutor {
     }
 
     private ProfileSnapshot owned(UUID userId, Long id) {
-        ProfileSnapshot s = snapshotMapper.selectById(id);
-        return s != null && s.getUserId().equals(userId) ? s : null;
+        return snapshotMapper.selectActiveById(userId, id);
     }
 
     private Map<String, Object> describe(ProfileSnapshot s) {

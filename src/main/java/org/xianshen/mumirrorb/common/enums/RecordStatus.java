@@ -7,10 +7,11 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 /**
- * 记录处理状态枚举（4 种状态）
+ * 记录处理状态枚举（5 种状态）
  *
  * <p><strong>状态流转：</strong></p>
  * <pre>
+ *   RECORD_ONLY（已保存，未提交 AI）
  *   PROCESSING → REVIEWING → DONE
  *       ↓
  *     FAILED
@@ -18,23 +19,23 @@ import lombok.Getter;
  *
  * <p><strong>各状态说明：</strong></p>
  * <ul>
- *   <li><strong>PROCESSING（处理中）</strong>：用户提交内容后，AI 正在处理。前端显示转圈动画。</li>
- *   <li><strong>REVIEWING（人工审查）</strong>：AI 处理完成，生成了标题、摘要、标签等。等待用户审核。
+ *   <li><strong>RECORD_ONLY（仅记录）</strong>：内容已保存，用户尚未授权 AI 处理。</li>
+ *   <li><strong>PROCESSING（处理中）</strong>：用户主动请求整理后，AI 正在处理。前端显示转圈动画。</li>
+ *   <li><strong>REVIEWING（人工审查）</strong>：AI 处理完成，生成标题、摘要、标签候选，等待用户审核。
  *       <ul>
  *         <li>用户可以查看 AI 生成的标签</li>
  *         <li>用户可以修改标签（调用更新接口）</li>
  *         <li>用户可以删除记录（调用软删除接口）</li>
- *         <li>用户确认后，调用确认接口将状态改为 DONE</li>
+ *         <li>用户确认后，调用确认接口分别保存记忆和待办授权</li>
  *       </ul>
  *   </li>
- *   <li><strong>DONE（已完成）</strong>：用户已确认标签无误。记录进入最终状态，不可再修改。</li>
+ *   <li><strong>DONE（已完成）</strong>：首次审核已完成，可继续更新片段内容和长期记忆授权。</li>
  *   <li><strong>FAILED（处理失败）</strong>：AI 处理失败。显示错误信息和重新尝试按钮。</li>
  * </ul>
  *
  * <p><strong>业务规则：</strong></p>
  * <ul>
- *   <li>只有 REVIEWING 状态的记录才能修改和删除</li>
- *   <li>DONE 状态的记录是只读的</li>
+ *   <li>仅记录可以编辑原文；审核或完成状态可更新片段记忆授权</li>
  *   <li>PROCESSING 状态的记录正在处理中，不可操作</li>
  * </ul>
  */
@@ -42,6 +43,10 @@ import lombok.Getter;
 @AllArgsConstructor
 @Schema(description = "记录处理状态枚举")
 public enum RecordStatus {
+
+    /** 已保存为个人记录，未授权 AI 处理。 */
+    @Schema(description = "仅记录 - 未授权AI处理")
+    RECORD_ONLY("record_only", "仅记录"),
 
     /**
      * 处理中 - AI 正在处理
@@ -64,16 +69,15 @@ public enum RecordStatus {
      *   <li>确认完成（调用 PUT /api/records/{id}/confirm）</li>
      * </ul>
      */
-    @Schema(description = "人工审查 - AI处理完成，等待用户审核标签")
+    @Schema(description = "人工审查 - AI候选片段等待用户审核")
     REVIEWING("reviewing", "人工审查"),
 
     /**
-     * 已完成 - 用户已确认
+     * 已完成首次审查
      *
-     * <p>用户已审核并确认标签无误</p>
-     * <p>记录进入最终状态，不可再修改或删除</p>
+     * <p>用户已完成首次审核；后续仍可更新片段内容和长期记忆授权</p>
      */
-    @Schema(description = "已完成 - 用户已确认标签")
+    @Schema(description = "已完成首次审核")
     DONE("done", "已完成"),
 
     /**

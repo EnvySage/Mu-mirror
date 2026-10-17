@@ -59,4 +59,19 @@ public class ChunkVO {
      */
     @Schema(description = "是否已生成embedding", example = "false")
     private Boolean hasEmbedding;
+
+    @Schema(description = "用户是否确认此片段可进入后续AI记忆")
+    private Boolean aiMemoryApproved;
+
+    @Schema(description = "用户是否单独确认此片段作为待办")
+    private Boolean todoApproved;
+
+    @Schema(description = "向量输入正文版本")
+    private Long contentVersion;
+
+    @Schema(description = "向量状态：not_requested / pending / ready / failed")
+    private String embeddingStatus;
+
+    @Schema(description = "最近一次向量重建错误摘要")
+    private String embeddingError;
 }

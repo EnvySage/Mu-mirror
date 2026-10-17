@@ -15,6 +15,7 @@ import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
 import org.xianshen.mumirrorb.service.ChunkService;
+import org.xianshen.mumirrorb.service.ChunkEmbeddingJobService;
 
 import java.util.UUID;
 
@@ -30,6 +31,7 @@ import java.util.UUID;
 public class ChunkController {
 
     private final ChunkService chunkService;
+    private final ChunkEmbeddingJobService chunkEmbeddingJobService;
 
     private UUID getCurrentUserId() {
         String userIdStr = (String) SecurityContextHolder.getContext()
@@ -40,12 +42,12 @@ public class ChunkController {
     /**
      * 更新 Chunk
      *
-     * 仅在记录处于 REVIEWING 状态时允许修改。
+     * 所属记录处于 REVIEWING 或 DONE 时允许修改。
      * 可修改 segment（主题片段）和 AI 元数据（title, contentType, mood 等）。
      */
     @Operation(
             summary = "更新Chunk",
-            description = "审核阶段修改Chunk的segment和AI元数据。只有REVIEWING状态的记录才允许修改。"
+            description = "显式保存片段正文或AI元数据；正文变化会撤销旧记忆授权。"
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "更新成功",
@@ -61,6 +63,15 @@ public class ChunkController {
         UUID userId = getCurrentUserId();
         ChunkVO chunk = chunkService.update(id, dto, userId);
         return R.ok("Chunk 已更新", chunk);
+    }
+
+    @Operation(summary = "重试片段向量重建", description = "当前用户已授权且最近一次重建失败时，重新排入后台任务")
+    @PostMapping("/{id}/embedding/retry")
+    public R<String> retryEmbedding(@PathVariable Long id) {
+        UUID userId = getCurrentUserId();
+        boolean queued = chunkEmbeddingJobService.retry(id, userId);
+        return queued ? R.ok("已重新加入向量重建队列", "pending")
+                : R.ok("当前没有可重试的向量任务", "unchanged");
     }
 
     /**

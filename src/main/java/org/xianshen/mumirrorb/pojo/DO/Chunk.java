@@ -111,6 +111,12 @@ public class Chunk {
     @Schema(description = "用户是否编辑过（文本或元数据）", example = "false")
     private Boolean userEdited;
 
+    /** 用户是否确认该片段可供后续 AI 记忆、检索、摘要和画像使用。 */
+    private Boolean aiMemoryApproved;
+
+    /** 用户是否单独确认将该片段作为待办登记。 */
+    private Boolean todoApproved;
+
     /**
      * vault 资产挂链（toolcalling-vault-design.md 3.3 全消化）
      *
@@ -128,6 +134,15 @@ public class Chunk {
     @TableField(typeHandler = VectorTypeHandler.class)
     @Schema(description = "向量嵌入（1024 维）")
     private List<Float> embedding;
+
+    /** 向量输入正文版本；正文变化时递增，拒绝迟到任务写入。 */
+    private Long contentVersion;
+
+    /** not_requested / pending / ready / failed。 */
+    private String embeddingStatus;
+
+    /** 最近一次向量重建错误摘要，仅用于当前用户自己的状态提示。 */
+    private String embeddingError;
 
     /**
      * 相似度（检索 SQL 计算列，非表列）

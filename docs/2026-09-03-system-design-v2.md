@@ -803,7 +803,7 @@ message PlannedCall { string tool = 1; string args_json = 2; }
 | Embed | 10s |
 | Chat | 60s（流式） |
 | ExtractIntent | 15s |
-| GenerateProfile | 60s |
+| GenerateProfile | 120s |
 | ExtractTerms | 180s（14 天语料 + LLM 归纳，取 classify 同级） |
 | PlanTools | 3s（规划超时即跳过工具走现有 RAG，零回归） |
 

@@ -28,6 +28,7 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             """)
@@ -47,6 +48,7 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'contentType')
@@ -70,6 +72,7 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'mood')
@@ -91,6 +94,7 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             GROUP BY 1
@@ -122,6 +126,7 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.todo_approved = TRUE
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             ORDER BY r.created_at DESC
@@ -139,16 +144,20 @@ public interface DailySummaryMapper {
      * createdAt 用 TO_CHAR 出字符串，避免 text → OffsetDateTime 的隐式转换坑。</p>
      */
     @Select("""
-            SELECT r.content,
+            SELECT c.segment AS content,
                    TO_CHAR(r.created_at, 'HH24:MI') AS createdAt
             FROM records r
+            JOIN chunks c ON c.record_id = r.id
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND c.ai_memory_approved = TRUE
+              AND c.segment IS NOT NULL
+              AND c.segment <> ''
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
-            ORDER BY r.created_at ASC
+            ORDER BY r.created_at ASC, c.id ASC
             LIMIT 30
             """)
     List<Map<String, Object>> selectDayRecords(@Param("userId") UUID userId,

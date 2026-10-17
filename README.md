@@ -72,7 +72,16 @@ Swagger UI 在 `/api/doc.html`。
 
 ## 数据库
 
-PostgreSQL + pgvector，14 张表。DDL 见 `src/main/resources/db/schema.sql`（幂等，唯一权威基线，需 `CREATE EXTENSION vector`）。
+PostgreSQL + pgvector，基础结构 14 张表。DDL 见 `src/main/resources/db/schema.sql`（幂等，唯一权威基线，需 `CREATE EXTENSION vector`）；v4 迁移增加镜子版本、来源依赖和历史断点状态，`snapshot_inputs` 只记录来源 ID，不保存正文。
+
+新环境按顺序执行 `schema.sql`、`migration-v3-record-ai-authorization.sql` 和 `migration-v4-mirror-archive-lineage.sql`。已有 v3 本地库只需应用 v4：
+
+```powershell
+psql -h 127.0.0.1 -p 5432 -U postgres -d mu_mirror_test `
+  -v ON_ERROR_STOP=1 -f src/main/resources/db/migration-v4-mirror-archive-lineage.sql
+```
+
+v4 使用可重复执行的 DDL，不会重写镜子正文或 embedding。生成与来源变更按用户串行，避免 AI 生成期间的删除或撤权漏掉刚写入的镜子。首次应用前先用一次性本地数据库验证；当前本地开发任务只更新代码和测试，生产数据库与服务部署需另行安排。
 
 核心模型决策：**Chunk 是唯一业务单元**。一条用户输入 = 一条 Record（只存原文与状态）；AI 拆出的每个语义片段 = 一个 Chunk，承载 segment 文本、元数据（JSONB）与向量（1024 维，HNSW 索引）。
 
@@ -125,6 +134,7 @@ POST /mirror/chat
 - **词典**：从日记文本学个人指代（"论文 = 毕设 RAG 检索"）。仅 `confirmed` 词条参与注入（同审核门禁哲学），四处注入点：Classify / ExtractIntent / Chat / GenerateProfile。
 - **资产 vault**：文件存 PG BYTEA（数据主权），20MB/文件、500MB/用户，magic bytes 类型白名单，SHA-256 去重。三档消化：文本/PDF/docx 全量、图片半量、音视频仅元数据。五态机 `pending → extracted → confirmed`（+ skipped / failed），确认是进入 embedding 的门禁。删除需提交文件名后四位（`X-Confirm-Name` 头）。
 - **滑动镜子**：镜像是**累计**画像（上月镜子 + 本月增量），不是月度切片。四道防洪闸（chunks 数 / 字符数 / 单条截断 / 12 月摘要化）全部可配。漂移 = 相邻月度快照的余弦距离。
+- **镜子归档**：`GET /mirror/snapshots` 用游标分页返回所有版本；来源变化后退出 AI 上下文的快照仍可查阅。`GET /mirror/snapshot-months` 返回授权历史月份和已有月度快照归属月；重新生成会创建新版本并保留旧版，归档快照不会作为后续镜子的上下文。
 - **待办 registry**：跨日记追踪。真源是 `chunk.metadata.taskStatus`，registry 是物化索引，双写。LLM 提出的状态变更只落为建议，用户确认后才写 evidence 链接。
 - **定时任务**：每日总结（`0 0 1 * * ?` Asia/Shanghai，回溯补 7 天，顺路跑词典抽取）、月度快照（`0 0 2 1 * ?`）。
 
@@ -165,10 +175,23 @@ mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev   # Windows
 ### 测试
 
 ```bash
-./mvnw test     # 248 个测试，18 个测试类
+./mvnw test
 ```
 
 绝大多数是 Mockito 纯单测。`MuMirrorBApplicationTests` 会起 Spring 上下文（继承 `prod` profile），需要可达的 PostgreSQL 与 gRPC 端。
+
+记录 AI 授权与镜子归档的 PostgreSQL/MyBatis 联调测试使用 `RecordAiAuthorizationDatabaseTest` 和 `MirrorLineageReplayDatabaseTest`。测试库需先执行 `src/main/resources/db/schema.sql`、`migration-v3-record-ai-authorization.sql` 和 `migration-v4-mirror-archive-lineage.sql`，测试方法通过事务回滚清理自己写入的数据。设置以下环境变量后运行：
+
+```powershell
+$env:MIRROR_TEST_DB_URL = "jdbc:postgresql://127.0.0.1:5432/mu_mirror"
+$env:MIRROR_TEST_DB_USERNAME = "postgres"
+# 在本地环境中设置 MIRROR_TEST_DB_PASSWORD，不要提交凭据
+.\mvnw.cmd -Dtest=RecordAiAuthorizationDatabaseTest test
+```
+
+归档专项测试可用 `.\mvnw.cmd -Dtest=MirrorLineageReplayDatabaseTest test` 运行。没有配置 `MIRROR_TEST_DB_URL` 时，PostgreSQL 联调测试会跳过；不要把跳过记录报告为通过。
+
+普通 Mockito 单测不需要数据库连接。
 
 ## 部署
 

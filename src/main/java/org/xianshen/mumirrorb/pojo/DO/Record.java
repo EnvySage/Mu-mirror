@@ -84,6 +84,12 @@ public class Record {
     @Schema(description = "处理状态", example = "reviewing")
     private RecordStatus status;
 
+    /** 是否由用户主动请求过 AI 整理（仅表示当前处理授权，不代表长期记忆确认）。 */
+    private Boolean aiProcessingAuthorized;
+
+    /** 异步处理代次；撤回/删除时递增，阻止旧任务回写。 */
+    private Integer processingVersion;
+
     /**
      * 用户是否已审核
      */

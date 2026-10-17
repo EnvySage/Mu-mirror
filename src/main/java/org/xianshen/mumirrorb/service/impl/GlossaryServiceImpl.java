@@ -337,6 +337,8 @@ public class GlossaryServiceImpl implements GlossaryService {
         List<Chunk> corpus = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
                 .eq(Chunk::getUserId, userId)
                 .in(Chunk::getRecordId, userRecordIds)
+                .eq(Chunk::getAiMemoryApproved, true)
+                .isNotNull(Chunk::getSegment)
                 .orderByDesc(Chunk::getUserEdited)
                 .orderByDesc(Chunk::getCreatedAt)
                 .last("LIMIT " + CORPUS_LIMIT));
@@ -521,6 +523,8 @@ public class GlossaryServiceImpl implements GlossaryService {
                 : chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
                         .eq(Chunk::getUserId, userId)
                         .in(Chunk::getRecordId, userRecordIds)
+                        .eq(Chunk::getAiMemoryApproved, true)
+                        .isNotNull(Chunk::getSegment)
                         .last("LIMIT " + CORPUS_LIMIT));
         int drifted = 0;
         for (UserTerm term : confirmed) {
@@ -571,8 +575,7 @@ public class GlossaryServiceImpl implements GlossaryService {
      */
     static boolean corpusMentions(List<Chunk> corpus, UserTerm term) {
         for (Chunk chunk : corpus) {
-            String text = (chunk.getSegment() == null || chunk.getSegment().isBlank()
-                    ? "" : chunk.getSegment()) + " " + (chunk.getContent() == null ? "" : chunk.getContent());
+            String text = chunk.getSegment() == null ? "" : chunk.getSegment();
             if (text.contains(term.getTerm())) {
                 return true;
             }
@@ -744,7 +747,7 @@ public class GlossaryServiceImpl implements GlossaryService {
                 .setChunkId(chunk.getId() == null ? 0 : chunk.getId())
                 .setRecordId(chunk.getRecordId() == null ? 0 : chunk.getRecordId())
                 .setSegment(nullSafe(chunk.getSegment()))
-                .setContent(nullSafe(chunk.getContent()))
+                .setContent(nullSafe(chunk.getSegment()))
                 .setCreatedAt(chunk.getCreatedAt() == null
                         ? "" : chunk.getCreatedAt().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")))
                 .setUserEdited(Boolean.TRUE.equals(chunk.getUserEdited()));

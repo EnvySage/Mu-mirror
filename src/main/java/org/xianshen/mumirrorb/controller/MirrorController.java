@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,16 +21,19 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.xianshen.mumirrorb.common.enums.ResultCode;
+import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
-import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
 import org.xianshen.mumirrorb.service.ChatService;
 import org.xianshen.mumirrorb.service.MirrorService;
 
 import java.util.List;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -149,25 +153,45 @@ public class MirrorController {
     }
 
     /**
-     * 快照历史列表（manual + monthly 合并全量，时间倒序，上限 14 = 2 + 12）
+     * 快照历史归档（manual + monthly 合并，稳定 keyset 分页，包含仅归档版本）
      *
-     * <p>轻量 VO：id / snapshotType / createdAt / driftDistance / overallSummary（前 50 字截断）。
-     * driftDistance 仅 monthly 快照有值，manual 为 null（无对比基线）。</p>
+     * <p>游标时间和 ID 必须同时提供，limit 默认为 20，范围 1–100。</p>
      */
     @Operation(
             summary = "快照历史列表",
-            description = "当前用户全量快照（manual+monthly 合并），按生成时间倒序，上限 14 份。" +
-                    "overallSummary 截断 50 字；driftDistance 仅 monthly 有值。"
+            description = "当前用户全量快照（manual+monthly 合并），按生成时间和 ID 倒序分页；包含失效归档。"
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "查询成功",
-                    content = @Content(schema = @Schema(implementation = SnapshotListVO.class))),
+                    content = @Content(schema = @Schema(implementation = SnapshotPageVO.class))),
             @ApiResponse(responseCode = "401", description = "未登录或 Token 无效")
     })
     @GetMapping("/snapshots")
-    public R<List<SnapshotListVO>> snapshots() {
+    public R<SnapshotPageVO> snapshots(
+            @Parameter(description = "下一页游标创建时间（ISO-8601）")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) OffsetDateTime beforeCreatedAt,
+            @Parameter(description = "下一页游标快照 ID")
+            @RequestParam(required = false) Long beforeId,
+            @Parameter(description = "每页条数，范围 1–100，默认 20")
+            @RequestParam(required = false) Integer limit) {
+        if ((beforeCreatedAt == null) != (beforeId == null)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "分页游标时间和快照 ID 必须同时提供");
+        }
+        int pageSize = limit == null ? 20 : limit;
+        if (pageSize < 1 || pageSize > 100) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "每页数量必须在 1 到 100 之间");
+        }
         UUID userId = getCurrentUserId();
-        return R.ok("查询成功", mirrorService.listSnapshots(userId));
+        return R.ok("查询成功", mirrorService.listSnapshots(userId, beforeCreatedAt, beforeId, pageSize));
+    }
+
+    /** History months that can be explicitly regenerated. */
+    @Operation(summary = "可重建镜子月份", description = "返回有授权记录或已有归档、但尚无可用月度镜子的历史月份。")
+    @GetMapping("/snapshot-months")
+    public R<List<String>> snapshotMonths() {
+        UUID userId = getCurrentUserId();
+        return R.ok("查询成功", mirrorService.snapshotMonths(userId));
     }
 
     /**

@@ -6,7 +6,9 @@
 -- 执行顺序（docker-entrypoint-initdb.d 按文件名字典序）：
 --   1. schema.sql        ← 本文件，唯一权威基准（chunks 已并入）
 --   2. migration-v2.sql  ← 仅存量旧库迁移用；空库执行为无害空操作
---   3. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
+--   3. migration-v3-record-ai-authorization.sql ← 授权字段迁移；空库执行为无害空操作
+--   4. migration-v4-mirror-archive-lineage.sql ← 镜子归档/依赖迁移；空库执行为无害空操作
+--   5. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
 -- 对应设计文档：Mu-mirror-B/docs/2026-09-03-system-design-v2.md 第三章、3.4、裁决 #2/#6/#8/#9/#14/#17/#18/#20
 -- ============================================================
 
@@ -31,8 +33,10 @@ CREATE TABLE IF NOT EXISTS records (
     user_id UUID NOT NULL REFERENCES users(id),
     content TEXT NOT NULL,                              -- 原始输入，不可修改
     source VARCHAR(20) DEFAULT 'user',                  -- user=用户输入 / system=系统生成（每日总结，裁决 #17）
-    status VARCHAR(20) DEFAULT 'processing',            -- processing/reviewing/done/failed
+    status VARCHAR(20) DEFAULT 'processing',            -- record_only/processing/reviewing/done/failed
     user_reviewed BOOLEAN DEFAULT FALSE,
+    ai_processing_authorized BOOLEAN NOT NULL DEFAULT FALSE,
+    processing_version INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,                             -- 软删除
@@ -57,7 +61,12 @@ CREATE TABLE IF NOT EXISTS chunks (
     metadata JSONB,                     -- AI 元数据（title/summary/contentType/mood/keywords/taskStatus）
     classified_segment TEXT,            -- 生成当前 metadata 时所用的 segment 文本；NULL = 未分类/文本已改
     user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
-    vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE,  -- vault 全消化产物挂链（vault 删除时级联清，向量库无孤儿）
+    ai_memory_approved BOOLEAN NOT NULL DEFAULT FALSE, -- 用户逐片段确认后才进入后续 AI 记忆
+    embedding_status VARCHAR(24) NOT NULL DEFAULT 'not_requested', -- 持久 embedding 工作状态
+    content_version BIGINT NOT NULL DEFAULT 1,          -- segment 变化时递增，屏蔽迟到向量
+    embedding_error TEXT,                                -- 最近一次向量失败摘要
+    todo_approved BOOLEAN NOT NULL DEFAULT FALSE,       -- 待办需另行确认
+    vault_item_id BIGINT,               -- 外键在 vault_items 建表后补齐，解决两表循环引用
     embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -65,6 +74,31 @@ CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_vault_item ON chunks(vault_item_id);  -- vault 消化 chunks 溯源/级联清
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS chunk_embedding_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content_version BIGINT NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'ready', 'failed', 'cancelled')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    lease_until TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_embedding_jobs_due
+    ON chunk_embedding_jobs(status, available_at, id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_chunk_embedding_jobs_expired_lease
+    ON chunk_embedding_jobs(lease_until, id) WHERE status = 'processing';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_chunk_embedding_job_active_version
+    ON chunk_embedding_jobs(chunk_id, content_version)
+    WHERE status IN ('pending', 'processing');
+CREATE INDEX IF NOT EXISTS idx_chunk_embedding_jobs_chunk
+    ON chunk_embedding_jobs(chunk_id, created_at DESC);
 
 -- ============================================================
 -- 用户配置表（AI 模型配置，每个用户一条）
@@ -108,13 +142,33 @@ CREATE TABLE IF NOT EXISTS profile_snapshots (
     user_tags JSONB,                      -- ["技术学习", "夜猫子"]
     overall_summary TEXT,
     embedding vector(1024),               -- 漂移检测用（五维文本按固定顺序拼接后向量化）
+    invalidated BOOLEAN NOT NULL DEFAULT FALSE, -- 来源授权变化后不再进入后续AI推断
+    version_no INT NOT NULL DEFAULT 1,    -- 同一归属月份的历史版本号
+    is_current BOOLEAN NOT NULL DEFAULT TRUE, -- monthly 每月最多一个当前版本；旧版本仍归档
+    lineage_tracked BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE 表示已记录生成输入依赖
+      archive_discontinuity BOOLEAN NOT NULL DEFAULT FALSE, -- 累计链存在无法重建的历史断点
+    invalidated_at TIMESTAMPTZ,            -- 退出后续 AI 上下文的时间
+    invalidated_reason VARCHAR(80),        -- 退出上下文的原因
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_user ON profile_snapshots(user_id, snapshot_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_snapshots_period ON profile_snapshots(user_id, snapshot_type, period_month);
--- 同一 (user, monthly, 归属月份) 唯一：幂等重生成即替换（部分唯一索引，NULL 不参与约束）
-CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshots_user_period
-    ON profile_snapshots(user_id, period_month) WHERE snapshot_type = 'monthly' AND period_month IS NOT NULL;
+DROP INDEX IF EXISTS uq_snapshots_user_period;
+-- 同一 (user, monthly, 归属月份) 只允许一个当前版，旧版本保留为只读归档。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshots_user_period_current
+    ON profile_snapshots(user_id, period_month)
+    WHERE snapshot_type = 'monthly' AND period_month IS NOT NULL AND is_current = TRUE;
+
+CREATE TABLE IF NOT EXISTS snapshot_inputs (
+    snapshot_id BIGINT NOT NULL REFERENCES profile_snapshots(id) ON DELETE CASCADE,
+    input_kind VARCHAR(16) NOT NULL,       -- snapshot / record / chunk
+    input_id BIGINT NOT NULL,              -- 不设来源外键，物理清除后保留墓碑
+    input_role VARCHAR(24) NOT NULL,        -- parent / stats / todo / learning / lookback / correction_index
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (snapshot_id, input_kind, input_id, input_role)
+);
+CREATE INDEX IF NOT EXISTS idx_snapshot_inputs_source ON snapshot_inputs(input_kind, input_id, snapshot_id);
+COMMENT ON TABLE snapshot_inputs IS '快照实际使用的父快照与原始来源 ID；不存正文，来源删除后保留归档墓碑';
 
 -- ============================================================
 -- 会话（6.6；无 last_message_at，统一用 updated_at，裁决 #9）
@@ -161,7 +215,7 @@ CREATE TABLE IF NOT EXISTS user_terms (
     content_hit_count INT DEFAULT 0,        -- 入库内容命中（过期沉底）
     last_confirmed_at TIMESTAMPTZ,          -- confirmed 卡片"最后确认于x日"
     last_seen_at TIMESTAMPTZ,               -- 最近语料出现（衰减依据）
-    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    source_chunk_id BIGINT,              -- 外键在 chunks 建表后补齐，解决两表循环引用
     source_record_id BIGINT,                -- 佐证 chunk 所在记录（F 契约：跳记录详情直接用；@agent-DB 已在活库补列）
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
@@ -199,6 +253,30 @@ CREATE TABLE IF NOT EXISTS vault_blobs (
     vault_item_id BIGINT PRIMARY KEY REFERENCES vault_items(id) ON DELETE CASCADE,
     data BYTEA NOT NULL
 );
+
+-- chunks 与 vault_items 双向引用，等两张表都创建后再补外键，保证空库可一次初始化。
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'chunks'::regclass
+          AND conname IN ('chunks_vault_item_id_fkey', 'fk_chunks_vault_item')
+    ) THEN
+        ALTER TABLE chunks
+            ADD CONSTRAINT fk_chunks_vault_item
+            FOREIGN KEY (vault_item_id) REFERENCES vault_items(id) ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'vault_items'::regclass
+          AND conname IN ('vault_items_source_chunk_id_fkey', 'fk_vault_items_source_chunk')
+    ) THEN
+        ALTER TABLE vault_items
+            ADD CONSTRAINT fk_vault_items_source_chunk
+            FOREIGN KEY (source_chunk_id) REFERENCES chunks(id) ON DELETE SET NULL;
+    END IF;
+END
+$$;
 
 -- toolcalling 审计（论文素材：工具使用频率/成功率/延迟分布）
 CREATE TABLE IF NOT EXISTS tool_calls (

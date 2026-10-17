@@ -24,8 +24,8 @@ import java.util.UUID;
  * <p>流程：question → Python PlanTools RPC（3s 超时）→ 计划 ≤2 步 → Java 逐工具执行（审计落 tool_calls）
  * → ToolResult 列表回塞 ChatRequest.tool_results → Python 渲染上下文块。</p>
  *
- * <p>零回归裁决（0.4）：PlanTools 失败/超时/空计划/未知工具/参数解析失败 → 任何一步都返回空结果，
- * 对话静默走现有 RAG 链路。</p>
+ * <p>旧单次规划路径的零回归裁决（0.4）：PlanTools 失败/超时/空计划/未知工具/参数解析失败 →
+ * 返回空结果，由旧对话路径继续执行 RAG。Agent 循环路径即使没有工具结果，也会继续调用 Chat。</p>
  *
  * <p><b>两条路径并存</b>（chat-loop-design.md §4.1）：
  * {@link #loopAndExecute} 是 Java 驱动的多步循环（{@code vault.chat-loop-enabled=true}，默认），
@@ -50,7 +50,7 @@ public class ToolOrchestrator {
      * 规划 + 执行（全流程防御）
      *
      * @param sessionId 对话会话（审计关联；可空）
-     * @return 执行结果列表（空 = 本轮无工具，对话走纯 RAG）
+     * @return 执行结果列表（空 = 本轮无工具；上层旧对话路径继续执行 RAG）
      */
     public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, String question) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
@@ -226,8 +226,8 @@ public class ToolOrchestrator {
      *   <li>单步流式中断 / 终帧缺失 / 解析失败 → <b>不重试</b>，带着已有结果退出</li>
      * </ol>
      *
-     * <p>零回归（裁决 0.4）：任何一步失败都只是退出循环，<b>绝不抛给上层</b>——
-     * 已经拿到的结果照常进 Chat；一步都没成功则返回空列表，退化成纯 RAG。</p>
+     * <p>任何一步失败都只是退出循环，<b>绝不抛给上层</b>：已经拿到的结果照常进 Chat；
+     * 一步都没成功则返回空列表，由 Chat 根据问题和可用上下文回答。</p>
      *
      * <p>与旧 {@link #planAndExecute} 的差别之一：循环里<b>没有</b>逐步给 {@code recall_item} 手动接
      * {@code find_item} id 的硬编码——模型看得见上一步结果，会自己把 id 填进参数。但循环<b>正常收束</b>
@@ -235,13 +235,11 @@ public class ToolOrchestrator {
      * 因为"模型经常只规划 find_item"是实测结论，不能用理论假设换掉。</p>
      *
      * @param history      对话历史（正序，窗口 {@code vault.plan-history-rounds}）
-     * @param hasRetrieval 本轮 RAG 是否有命中（让模型知道检索空了）
      * @param listener     单步回调（可为 null = 不推 SSE）
-     * @return 累积的工具结果（空 = 本轮无工具，对话走纯 RAG）
+     * @return 累积的工具结果（空 = 本轮无工具；上层仍调用 Chat 生成回答）
      */
     public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, String question,
                                                       List<MirrorChatProto.ChatMessage> history,
-                                                      boolean hasRetrieval,
                                                       StepListener listener) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
         List<String> summaries = new ArrayList<>();
@@ -282,7 +280,7 @@ public class ToolOrchestrator {
                 StepPlan plan;
                 try {
                     plan = planOneStep(userId, question, glossary, tools, safeHistory,
-                            results, step, maxSteps, hasRetrieval, listener);
+                            results, step, maxSteps, listener);
                 } catch (Exception e) {
                     // 终止 6：不重试，带着已有结果正常退出。
                     // 必须是 WARN：2026-09-21 联调时第 1 步因思考预算过大撞 60s deadline，这条是 INFO，
@@ -476,7 +474,7 @@ public class ToolOrchestrator {
                                  List<CommonProto.ToolSpec> tools,
                                  List<MirrorChatProto.ChatMessage> history,
                                  List<CommonProto.ToolResult> previousResults,
-                                 int step, int maxSteps, boolean hasRetrieval,
+                                 int step, int maxSteps,
                                  StepListener listener) {
         MirrorChatProto.PlanNextStepRequest request = MirrorChatProto.PlanNextStepRequest.newBuilder()
                 .setQuestion(question)
@@ -486,7 +484,6 @@ public class ToolOrchestrator {
                 .addAllPreviousResults(previousResults)
                 .setStep(step)
                 .setMaxSteps(maxSteps)
-                .setHasRetrieval(hasRetrieval)
                 .build();
         Iterator<MirrorChatProto.PlanStepChunk> stream =
                 aiGrpcClient.planNextStep(userId, request, props.getPlanToolsTimeoutMs());

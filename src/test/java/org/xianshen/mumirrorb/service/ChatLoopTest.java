@@ -139,7 +139,7 @@ class ChatLoopTest {
     }
 
     private List<CommonProto.ToolResult> run() {
-        return orchestrator.loopAndExecute(USER_ID, SESSION_ID, QUESTION, List.of(), false, listener);
+        return orchestrator.loopAndExecute(USER_ID, SESSION_ID, QUESTION, List.of(), listener);
     }
 
     // ==================== 终止条件 1：done == true ====================
@@ -381,7 +381,7 @@ class ChatLoopTest {
     }
 
     @Test
-    @DisplayName("请求携带 step/max_steps/has_retrieval/previous_results（Python 无状态所需的全量上下文）")
+    @DisplayName("请求携带 step/max_steps/previous_results（Python 无状态所需的全量上下文）")
     void requestCarriesLoopContext() throws Exception {
         props.setMaxLoopSteps(3);
         stubTool("get_stats", "get_stats:记录12条/30天", Map.of("record_count", 12));
@@ -392,7 +392,7 @@ class ChatLoopTest {
         orchestrator.loopAndExecute(USER_ID, SESSION_ID, QUESTION,
                 List.of(MirrorChatProto.ChatMessage.newBuilder()
                         .setRole("user").setContent("上一轮问的开题报告").build()),
-                true, listener);
+                listener);
 
         org.mockito.ArgumentCaptor<MirrorChatProto.PlanNextStepRequest> captor =
                 org.mockito.ArgumentCaptor.forClass(MirrorChatProto.PlanNextStepRequest.class);
@@ -400,7 +400,7 @@ class ChatLoopTest {
         MirrorChatProto.PlanNextStepRequest first = captor.getAllValues().get(0);
         assertEquals(1, first.getStep());
         assertEquals(3, first.getMaxSteps());
-        assertTrue(first.getHasRetrieval());
+        assertFalse(first.getHasRetrieval()); // legacy proto 字段保留兼容，Agent 不再依赖它
         assertEquals(0, first.getPreviousResultsCount());
         assertEquals(1, first.getHistoryCount());
         // 第 2 步必须看得见第 1 步的结果（循环的核心输入）

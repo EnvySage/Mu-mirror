@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 
 import java.util.List;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -17,6 +19,10 @@ import java.util.UUID;
  */
 @Mapper
 public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
+
+    /** Serialize snapshot generation and source-authorization changes for one user. */
+    @Select("SELECT id FROM users WHERE id = #{userId}::uuid FOR UPDATE")
+    UUID lockUserLineage(@Param("userId") UUID userId);
 
     /**
      * 最新一份指定类型的快照
@@ -33,6 +39,8 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
         return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 1"));
     }
@@ -50,6 +58,8 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
         return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .ge(ProfileSnapshot::getCreatedAt, start)
                 .lt(ProfileSnapshot::getCreatedAt, end)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
@@ -68,6 +78,8 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                     .eq(ProfileSnapshot::getUserId, userId)
                     .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                     .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                    .eq(ProfileSnapshot::getInvalidated, false)
+                    .eq(ProfileSnapshot::getIsCurrent, true)
                     .orderByDesc(ProfileSnapshot::getCreatedAt)
                     .last("LIMIT 1"));
         }
@@ -81,6 +93,8 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT " + limit));
     }
@@ -95,20 +109,142 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, "monthly")
                 .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 1"));
     }
 
-    /**
-     * 指定用户全量快照（快照历史列表用，manual + monthly 合并，时间倒序）
-     *
-     * <p>上限 14 = manual 保 2 + monthly 保 12（分层保留后总量），无需分页。</p>
-     */
+    default ProfileSnapshot selectCurrentMonthlyForUpdate(java.util.UUID userId, String periodMonth) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getSnapshotType, "monthly")
+                .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                .eq(ProfileSnapshot::getIsCurrent, true)
+                .last("LIMIT 1 FOR UPDATE"));
+    }
+
+    @Select("""
+            SELECT COALESCE(MAX(version_no), 0)
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND period_month = #{periodMonth}
+            """)
+    int selectMaxVersionNo(@Param("userId") java.util.UUID userId,
+                           @Param("periodMonth") String periodMonth);
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = TRUE
+              AND period_month IS NOT NULL
+              AND period_month <= #{targetMonth}
+            ORDER BY period_month
+            """)
+    List<String> selectInvalidatedCurrentMonthlyPeriods(@Param("userId") java.util.UUID userId,
+                                                        @Param("targetMonth") String targetMonth);
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND period_month IS NOT NULL
+              AND period_month >= #{fromMonth}
+              AND period_month <= #{throughMonth}
+            ORDER BY period_month
+            """)
+    List<String> selectCurrentMonthlyPeriods(@Param("userId") java.util.UUID userId,
+                                             @Param("fromMonth") String fromMonth,
+                                             @Param("throughMonth") String throughMonth);
+
+    @Select("""
+            SELECT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = FALSE
+              AND period_month IS NOT NULL
+              AND period_month < #{beforeMonth}
+            ORDER BY period_month DESC
+            LIMIT 1
+            """)
+    String selectLatestUsableMonthlyPeriodBefore(@Param("userId") UUID userId,
+                                                @Param("beforeMonth") String beforeMonth);
+
+    @Select("""
+            SELECT MIN(period_month)
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND period_month IS NOT NULL
+            """)
+    String selectEarliestArchivedMonthlyPeriod(@Param("userId") UUID userId);
+
+    @Update("""
+            UPDATE profile_snapshots
+            SET is_current = FALSE
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = TRUE
+              AND period_month >= #{fromMonth}
+              AND period_month < #{beforeMonth}
+            """)
+    int retireUnreconstructableInvalidatedCurrentMonthlyVersions(@Param("userId") UUID userId,
+                                                                  @Param("fromMonth") String fromMonth,
+                                                                  @Param("beforeMonth") String beforeMonth);
+
+    default List<ProfileSnapshot> selectSnapshotPage(UUID userId, OffsetDateTime beforeCreatedAt,
+                                                     Long beforeId, int fetchLimit) {
+        var query = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .and(beforeCreatedAt != null && beforeId != null,
+                        nested -> nested.lt(ProfileSnapshot::getCreatedAt, beforeCreatedAt)
+                                .or().eq(ProfileSnapshot::getCreatedAt, beforeCreatedAt)
+                                .lt(ProfileSnapshot::getId, beforeId))
+                .orderByDesc(ProfileSnapshot::getCreatedAt)
+                .orderByDesc(ProfileSnapshot::getId)
+                .last("LIMIT " + fetchLimit);
+        return selectList(query);
+    }
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND period_month IS NOT NULL
+            ORDER BY period_month
+            """)
+    List<String> selectMonthlyPeriodMonths(@Param("userId") UUID userId);
+
+    /** Two newest active context snapshots for AI comparison; the user-facing archive uses keyset pagination. */
     default List<ProfileSnapshot> selectAllByUser(java.util.UUID userId) {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .and(query -> query.ne(ProfileSnapshot::getSnapshotType, "monthly")
+                        .or().eq(ProfileSnapshot::getSnapshotType, "monthly")
+                        .eq(ProfileSnapshot::getIsCurrent, true))
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
-                .last("LIMIT 14"));
+                .orderByDesc(ProfileSnapshot::getId)
+                .last("LIMIT 2"));
+    }
+
+    default ProfileSnapshot selectActiveById(java.util.UUID userId, Long snapshotId) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getId, snapshotId)
+                .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
+                .last("LIMIT 1"));
     }
 
     /**
@@ -123,13 +259,73 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 SELECT embedding FROM profile_snapshots
                 WHERE user_id = cur.user_id::uuid
                   AND snapshot_type = 'monthly'
+                  AND invalidated = FALSE
+                  AND is_current = TRUE
                   AND created_at < cur.created_at
                   AND embedding IS NOT NULL
                 ORDER BY created_at DESC
                 LIMIT 1
             ) prev ON true
             WHERE cur.id = #{snapshotId}
+              AND cur.invalidated = FALSE
+              AND cur.is_current = TRUE
               AND cur.embedding IS NOT NULL
             """)
     Double selectDriftDistance(@Param("snapshotId") Long snapshotId);
+
+    @Update("""
+            WITH RECURSIVE affected(snapshot_id) AS (
+                SELECT si.snapshot_id
+                FROM snapshot_inputs si
+                JOIN profile_snapshots source_snapshot ON source_snapshot.id = si.snapshot_id
+                WHERE source_snapshot.user_id = #{userId}::uuid
+                  AND si.input_kind = #{inputKind}
+                  AND si.input_id = #{inputId}
+                UNION
+                SELECT child.snapshot_id
+                FROM snapshot_inputs child
+                JOIN affected parent
+                  ON child.input_kind = 'snapshot'
+                 AND child.input_id = parent.snapshot_id
+                JOIN profile_snapshots child_snapshot ON child_snapshot.id = child.snapshot_id
+                WHERE child_snapshot.user_id = #{userId}::uuid
+            )
+            UPDATE profile_snapshots target
+            SET invalidated = TRUE,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidated_reason = #{reason}
+            WHERE target.user_id = #{userId}::uuid
+              AND target.invalidated = FALSE
+              AND target.id IN (SELECT snapshot_id FROM affected)
+            """)
+    int invalidateTrackedFromSource(@Param("userId") java.util.UUID userId,
+                                    @Param("inputKind") String inputKind,
+                                    @Param("inputId") Long inputId,
+                                    @Param("reason") String reason);
+
+    @Update("""
+            WITH RECURSIVE affected(snapshot_id) AS (
+                SELECT id
+                FROM profile_snapshots
+                WHERE user_id = #{userId}::uuid
+                  AND lineage_tracked = FALSE
+                  AND invalidated = FALSE
+                UNION
+                SELECT child.snapshot_id
+                FROM snapshot_inputs child
+                JOIN affected parent
+                  ON child.input_kind = 'snapshot'
+                 AND child.input_id = parent.snapshot_id
+                JOIN profile_snapshots child_snapshot ON child_snapshot.id = child.snapshot_id
+                WHERE child_snapshot.user_id = #{userId}::uuid
+            )
+            UPDATE profile_snapshots target
+            SET invalidated = TRUE,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidated_reason = 'legacy_untracked_source_change'
+            WHERE target.user_id = #{userId}::uuid
+              AND target.invalidated = FALSE
+              AND target.id IN (SELECT snapshot_id FROM affected)
+            """)
+    int invalidateUntrackedForUser(@Param("userId") java.util.UUID userId);
 }
