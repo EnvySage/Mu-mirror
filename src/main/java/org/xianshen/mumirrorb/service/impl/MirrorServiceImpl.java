@@ -126,17 +126,12 @@ public class MirrorServiceImpl implements MirrorService {
     @Transactional(readOnly = true)
     public List<String> snapshotMonths(UUID userId) {
         YearMonth currentMonth = YearMonth.now(ZONE);
-        YearMonth lastCompleteMonth = currentMonth.minusMonths(1);
         Set<YearMonth> candidates = new TreeSet<>();
         List<String> recordMonths = statsMapper.selectAuthorizedRecordMonths(userId);
         List<String> snapshotMonths = snapshotMapper.selectMonthlyPeriodMonths(userId);
         addValidMonths(candidates, recordMonths, currentMonth);
         addValidMonths(candidates, snapshotMonths, currentMonth);
 
-        Set<String> alreadyAvailable = new java.util.HashSet<>();
-        List<String> available = snapshotMapper.selectUsableMonthlyPeriods(userId, lastCompleteMonth.toString());
-        if (available != null) alreadyAvailable.addAll(available);
-        candidates.removeIf(month -> alreadyAvailable.contains(month.toString()));
         return candidates.stream().map(YearMonth::toString).toList();
     }
 

@@ -148,7 +148,7 @@ class MirrorLineageReplayDatabaseTest {
         insertChunk(currentRecord, true);
         insertChunk(unauthorizedRecord, false);
 
-        assertEquals(List.of(archiveOnlyMonth.toString(), authorizedRecordMonth.toString()),
+        assertEquals(List.of(archiveOnlyMonth.toString(), availableMonth.toString(), authorizedRecordMonth.toString()),
                 mirrorService.snapshotMonths(userId));
         List<Long> activeContextIds = snapshotMapper.selectAllByUser(userId).stream()
                 .map(ProfileSnapshot::getId).toList();

@@ -183,20 +183,6 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
             """)
     List<String> selectMonthlyPeriodMonths(@Param("userId") UUID userId);
 
-    @Select("""
-            SELECT DISTINCT period_month
-            FROM profile_snapshots
-            WHERE user_id = #{userId}::uuid
-              AND snapshot_type = 'monthly'
-              AND is_current = TRUE
-              AND invalidated = FALSE
-              AND period_month IS NOT NULL
-              AND period_month <= #{throughMonth}
-            ORDER BY period_month
-            """)
-    List<String> selectUsableMonthlyPeriods(@Param("userId") UUID userId,
-                                            @Param("throughMonth") String throughMonth);
-
     /** Two newest active context snapshots for AI comparison; the user-facing archive uses keyset pagination. */
     default List<ProfileSnapshot> selectAllByUser(java.util.UUID userId) {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()

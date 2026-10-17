@@ -506,7 +506,7 @@ class MirrorStatsTest {
     }
 
     @Test
-    @DisplayName("重建月份：取授权记录月份和归档 period_month 并集，排除可用当前版及本月以后")
+    @DisplayName("重建月份：取授权记录月份和归档 period_month 并集，包含可用月份并排除本月以后")
     void snapshots_rebuildMonthsUsePeriodMonthAndAuthorization() {
         YearMonth currentMonth = YearMonth.now(ZONE);
         String sourceOlderMonth = currentMonth.minusMonths(2).toString();
@@ -519,12 +519,9 @@ class MirrorStatsTest {
         when(snapshotMapper.selectMonthlyPeriodMonths(USER_ID))
                 .thenReturn(List.of(secondArchiveOnlyMonth, sourceAvailableMonth,
                         archiveOnlyMonth, currentMonth.toString()));
-        when(snapshotMapper.selectUsableMonthlyPeriods(eq(USER_ID), any()))
-                .thenReturn(List.of(sourceAvailableMonth, archiveOnlyMonth));
-
         List<String> months = mirrorService.snapshotMonths(USER_ID);
 
-        assertEquals(List.of(secondArchiveOnlyMonth, sourceOlderMonth), months);
+        assertEquals(List.of(secondArchiveOnlyMonth, archiveOnlyMonth, sourceOlderMonth, sourceAvailableMonth), months);
         org.mockito.Mockito.verify(snapshotMapper).selectMonthlyPeriodMonths(USER_ID);
         org.mockito.Mockito.verify(statsMapper).selectAuthorizedRecordMonths(USER_ID);
     }
