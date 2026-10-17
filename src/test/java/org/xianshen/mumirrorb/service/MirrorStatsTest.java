@@ -19,6 +19,7 @@ import org.xianshen.mumirrorb.pojo.DO.SnapshotInput;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
 import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
 
 import java.time.LocalDate;
@@ -366,6 +367,8 @@ class MirrorStatsTest {
                 .id(id)
                 .userId(USER_ID)
                 .snapshotType(type)
+                .versionNo(1)
+                .isCurrent(true)
                 .overallSummary(summary)
                 .createdAt(createdAt)
                 .build();
@@ -375,14 +378,14 @@ class MirrorStatsTest {
     @DisplayName("快照列表：manual+monthly 合并倒序透传，monthly 算漂移、manual 漂移为 null")
     void snapshots_list_mergedOrderAndDrift() {
         OffsetDateTime now = OffsetDateTime.now(ZONE);
-        when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of(
+        when(snapshotMapper.selectSnapshotPage(eq(USER_ID), eq(null), eq(null), eq(15))).thenReturn(List.of(
                 snapshot(5, "manual", now, "最近的手动画像总结"),
                 snapshot(4, "monthly", now.minusDays(1), "月度画像总结"),
                 snapshot(3, "manual", now.minusDays(2), null)
         ));
         when(snapshotMapper.selectDriftDistance(4L)).thenReturn(0.12);
 
-        List<SnapshotListVO> list = mirrorService.listSnapshots(USER_ID);
+        List<SnapshotListVO> list = mirrorService.listSnapshots(USER_ID, null, null, 14).getItems();
 
         assertEquals(3, list.size());
         assertEquals(5L, list.get(0).getId());
@@ -405,11 +408,11 @@ class MirrorStatsTest {
     @DisplayName("快照列表：overallSummary 超 50 字截断并追加 ...")
     void snapshots_list_summaryTruncatedTo50() {
         String longSummary = "字".repeat(80);
-        when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of(
+        when(snapshotMapper.selectSnapshotPage(eq(USER_ID), eq(null), eq(null), eq(21))).thenReturn(List.of(
                 snapshot(1, "manual", OffsetDateTime.now(ZONE), longSummary)
         ));
 
-        SnapshotListVO vo = mirrorService.listSnapshots(USER_ID).get(0);
+        SnapshotListVO vo = mirrorService.listSnapshots(USER_ID, null, null, 20).getItems().get(0);
 
         assertEquals(53, vo.getOverallSummary().length()); // 50 字 + "..."（3 个字符）
         assertTrue(vo.getOverallSummary().endsWith("..."));
@@ -419,9 +422,111 @@ class MirrorStatsTest {
     @Test
     @DisplayName("快照列表：空数据返回空数组")
     void snapshots_list_empty() {
-        when(snapshotMapper.selectAllByUser(USER_ID)).thenReturn(List.of());
+        when(snapshotMapper.selectSnapshotPage(eq(USER_ID), eq(null), eq(null), eq(21))).thenReturn(List.of());
 
-        assertTrue(mirrorService.listSnapshots(USER_ID).isEmpty());
+        assertTrue(mirrorService.listSnapshots(USER_ID, null, null, 20).getItems().isEmpty());
+    }
+
+    @Test
+    @DisplayName("归档分页：包含失效版本，稳定游标指向本页最后一项")
+    void snapshots_pageIncludesArchivesAndUsesStableCursor() {
+        OffsetDateTime firstAt = OffsetDateTime.parse("2026-10-02T08:00:00+08:00");
+        OffsetDateTime secondAt = OffsetDateTime.parse("2026-10-01T08:00:00+08:00");
+        ProfileSnapshot archived = snapshot(9, "monthly", firstAt, "失效归档");
+        archived.setPeriodMonth("2026-08");
+        archived.setVersionNo(1);
+        archived.setIsCurrent(false);
+        archived.setInvalidated(true);
+        archived.setInvalidatedAt(firstAt.plusMinutes(5));
+        archived.setInvalidatedReason("record_deleted");
+        ProfileSnapshot current = snapshot(8, "monthly", secondAt, "当前版本");
+        current.setPeriodMonth("2026-08");
+        current.setVersionNo(2);
+        current.setIsCurrent(true);
+        current.setInvalidated(false);
+        ProfileSnapshot overflow = snapshot(7, "manual", secondAt.minusDays(1), "下一页");
+        when(snapshotMapper.selectSnapshotPage(eq(USER_ID), eq(null), eq(null), eq(3)))
+                .thenReturn(List.of(archived, current, overflow));
+        when(snapshotInputMapper.selectDeletedSourceCounts(List.of(9L, 8L)))
+                .thenReturn(List.of(row("snapshotId", 9L, "deletedSourceCount", 2L)));
+
+        SnapshotPageVO page = mirrorService.listSnapshots(USER_ID, null, null, 2);
+
+        assertEquals(List.of(9L, 8L), page.getItems().stream().map(SnapshotListVO::getId).toList());
+        assertTrue(page.isHasMore());
+        assertEquals(secondAt, page.getNextCreatedAt());
+        assertEquals(8L, page.getNextId());
+        assertEquals("archive_only", page.getItems().get(0).getContextStatus());
+        assertEquals("2026-08", page.getItems().get(0).getPeriodMonth());
+        assertEquals(1, page.getItems().get(0).getVersionNo());
+        assertFalse(page.getItems().get(0).getIsCurrent());
+        assertEquals("record_deleted", page.getItems().get(0).getInvalidatedReason());
+        assertEquals(2, page.getItems().get(0).getDeletedSourceCount());
+        assertEquals("usable", page.getItems().get(1).getContextStatus());
+        assertEquals(0, page.getItems().get(1).getDeletedSourceCount());
+
+        OffsetDateTime cursorAt = page.getNextCreatedAt();
+        Long cursorId = page.getNextId();
+        when(snapshotMapper.selectSnapshotPage(eq(USER_ID), eq(cursorAt), eq(cursorId), eq(3)))
+                .thenReturn(List.of(overflow));
+        SnapshotPageVO secondPage = mirrorService.listSnapshots(USER_ID, cursorAt, cursorId, 2);
+        assertEquals(List.of(7L), secondPage.getItems().stream().map(SnapshotListVO::getId).toList());
+        assertTrue(java.util.Collections.disjoint(
+                page.getItems().stream().map(SnapshotListVO::getId).toList(),
+                secondPage.getItems().stream().map(SnapshotListVO::getId).toList()));
+    }
+
+    @Test
+    @DisplayName("归档详情：失效快照仍可归属校验后查看，并标记删除来源数")
+    void snapshot_detailArchiveMetadataAndDeletedSources() {
+        OffsetDateTime createdAt = OffsetDateTime.parse("2026-08-31T21:00:00+08:00");
+        ProfileSnapshot archived = snapshot(44, "monthly", createdAt, "留存的归档正文");
+        archived.setPeriodMonth("2026-08");
+        archived.setVersionNo(3);
+        archived.setIsCurrent(false);
+        archived.setInvalidated(true);
+        archived.setInvalidatedAt(createdAt.plusDays(1));
+        archived.setInvalidatedReason("record_deleted");
+        archived.setLineageTracked(true);
+        when(snapshotMapper.selectById(44L)).thenReturn(archived);
+        when(snapshotInputMapper.selectDeletedSourceCounts(List.of(44L)))
+                .thenReturn(List.of(row("snapshotId", 44L, "deletedSourceCount", 3L)));
+        when(snapshotMapper.selectList(any())).thenReturn(List.of());
+
+        MirrorProfileVO detail = mirrorService.getSnapshot(44L, USER_ID);
+
+        assertEquals("archive_only", detail.getContextStatus());
+        assertEquals("2026-08", detail.getPeriodMonth());
+        assertEquals(3, detail.getVersionNo());
+        assertFalse(detail.getIsCurrent());
+        assertEquals(createdAt.plusDays(1), detail.getInvalidatedAt());
+        assertEquals("record_deleted", detail.getInvalidatedReason());
+        assertEquals(3, detail.getDeletedSourceCount());
+        assertEquals("留存的归档正文", detail.getOverallSummary());
+    }
+
+    @Test
+    @DisplayName("重建月份：取授权记录月份和归档 period_month 并集，排除可用当前版及本月以后")
+    void snapshots_rebuildMonthsUsePeriodMonthAndAuthorization() {
+        YearMonth currentMonth = YearMonth.now(ZONE);
+        String sourceOlderMonth = currentMonth.minusMonths(2).toString();
+        String sourceAvailableMonth = currentMonth.minusMonths(1).toString();
+        String archiveOnlyMonth = currentMonth.minusMonths(3).toString();
+        String secondArchiveOnlyMonth = currentMonth.minusMonths(4).toString();
+        when(statsMapper.selectAuthorizedRecordMonths(USER_ID))
+                .thenReturn(List.of(sourceOlderMonth, sourceAvailableMonth,
+                        currentMonth.toString(), currentMonth.plusMonths(1).toString()));
+        when(snapshotMapper.selectMonthlyPeriodMonths(USER_ID))
+                .thenReturn(List.of(secondArchiveOnlyMonth, sourceAvailableMonth,
+                        archiveOnlyMonth, currentMonth.toString()));
+        when(snapshotMapper.selectUsableMonthlyPeriods(eq(USER_ID), any()))
+                .thenReturn(List.of(sourceAvailableMonth, archiveOnlyMonth));
+
+        List<String> months = mirrorService.snapshotMonths(USER_ID);
+
+        assertEquals(List.of(secondArchiveOnlyMonth, sourceOlderMonth), months);
+        org.mockito.Mockito.verify(snapshotMapper).selectMonthlyPeriodMonths(USER_ID);
+        org.mockito.Mockito.verify(statsMapper).selectAuthorizedRecordMonths(USER_ID);
     }
 
     @Test

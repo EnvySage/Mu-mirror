@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Update;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 
 import java.util.List;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -158,17 +159,55 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                                              @Param("fromMonth") String fromMonth,
                                              @Param("throughMonth") String throughMonth);
 
-    /**
-     * 指定用户有效快照（历史页和 AI 对比使用；失效快照不再参与后续推断）
-     *
-     * <p>上限 14 = manual 保 2 + monthly 保 12（分层保留后总量），无需分页。</p>
-     */
+    default List<ProfileSnapshot> selectSnapshotPage(UUID userId, OffsetDateTime beforeCreatedAt,
+                                                     Long beforeId, int fetchLimit) {
+        var query = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .and(beforeCreatedAt != null && beforeId != null,
+                        nested -> nested.lt(ProfileSnapshot::getCreatedAt, beforeCreatedAt)
+                                .or().eq(ProfileSnapshot::getCreatedAt, beforeCreatedAt)
+                                .lt(ProfileSnapshot::getId, beforeId))
+                .orderByDesc(ProfileSnapshot::getCreatedAt)
+                .orderByDesc(ProfileSnapshot::getId)
+                .last("LIMIT " + fetchLimit);
+        return selectList(query);
+    }
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND period_month IS NOT NULL
+            ORDER BY period_month
+            """)
+    List<String> selectMonthlyPeriodMonths(@Param("userId") UUID userId);
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = FALSE
+              AND period_month IS NOT NULL
+              AND period_month <= #{throughMonth}
+            ORDER BY period_month
+            """)
+    List<String> selectUsableMonthlyPeriods(@Param("userId") UUID userId,
+                                            @Param("throughMonth") String throughMonth);
+
+    /** Two newest active context snapshots for AI comparison; the user-facing archive uses keyset pagination. */
     default List<ProfileSnapshot> selectAllByUser(java.util.UUID userId) {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getInvalidated, false)
+                .and(query -> query.ne(ProfileSnapshot::getSnapshotType, "monthly")
+                        .or().eq(ProfileSnapshot::getSnapshotType, "monthly")
+                        .eq(ProfileSnapshot::getIsCurrent, true))
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
-                .last("LIMIT 14"));
+                .orderByDesc(ProfileSnapshot::getId)
+                .last("LIMIT 2"));
     }
 
     default ProfileSnapshot selectActiveById(java.util.UUID userId, Long snapshotId) {

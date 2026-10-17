@@ -196,6 +196,22 @@ public interface ProfileStatsMapper {
                                                   @Param("since") OffsetDateTime since,
                                                   @Param("until") OffsetDateTime until);
 
+    /** Distinct history months containing at least one AI-authorized record. */
+    @Select("""
+            SELECT DISTINCT TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM') AS month
+            FROM records r
+            WHERE r.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.source = 'user'
+              AND r.status = 'done'
+              AND EXISTS (
+                  SELECT 1 FROM chunks c
+                  WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              )
+            ORDER BY month
+            """)
+    List<String> selectAuthorizedRecordMonths(@Param("userId") java.util.UUID userId);
+
     /**
      * 情绪分布（metadata.mood 数组展开计数）
      *

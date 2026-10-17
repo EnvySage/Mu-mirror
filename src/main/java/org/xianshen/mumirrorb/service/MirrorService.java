@@ -2,8 +2,9 @@ package org.xianshen.mumirrorb.service;
 
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
-import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,12 +21,14 @@ public interface MirrorService {
     MirrorProfileVO getMirror(UUID userId);
 
     /**
-     * 快照历史列表（manual + monthly 合并全量，时间倒序，上限 14）
+     * 快照历史列表（包含有效快照与仅归档快照，按创建时间和 ID 稳定倒序分页）
      *
-     * <p>轻量 VO：id / snapshotType / createdAt / driftDistance / overallSummary（前 50 字截断）。
-     * driftDistance 仅 monthly 快照计算（manual 无对比基线为 null）。</p>
+     * <p>首屏游标为空；后续游标必须同时提供创建时间和 ID。限制每页 1–100 条。</p>
      */
-    List<SnapshotListVO> listSnapshots(UUID userId);
+    SnapshotPageVO listSnapshots(UUID userId, OffsetDateTime beforeCreatedAt, Long beforeId, int limit);
+
+    /** 可重建的历史月：授权记录月份与镜子归属月份的并集，排除已有可用版本和当前/未来月。 */
+    List<String> snapshotMonths(UUID userId);
 
     /**
      * 单份完整快照（结构与 GET /api/mirror 的 MirrorProfileVO 一致 + id/snapshotType）

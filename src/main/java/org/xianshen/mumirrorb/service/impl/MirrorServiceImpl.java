@@ -25,6 +25,7 @@ import org.xianshen.mumirrorb.pojo.DO.SnapshotInput;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
+import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
 import org.xianshen.mumirrorb.service.GlossaryService;
 import org.xianshen.mumirrorb.service.MirrorService;
 
@@ -90,29 +91,103 @@ public class MirrorServiceImpl implements MirrorService {
         return toVO(snapshot);
     }
 
-    /**
-     * 快照历史列表（manual + monthly 合并全量，时间倒序，上限 14）
-     */
+    /** Keyset-paginated archive; invalidated snapshots remain visible. */
     @Override
     @Transactional(readOnly = true)
-    public List<SnapshotListVO> listSnapshots(UUID userId) {
-        List<ProfileSnapshot> snapshots = snapshotMapper.selectAllByUser(userId);
-        List<SnapshotListVO> result = new ArrayList<>(snapshots.size());
-        for (ProfileSnapshot snapshot : snapshots) {
-            // driftDistance 仅 monthly 快照计算（与 toVO 口径一致），manual 无对比基线为 null
-            Double drift = "monthly".equals(snapshot.getSnapshotType())
-                    ? snapshotMapper.selectDriftDistance(snapshot.getId())
-                    : null;
-            result.add(SnapshotListVO.builder()
-                    .id(snapshot.getId())
-                    .snapshotType(snapshot.getSnapshotType())
-                    .createdAt(snapshot.getCreatedAt())
-                    .driftDistance(drift)
-                    .overallSummary(truncateSummary(snapshot.getOverallSummary()))
-                    .build());
+    public SnapshotPageVO listSnapshots(UUID userId, OffsetDateTime beforeCreatedAt, Long beforeId, int limit) {
+        if ((beforeCreatedAt == null) != (beforeId == null)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "分页游标时间和快照 ID 必须同时提供");
         }
-        log.debug("快照历史列表：用户 {} 返回 {} 份", userId, result.size());
+        if (limit < 1 || limit > 100) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "每页数量必须在 1 到 100 之间");
+        }
+        List<ProfileSnapshot> fetched = snapshotMapper.selectSnapshotPage(userId, beforeCreatedAt, beforeId,
+                limit + 1);
+        if (fetched == null) fetched = List.of();
+        boolean hasMore = fetched.size() > limit;
+        List<ProfileSnapshot> snapshots = hasMore ? fetched.subList(0, limit) : fetched;
+        Map<Long, Integer> deletedSourceCounts = selectDeletedSourceCounts(snapshots);
+        List<SnapshotListVO> items = snapshots.stream()
+                .map(snapshot -> toSnapshotListVO(snapshot,
+                        deletedSourceCounts.getOrDefault(snapshot.getId(), 0)))
+                .toList();
+        SnapshotListVO last = hasMore && !items.isEmpty() ? items.get(items.size() - 1) : null;
+        SnapshotPageVO page = SnapshotPageVO.builder()
+                .items(items)
+                .hasMore(hasMore)
+                .nextCreatedAt(last == null ? null : last.getCreatedAt())
+                .nextId(last == null ? null : last.getId())
+                .build();
+        log.debug("快照归档分页：用户 {} 返回 {} 份，hasMore={}", userId, items.size(), hasMore);
+        return page;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> snapshotMonths(UUID userId) {
+        YearMonth currentMonth = YearMonth.now(ZONE);
+        YearMonth lastCompleteMonth = currentMonth.minusMonths(1);
+        Set<YearMonth> candidates = new TreeSet<>();
+        List<String> recordMonths = statsMapper.selectAuthorizedRecordMonths(userId);
+        List<String> snapshotMonths = snapshotMapper.selectMonthlyPeriodMonths(userId);
+        addValidMonths(candidates, recordMonths, currentMonth);
+        addValidMonths(candidates, snapshotMonths, currentMonth);
+
+        Set<String> alreadyAvailable = new java.util.HashSet<>();
+        List<String> available = snapshotMapper.selectUsableMonthlyPeriods(userId, lastCompleteMonth.toString());
+        if (available != null) alreadyAvailable.addAll(available);
+        candidates.removeIf(month -> alreadyAvailable.contains(month.toString()));
+        return candidates.stream().map(YearMonth::toString).toList();
+    }
+
+    private static void addValidMonths(Set<YearMonth> target, List<String> values, YearMonth currentMonth) {
+        if (values == null) return;
+        for (String value : values) {
+            if (value == null) continue;
+            try {
+                YearMonth month = YearMonth.parse(value);
+                if (month.isBefore(currentMonth)) target.add(month);
+            } catch (java.time.format.DateTimeParseException ignored) {
+                log.warn("忽略格式错误的镜子归属月份: {}", value);
+            }
+        }
+    }
+
+    private Map<Long, Integer> selectDeletedSourceCounts(List<ProfileSnapshot> snapshots) {
+        if (snapshots == null || snapshots.isEmpty()) return Map.of();
+        List<Long> ids = snapshots.stream().map(ProfileSnapshot::getId).filter(java.util.Objects::nonNull).toList();
+        if (ids.isEmpty()) return Map.of();
+        List<Map<String, Object>> rows = snapshotInputMapper.selectDeletedSourceCounts(ids);
+        if (rows == null || rows.isEmpty()) return Map.of();
+        Map<Long, Integer> result = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            Long snapshotId = toNullableLong(row.get("snapshotId"));
+            if (snapshotId != null) result.put(snapshotId, (int) toLong(row.get("deletedSourceCount")));
+        }
         return result;
+    }
+
+    private SnapshotListVO toSnapshotListVO(ProfileSnapshot snapshot, int deletedSourceCount) {
+        boolean current = snapshot.getIsCurrent() == null || snapshot.getIsCurrent();
+        boolean invalidated = Boolean.TRUE.equals(snapshot.getInvalidated());
+        String contextStatus = invalidated || ("monthly".equals(snapshot.getSnapshotType()) && !current)
+                ? "archive_only" : "usable";
+        Double drift = "monthly".equals(snapshot.getSnapshotType()) && "usable".equals(contextStatus)
+                ? snapshotMapper.selectDriftDistance(snapshot.getId()) : null;
+        return SnapshotListVO.builder()
+                .id(snapshot.getId())
+                .snapshotType(snapshot.getSnapshotType())
+                .periodMonth(snapshot.getPeriodMonth())
+                .versionNo(snapshot.getVersionNo())
+                .isCurrent(current)
+                .contextStatus(contextStatus)
+                .invalidatedAt(snapshot.getInvalidatedAt())
+                .invalidatedReason(snapshot.getInvalidatedReason())
+                .deletedSourceCount(deletedSourceCount)
+                .createdAt(snapshot.getCreatedAt())
+                .driftDistance(drift)
+                .overallSummary(truncateSummary(snapshot.getOverallSummary()))
+                .build();
     }
 
     /**
@@ -1078,9 +1153,23 @@ public class MirrorServiceImpl implements MirrorService {
             baselineAt = prevMonthly.getCreatedAt();
         }
 
+        int deletedSourceCount = snapshot.getId() == null ? 0
+                : selectDeletedSourceCounts(List.of(snapshot)).getOrDefault(snapshot.getId(), 0);
+        boolean current = snapshot.getIsCurrent() == null || snapshot.getIsCurrent();
+        boolean invalidated = Boolean.TRUE.equals(snapshot.getInvalidated());
+        String contextStatus = invalidated || ("monthly".equals(snapshot.getSnapshotType()) && !current)
+                ? "archive_only" : "usable";
+
         return MirrorProfileVO.builder()
                 .id(snapshot.getId())
                 .snapshotType(snapshot.getSnapshotType())
+                .periodMonth(snapshot.getPeriodMonth())
+                .versionNo(snapshot.getVersionNo())
+                .isCurrent(current)
+                .contextStatus(contextStatus)
+                .invalidatedAt(snapshot.getInvalidatedAt())
+                .invalidatedReason(snapshot.getInvalidatedReason())
+                .deletedSourceCount(deletedSourceCount)
                 .moodAnalysis(snapshot.getMoodAnalysis())
                 .learningAnalysis(snapshot.getLearningAnalysis())
                 .todoAnalysis(snapshot.getTodoAnalysis())

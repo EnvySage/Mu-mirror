@@ -28,6 +28,28 @@ public class SnapshotListVO {
     @Schema(description = "快照类型", example = "manual", allowableValues = {"manual", "monthly"})
     private String snapshotType;
 
+    @Schema(description = "月度快照归属月份", example = "2026-08")
+    private String periodMonth;
+
+    @Schema(description = "该归属月份的版本号", example = "2")
+    private Integer versionNo;
+
+    @Schema(description = "是否为当前月度版本")
+    private Boolean isCurrent;
+
+    @Schema(description = "上下文状态", example = "archive_only", allowableValues = {"usable", "archive_only"})
+    private String contextStatus;
+
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
+    @Schema(description = "退出后续 AI 上下文的时间")
+    private OffsetDateTime invalidatedAt;
+
+    @Schema(description = "退出上下文的原因")
+    private String invalidatedReason;
+
+    @Schema(description = "已删除或已清除的来源记录数")
+    private Integer deletedSourceCount;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "快照生成时间")
     private OffsetDateTime createdAt;

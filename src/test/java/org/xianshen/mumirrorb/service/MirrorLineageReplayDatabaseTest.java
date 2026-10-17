@@ -24,6 +24,8 @@ import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
 
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -84,8 +86,76 @@ class MirrorLineageReplayDatabaseTest {
         jdbcTemplate.update("DELETE FROM snapshot_inputs WHERE snapshot_id IN " +
                 "(SELECT id FROM profile_snapshots WHERE user_id = ?)", userId);
         jdbcTemplate.update("DELETE FROM profile_snapshots WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM chunks WHERE user_id = ?", userId);
+        jdbcTemplate.update("DELETE FROM records WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM user_settings WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM users WHERE id = ?", userId);
+    }
+
+    @Test
+    void archivePageUsesFullPrecisionKeysetAndCountsDeletedSources() {
+        OffsetDateTime createdAt = OffsetDateTime.parse("2026-08-12T10:20:30.123456+08:00");
+        ProfileSnapshot older = insertArchive("manual", null, false, true, createdAt);
+        ProfileSnapshot current = insertArchive("manual", null, false, true, createdAt);
+        ProfileSnapshot archived = insertArchive("monthly", "2026-08", true, false, createdAt);
+
+        long softDeletedRecordId = insertRecord(createdAt, createdAt.plusDays(1));
+        long removedRecordId = insertRecord(createdAt, null);
+        jdbcTemplate.update("INSERT INTO snapshot_inputs (snapshot_id, input_kind, input_id, input_role) " +
+                "VALUES (?, 'record', ?, 'stats'), (?, 'record', ?, 'stats')",
+                archived.getId(), softDeletedRecordId, archived.getId(), removedRecordId);
+        jdbcTemplate.update("DELETE FROM records WHERE id = ?", removedRecordId);
+
+        var first = mirrorService.listSnapshots(userId, null, null, 1);
+        assertEquals(List.of(archived.getId()), first.getItems().stream().map(item -> item.getId()).toList());
+        assertEquals("archive_only", first.getItems().get(0).getContextStatus());
+        assertEquals(2, first.getItems().get(0).getDeletedSourceCount());
+        assertTrue(first.isHasMore());
+        assertEquals(createdAt.toInstant(), first.getNextCreatedAt().toInstant());
+        assertEquals(123_456_000, first.getNextCreatedAt().getNano());
+        assertEquals(archived.getId(), first.getNextId());
+
+        var second = mirrorService.listSnapshots(userId, first.getNextCreatedAt(), first.getNextId(), 1);
+        assertEquals(List.of(current.getId()), second.getItems().stream().map(item -> item.getId()).toList());
+        assertTrue(second.isHasMore());
+        var third = mirrorService.listSnapshots(userId, second.getNextCreatedAt(), second.getNextId(), 1);
+        assertEquals(List.of(older.getId()), third.getItems().stream().map(item -> item.getId()).toList());
+        assertFalse(third.isHasMore());
+    }
+
+    @Test
+    void rebuildMonthCandidatesCombineAuthorizedRecordsAndArchivePeriod() {
+        YearMonth currentMonth = YearMonth.now(ZoneId.of("Asia/Shanghai"));
+        YearMonth archiveOnlyMonth = currentMonth.minusMonths(3);
+        YearMonth availableMonth = currentMonth.minusMonths(2);
+        YearMonth authorizedRecordMonth = currentMonth.minusMonths(1);
+        OffsetDateTime now = OffsetDateTime.now(ZoneId.of("Asia/Shanghai"));
+
+        ProfileSnapshot archive = insertArchive("monthly", archiveOnlyMonth.toString(), true, true, now);
+        ProfileSnapshot available = insertArchive("monthly", availableMonth.toString(), false, true, now.plusSeconds(1));
+        ProfileSnapshot oldVersion = insertArchive("monthly", availableMonth.toString(), false, false,
+                now.plusSeconds(2));
+        assertNotNull(archive.getId());
+        assertNotNull(available.getId());
+
+        long authorizedRecord = insertRecord(authorizedRecordMonth.atDay(10)
+                .atStartOfDay(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), null);
+        long currentRecord = insertRecord(currentMonth.atDay(2)
+                .atStartOfDay(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), null);
+        long unauthorizedRecord = insertRecord(authorizedRecordMonth.atDay(11)
+                .atStartOfDay(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), null);
+        insertChunk(authorizedRecord, true);
+        insertChunk(currentRecord, true);
+        insertChunk(unauthorizedRecord, false);
+
+        assertEquals(List.of(archiveOnlyMonth.toString(), authorizedRecordMonth.toString()),
+                mirrorService.snapshotMonths(userId));
+        List<Long> activeContextIds = snapshotMapper.selectAllByUser(userId).stream()
+                .map(ProfileSnapshot::getId).toList();
+        assertTrue(activeContextIds.contains(available.getId()));
+        assertFalse(activeContextIds.contains(archive.getId()));
+        assertFalse(activeContextIds.contains(oldVersion.getId()));
+        assertNull(snapshotMapper.selectActiveById(userId, oldVersion.getId()));
     }
 
     @Test
@@ -158,6 +228,40 @@ class MirrorLineageReplayDatabaseTest {
                 .build();
         snapshotMapper.insert(snapshot);
         return snapshot;
+    }
+
+    private ProfileSnapshot insertArchive(String type, String month, boolean invalidated, boolean current,
+                                          OffsetDateTime createdAt) {
+        ProfileSnapshot snapshot = ProfileSnapshot.builder()
+                .userId(userId)
+                .snapshotType(type)
+                .periodMonth(month)
+                .versionNo(1)
+                .isCurrent(current)
+                .lineageTracked(true)
+                .invalidated(invalidated)
+                .invalidatedAt(invalidated ? createdAt : null)
+                .invalidatedReason(invalidated ? "record_deleted" : null)
+                .overallSummary("archive " + month)
+                .createdAt(createdAt)
+                .build();
+        snapshotMapper.insert(snapshot);
+        return snapshot;
+    }
+
+    private long insertRecord(OffsetDateTime createdAt, OffsetDateTime deletedAt) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO records (user_id, content, source, status, created_at, deleted_at)
+                VALUES (?, 'test record', 'user', 'done', ?, ?)
+                RETURNING id
+                """, Long.class, userId, createdAt, deletedAt);
+    }
+
+    private void insertChunk(long recordId, boolean authorized) {
+        jdbcTemplate.update("""
+                INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved)
+                VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, ?)
+                """, userId, recordId, authorized);
     }
 
     @SpringBootConfiguration
