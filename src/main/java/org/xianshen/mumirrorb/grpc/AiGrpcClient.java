@@ -348,7 +348,7 @@ public class AiGrpcClient {
      * 调用画像生成服务（设计文档 6.5，阶段 3）
      *
      * <p>输入五维统计 + recent_chats + LlmConfig，输出六维分析 + user_tags + overall_summary。
-     * 超时 60s（7.4）。</p>
+     * 超时 120s：画像生成会串行处理月度语料，需为 AI 侧 60s 非流式预算留出返回与解析余量。</p>
      *
      * @param userId  用户 ID（读取 LLM 配置）
      * @param request 已组装的 GenerateProfileRequest
@@ -362,7 +362,7 @@ public class AiGrpcClient {
                     .setLlmConfig(buildLlmConfig(userId))
                     .build();
             MirrorProfileProto.GenerateProfileResponse response = profileStub
-                    .withDeadlineAfter(60, TimeUnit.SECONDS)
+                    .withDeadlineAfter(120, TimeUnit.SECONDS)
                     .generateProfile(enriched);
             log.info("GenerateProfile 返回: tags={}, summary 长度={}",
                     response.getUserTagsList(), response.getOverallSummary().length());
