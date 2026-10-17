@@ -180,6 +180,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     @Select("""
             <script>
             SELECT c.metadata->>'title' AS title,
+                   r.id AS "recordId",
+                   c.id AS "chunkId",
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS record_date
             FROM chunks c
             JOIN records r ON r.id = c.record_id

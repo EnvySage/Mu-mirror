@@ -35,6 +35,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                 .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 1"));
     }
@@ -53,6 +54,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                 .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .ge(ProfileSnapshot::getCreatedAt, start)
                 .lt(ProfileSnapshot::getCreatedAt, end)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
@@ -72,6 +74,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                     .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                     .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
                     .eq(ProfileSnapshot::getInvalidated, false)
+                    .eq(ProfileSnapshot::getIsCurrent, true)
                     .orderByDesc(ProfileSnapshot::getCreatedAt)
                     .last("LIMIT 1"));
         }
@@ -86,6 +89,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getSnapshotType, snapshotType)
                 .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT " + limit));
     }
@@ -101,9 +105,58 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getSnapshotType, "monthly")
                 .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
                 .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .orderByDesc(ProfileSnapshot::getCreatedAt)
                 .last("LIMIT 1"));
     }
+
+    default ProfileSnapshot selectCurrentMonthlyForUpdate(java.util.UUID userId, String periodMonth) {
+        return selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                .eq(ProfileSnapshot::getUserId, userId)
+                .eq(ProfileSnapshot::getSnapshotType, "monthly")
+                .eq(ProfileSnapshot::getPeriodMonth, periodMonth)
+                .eq(ProfileSnapshot::getIsCurrent, true)
+                .last("LIMIT 1 FOR UPDATE"));
+    }
+
+    @Select("""
+            SELECT COALESCE(MAX(version_no), 0)
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND period_month = #{periodMonth}
+            """)
+    int selectMaxVersionNo(@Param("userId") java.util.UUID userId,
+                           @Param("periodMonth") String periodMonth);
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = TRUE
+              AND period_month IS NOT NULL
+              AND period_month <= #{targetMonth}
+            ORDER BY period_month
+            """)
+    List<String> selectInvalidatedCurrentMonthlyPeriods(@Param("userId") java.util.UUID userId,
+                                                        @Param("targetMonth") String targetMonth);
+
+    @Select("""
+            SELECT DISTINCT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND period_month IS NOT NULL
+              AND period_month >= #{fromMonth}
+              AND period_month <= #{throughMonth}
+            ORDER BY period_month
+            """)
+    List<String> selectCurrentMonthlyPeriods(@Param("userId") java.util.UUID userId,
+                                             @Param("fromMonth") String fromMonth,
+                                             @Param("throughMonth") String throughMonth);
 
     /**
      * 指定用户有效快照（历史页和 AI 对比使用；失效快照不再参与后续推断）
@@ -123,6 +176,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 .eq(ProfileSnapshot::getUserId, userId)
                 .eq(ProfileSnapshot::getId, snapshotId)
                 .eq(ProfileSnapshot::getInvalidated, false)
+                .eq(ProfileSnapshot::getIsCurrent, true)
                 .last("LIMIT 1"));
     }
 
@@ -139,6 +193,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 WHERE user_id = cur.user_id::uuid
                   AND snapshot_type = 'monthly'
                   AND invalidated = FALSE
+                  AND is_current = TRUE
                   AND created_at < cur.created_at
                   AND embedding IS NOT NULL
                 ORDER BY created_at DESC
@@ -146,6 +201,7 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
             ) prev ON true
             WHERE cur.id = #{snapshotId}
               AND cur.invalidated = FALSE
+              AND cur.is_current = TRUE
               AND cur.embedding IS NOT NULL
             """)
     Double selectDriftDistance(@Param("snapshotId") Long snapshotId);

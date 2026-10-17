@@ -9,10 +9,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
+import org.xianshen.mumirrorb.mapper.SnapshotInputMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DTO.ProfileStatsDTO;
+import org.xianshen.mumirrorb.pojo.DTO.SnapshotSourceRef;
+import org.xianshen.mumirrorb.pojo.DO.SnapshotInput;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
@@ -27,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,6 +53,9 @@ class MirrorStatsTest {
 
     @Mock
     private ProfileSnapshotMapper snapshotMapper;
+
+    @Mock
+    private SnapshotInputMapper snapshotInputMapper;
 
     @Mock
     private ProfileStatsMapper statsMapper;
@@ -94,6 +101,15 @@ class MirrorStatsTest {
         lenient().when(statsMapper.selectKeywordStats(eq(USER_ID), any(), any(), eq(10))).thenReturn(List.of());
         lenient().when(statsMapper.selectTodoStatusCounts(USER_ID)).thenReturn(List.of());
         lenient().when(statsMapper.selectOpenTodos(USER_ID)).thenReturn(List.of());
+        lenient().when(statsMapper.selectStatsSourceRefs(eq(USER_ID), any(), any())).thenReturn(List.of());
+        lenient().when(statsMapper.selectTodoSourceRefs(USER_ID)).thenReturn(List.of());
+        lenient().when(statsMapper.selectRecentLearningSourceRefs(USER_ID)).thenReturn(List.of());
+        lenient().when(snapshotMapper.selectInvalidatedCurrentMonthlyPeriods(eq(USER_ID), any()))
+                .thenReturn(List.of());
+        lenient().when(snapshotMapper.selectCurrentMonthlyPeriods(eq(USER_ID), any(), any()))
+                .thenReturn(List.of());
+        lenient().when(snapshotMapper.selectCurrentMonthlyForUpdate(eq(USER_ID), any())).thenReturn(null);
+        lenient().when(snapshotMapper.selectMaxVersionNo(eq(USER_ID), any())).thenReturn(0);
     }
 
     @Test
@@ -561,6 +577,8 @@ class MirrorStatsTest {
                 .userId(USER_ID)
                 .snapshotType("monthly")
                 .periodMonth("2026-07")
+                .isCurrent(true)
+                .invalidated(false)
                 .moodAnalysis("7月情绪以 stressed 为主")
                 .learningAnalysis("实训 Java 开发为主")
                 .todoAnalysis("待办积压")
@@ -579,6 +597,53 @@ class MirrorStatsTest {
         assertTrue(prev.contains("七月：暑期实训冲刺期"));
         assertTrue(prev.contains("实训 Java 开发为主"));
         assertTrue(prev.contains("深夜记录居多"));
+    }
+
+    @Test
+    @DisplayName("生成时保存统计、待办、学习、校正索引及父镜子来源")
+    void generation_persistsSourceAndParentDependencies() {
+        stubRollingBase(0);
+        ProfileSnapshot july = ProfileSnapshot.builder()
+                .id(14L).userId(USER_ID).snapshotType("monthly").periodMonth("2026-07")
+                .isCurrent(true).invalidated(false)
+                .overallSummary("July archive")
+                .createdAt(OffsetDateTime.parse("2026-07-01T02:00:00+08:00"))
+                .build();
+        when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(july));
+        when(statsMapper.selectStatsSourceRefs(eq(USER_ID), any(), any())).thenReturn(List.of(
+                SnapshotSourceRef.builder().inputKind("record").inputId(51L).inputRole("stats").build(),
+                SnapshotSourceRef.builder().inputKind("chunk").inputId(52L).inputRole("stats").build()));
+        when(statsMapper.selectTodoSourceRefs(USER_ID)).thenReturn(List.of(
+                SnapshotSourceRef.builder().inputKind("chunk").inputId(53L).inputRole("todo").build()));
+        when(statsMapper.selectRecentLearningSourceRefs(USER_ID)).thenReturn(List.of(
+                SnapshotSourceRef.builder().inputKind("chunk").inputId(54L).inputRole("learning").build()));
+        when(chunkMapper.selectCorrectionIndex(eq(USER_ID), any(), any())).thenReturn(List.of(
+                row("title", "used in correction index", "record_date", "2026-08-05",
+                        "recordId", 55L, "chunkId", 56L)));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((ProfileSnapshot) invocation.getArgument(0)).setId(88L);
+            return 1;
+        }).when(snapshotMapper).insert(any(ProfileSnapshot.class));
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<List<SnapshotInput>> inputs =
+                org.mockito.ArgumentCaptor.forClass((Class) List.class);
+        org.mockito.Mockito.verify(snapshotInputMapper).insertAll(eq(88L), inputs.capture());
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("snapshot").inputId(14L).inputRole("parent").build()));
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("record").inputId(51L).inputRole("stats").build()));
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("chunk").inputId(52L).inputRole("stats").build()));
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("chunk").inputId(53L).inputRole("todo").build()));
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("chunk").inputId(54L).inputRole("learning").build()));
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("record").inputId(55L).inputRole("correction_index").build()));
+        assertTrue(inputs.getValue().contains(SnapshotInput.builder()
+                .inputKind("chunk").inputId(56L).inputRole("correction_index").build()));
     }
 
     @Test
@@ -635,24 +700,100 @@ class MirrorStatsTest {
     }
 
     @Test
-    @DisplayName("幂等：同 (user, month) 重复生成 → 删除旧 monthly 快照（period_month 精确匹配）")
-    void rolling_periodMonth_idempotentReplace() {
+    @DisplayName("同月重生成保留旧归档并递增版本号")
+    void rolling_periodMonth_rearchivesPreviousVersion() {
         stubRollingBase(1);
         ProfileSnapshot old = ProfileSnapshot.builder()
                 .id(20L).userId(USER_ID).snapshotType("monthly").periodMonth("2026-08")
+                .versionNo(1).isCurrent(true).lineageTracked(false).invalidated(false)
                 .createdAt(OffsetDateTime.parse("2026-09-01T02:00:00+08:00"))
                 .build();
+        when(snapshotMapper.selectCurrentMonthlyForUpdate(USER_ID, "2026-08")).thenReturn(old);
+        when(snapshotMapper.selectMaxVersionNo(USER_ID, "2026-08")).thenReturn(1);
         when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(old));
 
         mirrorService.generateMonthlyFor(USER_ID, "2026-08");
 
-        org.mockito.Mockito.verify(snapshotMapper).deleteById(20L);
-        // 新快照写入 period_month
+        org.mockito.Mockito.verify(snapshotMapper).updateById(old);
+        assertFalse(old.getIsCurrent());
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never())
+                .deleteById(org.mockito.ArgumentMatchers.anyLong());
         org.mockito.ArgumentCaptor<ProfileSnapshot> insCap =
                 org.mockito.ArgumentCaptor.forClass(ProfileSnapshot.class);
         org.mockito.Mockito.verify(snapshotMapper).insert(insCap.capture());
         assertEquals("monthly", insCap.getValue().getSnapshotType());
         assertEquals("2026-08", insCap.getValue().getPeriodMonth());
+        assertEquals(2, insCap.getValue().getVersionNo());
+        assertTrue(insCap.getValue().getIsCurrent());
+        assertTrue(insCap.getValue().getLineageTracked());
+    }
+
+    @Test
+    @DisplayName("没有失效祖先时，月度生成只调用一次 AI")
+    void rolling_monthlyWithoutInvalidatedAncestorsGeneratesOnlyTarget() {
+        stubRollingBase(1);
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.Mockito.verify(aiGrpcClient, org.mockito.Mockito.times(1))
+                .generateProfile(eq(USER_ID), any());
+    }
+
+    @Test
+    @DisplayName("目标月之前存在失效链时，只按曾有镜子的月份从检查点懒重放")
+    void rolling_invalidatedLineageReplaysOnlyExistingPeriodsThroughTarget() {
+        stubRollingBase(1);
+        ProfileSnapshot july = ProfileSnapshot.builder()
+                .id(7L).userId(USER_ID).snapshotType("monthly").periodMonth("2026-07")
+                .versionNo(1).isCurrent(true).lineageTracked(true).invalidated(false)
+                .overallSummary("July checkpoint")
+                .createdAt(OffsetDateTime.parse("2026-08-01T02:00:00+08:00"))
+                .build();
+        ProfileSnapshot oldAugust = staleMonthly(8L, "2026-08");
+        ProfileSnapshot oldSeptember = staleMonthly(9L, "2026-09");
+        List<ProfileSnapshot> visible = new ArrayList<>(List.of(july, oldAugust, oldSeptember));
+        Map<String, ProfileSnapshot> current = new HashMap<>(Map.of(
+                "2026-08", oldAugust, "2026-09", oldSeptember));
+        AtomicLong newId = new AtomicLong(100L);
+
+        when(snapshotMapper.selectInvalidatedCurrentMonthlyPeriods(USER_ID, "2026-09"))
+                .thenReturn(List.of("2026-08"));
+        when(snapshotMapper.selectCurrentMonthlyPeriods(USER_ID, "2026-08", "2026-09"))
+                .thenReturn(List.of("2026-08", "2026-09"));
+        when(snapshotMapper.selectCurrentMonthlyForUpdate(eq(USER_ID), any()))
+                .thenAnswer(invocation -> current.get(invocation.getArgument(1)));
+        when(snapshotMapper.selectMaxVersionNo(eq(USER_ID), any())).thenReturn(1);
+        when(snapshotMapper.selectList(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> visible.stream()
+                .filter(s -> Boolean.TRUE.equals(s.getIsCurrent()) && !Boolean.TRUE.equals(s.getInvalidated()))
+                .toList());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ProfileSnapshot inserted = invocation.getArgument(0);
+            inserted.setId(newId.getAndIncrement());
+            visible.add(inserted);
+            current.put(inserted.getPeriodMonth(), inserted);
+            return 1;
+        }).when(snapshotMapper).insert(any(ProfileSnapshot.class));
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-09");
+
+        org.mockito.Mockito.verify(aiGrpcClient, org.mockito.Mockito.times(2))
+                .generateProfile(eq(USER_ID), any());
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.times(2)).insert(any(ProfileSnapshot.class));
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never())
+                .deleteById(org.mockito.ArgumentMatchers.anyLong());
+        assertFalse(oldAugust.getIsCurrent());
+        assertFalse(oldSeptember.getIsCurrent());
+        assertTrue(visible.stream().filter(s -> s.getId() >= 100L)
+                .allMatch(s -> s.getVersionNo() == 2 && Boolean.TRUE.equals(s.getIsCurrent())
+                        && Boolean.TRUE.equals(s.getLineageTracked())));
+    }
+
+    private ProfileSnapshot staleMonthly(long id, String periodMonth) {
+        return ProfileSnapshot.builder()
+                .id(id).userId(USER_ID).snapshotType("monthly").periodMonth(periodMonth)
+                .versionNo(1).isCurrent(true).lineageTracked(false).invalidated(true)
+                .createdAt(OffsetDateTime.parse(periodMonth + "-01T02:00:00+08:00"))
+                .build();
     }
 
     @Test

@@ -20,6 +20,7 @@ import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
+import org.xianshen.mumirrorb.mapper.ProfileStatsMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.mapper.SnapshotInputMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
@@ -28,6 +29,7 @@ import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DO.SnapshotInput;
 import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
+import org.xianshen.mumirrorb.pojo.DTO.SnapshotSourceRef;
 import org.xianshen.mumirrorb.service.impl.ChunkServiceImpl;
 import org.xianshen.mumirrorb.service.impl.RecordServiceImpl;
 import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
@@ -74,6 +76,9 @@ class RecordAiAuthorizationDatabaseTest {
 
     @Autowired
     private SnapshotInputMapper snapshotInputMapper;
+
+    @Autowired
+    private ProfileStatsMapper profileStatsMapper;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -252,6 +257,50 @@ class RecordAiAuthorizationDatabaseTest {
         List<SnapshotInput> inputs = snapshotInputMapper.selectBySnapshotId(snapshot.getId());
         assertEquals(1, inputs.size());
         assertEquals(physicallyRemovedRecordId, inputs.get(0).getInputId());
+    }
+
+    @Test
+    void sourceQueriesReturnIdsForTheExactAuthorizedInputs() {
+        UUID userId = createUser();
+        Record record = createDoneRecord(userId);
+        Chunk chunk = Chunk.builder()
+                .userId(userId)
+                .recordId(record.getId())
+                .content("approved learning source")
+                .segment("approved learning source")
+                .metadata(Map.of("contentType", "learning", "title", "学习来源"))
+                .aiMemoryApproved(true)
+                .todoApproved(true)
+                .createdAt(record.getCreatedAt())
+                .build();
+        chunkMapper.insert(chunk);
+        jdbcTemplate.update("""
+                INSERT INTO todo_registry (user_id, title, current_status, source_chunk_id)
+                VALUES (?, ?, 'not_started', ?)
+                """, userId, "待办来源", chunk.getId());
+
+        OffsetDateTime since = record.getCreatedAt().minusDays(1);
+        OffsetDateTime until = record.getCreatedAt().plusDays(1);
+        SnapshotSourceRef statsRecord = SnapshotSourceRef.builder()
+                .inputKind("record").inputId(record.getId()).inputRole("stats").build();
+        SnapshotSourceRef statsChunk = SnapshotSourceRef.builder()
+                .inputKind("chunk").inputId(chunk.getId()).inputRole("stats").build();
+        assertTrue(profileStatsMapper.selectStatsSourceRefs(userId, since, until).containsAll(
+                List.of(statsRecord, statsChunk)));
+        assertTrue(profileStatsMapper.selectRecentLearningSourceRefs(userId).containsAll(List.of(
+                SnapshotSourceRef.builder().inputKind("record").inputId(record.getId())
+                        .inputRole("learning").build(),
+                SnapshotSourceRef.builder().inputKind("chunk").inputId(chunk.getId())
+                        .inputRole("learning").build())));
+        assertTrue(profileStatsMapper.selectTodoSourceRefs(userId).containsAll(List.of(
+                SnapshotSourceRef.builder().inputKind("record").inputId(record.getId())
+                        .inputRole("todo").build(),
+                SnapshotSourceRef.builder().inputKind("chunk").inputId(chunk.getId())
+                        .inputRole("todo").build())));
+
+        Map<String, Object> correction = chunkMapper.selectCorrectionIndex(userId, since, until).get(0);
+        assertEquals(record.getId(), ((Number) correction.get("recordId")).longValue());
+        assertEquals(chunk.getId(), ((Number) correction.get("chunkId")).longValue());
     }
 
     @Test

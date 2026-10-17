@@ -40,7 +40,7 @@ public interface MirrorService {
      * 生成 manual 快照（用户点"查看镜子"触发）
      *
      * <p>流程：五维统计 SQL → recent_chats 组装 → gRPC GenerateProfile →
-     * 存快照 + 五维拼接 Embed → 分层保留清理（manual 保 2 份）。</p>
+     * 存储新的归档版本及来源依赖 + 五维拼接 Embed；既有快照保留。</p>
      */
     MirrorProfileVO generate(UUID userId);
 
@@ -48,8 +48,8 @@ public interface MirrorService {
      * 按月生成 monthly 快照（历史月份回溯画像，如补生成 2026-08 的完整画像）
      *
      * <p>统计窗口为指定自然月（Asia/Shanghai），timeRange 传 "2026年8月" 形式；
-     * month 为空默认上个月（与月度定时任务同语义）。幂等：同 (user, month) 已有
-     * monthly 快照时重新生成则替换。校验：不允许当前月与未来月份
+     * month 为空默认上个月（与月度定时任务同语义）。同一月份重生成会新建版本，
+     * 旧版本保留为归档；若存在上游失效链，先懒重放相关月份。校验：不允许当前月与未来月份
      * （当前月数据不完整走 manual 语义，未来月份无语料）。</p>
      *
      * @param month "yyyy-MM" 格式（如 "2026-08"）；null/空 = 上个月
