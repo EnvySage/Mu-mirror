@@ -14,7 +14,6 @@ import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
-import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
@@ -49,7 +48,7 @@ public class RecordServiceImpl implements RecordService {
 
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
-    private final ProfileSnapshotMapper profileSnapshotMapper;
+    private final SnapshotLineageService snapshotLineageService;
     private final ApplicationEventPublisher eventPublisher;
     private final AiGrpcClient aiGrpcClient;
     private final org.springframework.context.ApplicationContext applicationContext;
@@ -208,7 +207,7 @@ public class RecordServiceImpl implements RecordService {
         record.setDeletedAt(OffsetDateTime.now());
         record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
         recordMapper.updateById(record);
-        profileSnapshotMapper.invalidateForUser(userId);
+        snapshotLineageService.invalidateSource(userId, "record", recordId, "record_deleted");
         log.info("记录已软删除，ID: {}, 用户: {}", recordId, userId);
     }
 
@@ -286,12 +285,12 @@ public class RecordServiceImpl implements RecordService {
         }
 
         String referenceDate = TimeSubstitutionApplier.referenceDateOf(record.getCreatedAt());
-        boolean authorizationChanged = false;
+        java.util.List<Long> revokedMemoryChunkIds = new java.util.ArrayList<>();
         for (Chunk chunk : chunks) {
             boolean approveMemory = approvedIds.contains(chunk.getId());
             boolean approveTodo = approvedTodoIds.contains(chunk.getId());
             boolean wasApproved = Boolean.TRUE.equals(chunk.getAiMemoryApproved());
-            authorizationChanged |= wasApproved != approveMemory;
+            if (wasApproved && !approveMemory) revokedMemoryChunkIds.add(chunk.getId());
             if ((approveMemory || approveTodo) && (chunk.getSegment() == null || chunk.getSegment().isBlank())) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "空片段不能授权给 AI 或登记为待办");
             }
@@ -340,7 +339,9 @@ public class RecordServiceImpl implements RecordService {
         record.setUserReviewed(true);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
-        if (authorizationChanged) profileSnapshotMapper.invalidateForUser(userId);
+        for (Long revokedChunkId : revokedMemoryChunkIds) {
+            snapshotLineageService.invalidateSource(userId, "chunk", revokedChunkId, "memory_revoked");
+        }
 
         // 8. 待办窗口决议（todo-status-removal-design.md §5）：审核页选的待办状态随本次入库一起生效。
         //    处理本记录 evidence 的 pending 建议：body.todoResolutions 中 confirmed 走 doConfirm

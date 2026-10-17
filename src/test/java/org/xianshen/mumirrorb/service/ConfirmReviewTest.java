@@ -16,11 +16,11 @@ import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
-import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.service.impl.RecordServiceImpl;
+import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
 import org.xianshen.mumirrorb.service.TodoRegistryService;
 
 import java.util.List;
@@ -56,7 +56,7 @@ class ConfirmReviewTest {
     private AiGrpcClient aiGrpcClient;
 
     @Mock
-    private ProfileSnapshotMapper profileSnapshotMapper;
+    private SnapshotLineageService snapshotLineageService;
 
     @Mock
     private ApplicationContext applicationContext;
@@ -256,6 +256,6 @@ class ConfirmReviewTest {
         verify(aiGrpcClient, never()).embed(any(), any());
         assertFalse(chunk.getAiMemoryApproved());
         assertNull(chunk.getEmbedding());
-        verify(profileSnapshotMapper).invalidateForUser(USER_ID);
+        verify(snapshotLineageService).invalidateSource(USER_ID, "chunk", 12L, "memory_revoked");
     }
 }

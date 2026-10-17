@@ -11,7 +11,6 @@ import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
-import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
@@ -36,7 +35,7 @@ public class ChunkServiceImpl implements ChunkService {
 
     private final ChunkMapper chunkMapper;
     private final RecordMapper recordMapper;
-    private final ProfileSnapshotMapper profileSnapshotMapper;
+    private final SnapshotLineageService snapshotLineageService;
     private final AiGrpcClient aiGrpcClient;
 
     @Override
@@ -114,7 +113,9 @@ public class ChunkServiceImpl implements ChunkService {
             boolean hadMemoryApproval = Boolean.TRUE.equals(chunk.getAiMemoryApproved());
             chunk.setAiMemoryApproved(false);
             chunk.setEmbedding(null);
-            if (hadMemoryApproval) profileSnapshotMapper.invalidateForUser(userId);
+            if (hadMemoryApproval) {
+                snapshotLineageService.invalidateSource(userId, "chunk", chunkId, "approved_chunk_edited");
+            }
         }
 
         chunk.setMetadata(metadata);
@@ -147,6 +148,9 @@ public class ChunkServiceImpl implements ChunkService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能删除 Chunk");
         }
 
+        if (Boolean.TRUE.equals(chunk.getAiMemoryApproved())) {
+            snapshotLineageService.invalidateSource(userId, "chunk", chunkId, "chunk_removed");
+        }
         chunkMapper.deleteById(chunkId);
         log.info("Chunk 已删除，ID: {}, 记录ID: {}, 用户: {}", chunkId, chunk.getRecordId(), userId);
     }

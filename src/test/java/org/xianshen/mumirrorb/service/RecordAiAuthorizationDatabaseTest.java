@@ -30,6 +30,7 @@ import org.xianshen.mumirrorb.pojo.DTO.ChunkDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.service.impl.ChunkServiceImpl;
 import org.xianshen.mumirrorb.service.impl.RecordServiceImpl;
+import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -175,10 +176,14 @@ class RecordAiAuthorizationDatabaseTest {
                 .createdAt(OffsetDateTime.now())
                 .build();
         chunkMapper.insert(chunk);
+        ProfileSnapshot snapshot = trackedSnapshot(userId, "uses approved chunk");
+        profileSnapshotMapper.insert(snapshot);
+        snapshotInputMapper.insertAll(snapshot.getId(), List.of(SnapshotInput.builder()
+                .inputKind("chunk").inputId(chunk.getId()).inputRole("stats").build()));
 
         ChunkDTO edit = new ChunkDTO();
         edit.setSegment("edited segment");
-        new ChunkServiceImpl(chunkMapper, recordMapper, profileSnapshotMapper,
+        new ChunkServiceImpl(chunkMapper, recordMapper, new SnapshotLineageService(profileSnapshotMapper),
                 mock(AiGrpcClient.class)).update(chunk.getId(), edit, userId);
 
         Chunk persisted = chunkMapper.selectById(chunk.getId());
@@ -187,6 +192,36 @@ class RecordAiAuthorizationDatabaseTest {
         assertFalse(persisted.getAiMemoryApproved());
         assertNull(persisted.getEmbedding());
         assertTrue(chunkMapper.searchBySimilarity(userId, vectorLiteral(), 10).isEmpty());
+        ProfileSnapshot invalidated = profileSnapshotMapper.selectById(snapshot.getId());
+        assertTrue(invalidated.getInvalidated());
+        assertEquals("approved_chunk_edited", invalidated.getInvalidatedReason());
+    }
+
+    @Test
+    void deletingApprovedChunkInvalidatesItsDependentArchiveBeforeRemovingSource() {
+        UUID userId = createUser();
+        Record record = createReviewingRecord(userId);
+        Chunk chunk = Chunk.builder()
+                .userId(userId)
+                .recordId(record.getId())
+                .content("approved source")
+                .segment("approved source")
+                .aiMemoryApproved(true)
+                .createdAt(OffsetDateTime.now())
+                .build();
+        chunkMapper.insert(chunk);
+        ProfileSnapshot snapshot = trackedSnapshot(userId, "uses removed chunk");
+        profileSnapshotMapper.insert(snapshot);
+        snapshotInputMapper.insertAll(snapshot.getId(), List.of(SnapshotInput.builder()
+                .inputKind("chunk").inputId(chunk.getId()).inputRole("stats").build()));
+
+        new ChunkServiceImpl(chunkMapper, recordMapper, new SnapshotLineageService(profileSnapshotMapper),
+                mock(AiGrpcClient.class)).delete(chunk.getId(), userId);
+
+        assertNull(chunkMapper.selectById(chunk.getId()));
+        ProfileSnapshot invalidated = profileSnapshotMapper.selectById(snapshot.getId());
+        assertTrue(invalidated.getInvalidated());
+        assertEquals("chunk_removed", invalidated.getInvalidatedReason());
     }
 
     @Test
@@ -217,6 +252,51 @@ class RecordAiAuthorizationDatabaseTest {
         List<SnapshotInput> inputs = snapshotInputMapper.selectBySnapshotId(snapshot.getId());
         assertEquals(1, inputs.size());
         assertEquals(physicallyRemovedRecordId, inputs.get(0).getInputId());
+    }
+
+    @Test
+    void softDeleteInvalidatesOnlyDependentSnapshotsAndTheirDescendants() {
+        UUID userA = createUser();
+        UUID userB = createUser();
+        Record deletedSource = createDoneRecord(userA);
+        ProfileSnapshot direct = trackedSnapshot(userA, "direct dependent");
+        ProfileSnapshot descendant = trackedSnapshot(userA, "descendant");
+        ProfileSnapshot unrelated = trackedSnapshot(userA, "unrelated");
+        ProfileSnapshot legacy = trackedSnapshot(userA, "legacy without lineage");
+        legacy.setLineageTracked(false);
+        ProfileSnapshot otherUser = trackedSnapshot(userB, "other user");
+        profileSnapshotMapper.insert(direct);
+        profileSnapshotMapper.insert(descendant);
+        profileSnapshotMapper.insert(unrelated);
+        profileSnapshotMapper.insert(legacy);
+        profileSnapshotMapper.insert(otherUser);
+        snapshotInputMapper.insertAll(direct.getId(), List.of(SnapshotInput.builder()
+                .inputKind("record").inputId(deletedSource.getId()).inputRole("stats").build()));
+        snapshotInputMapper.insertAll(descendant.getId(), List.of(SnapshotInput.builder()
+                .inputKind("snapshot").inputId(direct.getId()).inputRole("parent").build()));
+
+        service(mock(AiGrpcClient.class)).softDelete(deletedSource.getId(), userA);
+
+        assertTrue(profileSnapshotMapper.selectById(direct.getId()).getInvalidated());
+        assertTrue(profileSnapshotMapper.selectById(descendant.getId()).getInvalidated());
+        assertEquals("record_deleted", profileSnapshotMapper.selectById(direct.getId()).getInvalidatedReason());
+        assertEquals("legacy_untracked_source_change",
+                profileSnapshotMapper.selectById(legacy.getId()).getInvalidatedReason());
+        assertFalse(profileSnapshotMapper.selectById(unrelated.getId()).getInvalidated());
+        assertFalse(profileSnapshotMapper.selectById(otherUser.getId()).getInvalidated());
+    }
+
+    private ProfileSnapshot trackedSnapshot(UUID userId, String summary) {
+        return ProfileSnapshot.builder()
+                .userId(userId)
+                .snapshotType("manual")
+                .overallSummary(summary)
+                .invalidated(false)
+                .lineageTracked(true)
+                .versionNo(1)
+                .isCurrent(true)
+                .createdAt(OffsetDateTime.now())
+                .build();
     }
 
     private UUID createUser() {
@@ -278,7 +358,7 @@ class RecordAiAuthorizationDatabaseTest {
         ApplicationContext applicationContext = mock(ApplicationContext.class);
         TodoRegistryService todoRegistryService = mock(TodoRegistryService.class);
         when(applicationContext.getBean(TodoRegistryService.class)).thenReturn(todoRegistryService);
-        return new RecordServiceImpl(recordMapper, chunkMapper, profileSnapshotMapper,
+        return new RecordServiceImpl(recordMapper, chunkMapper, new SnapshotLineageService(profileSnapshotMapper),
                 mock(ApplicationEventPublisher.class), aiGrpcClient, applicationContext);
     }
 

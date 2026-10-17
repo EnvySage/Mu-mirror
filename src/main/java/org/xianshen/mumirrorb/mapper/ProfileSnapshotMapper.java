@@ -150,6 +150,60 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
             """)
     Double selectDriftDistance(@Param("snapshotId") Long snapshotId);
 
-    @Update("UPDATE profile_snapshots SET invalidated = TRUE WHERE user_id = #{userId}::uuid AND invalidated = FALSE")
-    int invalidateForUser(@Param("userId") java.util.UUID userId);
+    @Update("""
+            WITH RECURSIVE affected(snapshot_id) AS (
+                SELECT si.snapshot_id
+                FROM snapshot_inputs si
+                JOIN profile_snapshots source_snapshot ON source_snapshot.id = si.snapshot_id
+                WHERE source_snapshot.user_id = #{userId}::uuid
+                  AND si.input_kind = #{inputKind}
+                  AND si.input_id = #{inputId}
+                UNION
+                SELECT child.snapshot_id
+                FROM snapshot_inputs child
+                JOIN affected parent
+                  ON child.input_kind = 'snapshot'
+                 AND child.input_id = parent.snapshot_id
+                JOIN profile_snapshots child_snapshot ON child_snapshot.id = child.snapshot_id
+                WHERE child_snapshot.user_id = #{userId}::uuid
+            )
+            UPDATE profile_snapshots target
+            SET invalidated = TRUE,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidated_reason = #{reason}
+            WHERE target.user_id = #{userId}::uuid
+              AND target.invalidated = FALSE
+              AND target.id IN (SELECT snapshot_id FROM affected)
+            """)
+    int invalidateTrackedFromSource(@Param("userId") java.util.UUID userId,
+                                    @Param("inputKind") String inputKind,
+                                    @Param("inputId") Long inputId,
+                                    @Param("reason") String reason);
+
+    @Update("""
+            WITH RECURSIVE affected(snapshot_id) AS (
+                SELECT id
+                FROM profile_snapshots
+                WHERE user_id = #{userId}::uuid
+                  AND lineage_tracked = FALSE
+                  AND is_current = TRUE
+                  AND invalidated = FALSE
+                UNION
+                SELECT child.snapshot_id
+                FROM snapshot_inputs child
+                JOIN affected parent
+                  ON child.input_kind = 'snapshot'
+                 AND child.input_id = parent.snapshot_id
+                JOIN profile_snapshots child_snapshot ON child_snapshot.id = child.snapshot_id
+                WHERE child_snapshot.user_id = #{userId}::uuid
+            )
+            UPDATE profile_snapshots target
+            SET invalidated = TRUE,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidated_reason = 'legacy_untracked_source_change'
+            WHERE target.user_id = #{userId}::uuid
+              AND target.invalidated = FALSE
+              AND target.id IN (SELECT snapshot_id FROM affected)
+            """)
+    int invalidateUntrackedCurrentForUser(@Param("userId") java.util.UUID userId);
 }
