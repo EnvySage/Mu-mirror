@@ -21,6 +21,7 @@ import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotListVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
 import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
+import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -70,6 +71,9 @@ class MirrorStatsTest {
     @Mock
     private org.xianshen.mumirrorb.mapper.ChunkMapper chunkMapper;
 
+    @Mock
+    private SnapshotLineageService snapshotLineageService;
+
     private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties =
             new org.xianshen.mumirrorb.config.MirrorProperties();
 
@@ -109,6 +113,9 @@ class MirrorStatsTest {
                 .thenReturn(List.of());
         lenient().when(snapshotMapper.selectCurrentMonthlyPeriods(eq(USER_ID), any(), any()))
                 .thenReturn(List.of());
+        lenient().when(snapshotMapper.selectLatestUsableMonthlyPeriodBefore(eq(USER_ID), any())).thenReturn(null);
+        lenient().when(snapshotMapper.selectEarliestArchivedMonthlyPeriod(USER_ID)).thenReturn(null);
+        lenient().when(statsMapper.selectAuthorizedRecordMonths(USER_ID)).thenReturn(List.of());
         lenient().when(snapshotMapper.selectCurrentMonthlyForUpdate(eq(USER_ID), any())).thenReturn(null);
         lenient().when(snapshotMapper.selectMaxVersionNo(eq(USER_ID), any())).thenReturn(0);
     }
@@ -860,6 +867,8 @@ class MirrorStatsTest {
 
         when(snapshotMapper.selectInvalidatedCurrentMonthlyPeriods(USER_ID, "2026-09"))
                 .thenReturn(List.of("2026-08"));
+        when(snapshotMapper.selectLatestUsableMonthlyPeriodBefore(USER_ID, "2026-08"))
+                .thenReturn("2026-07");
         when(snapshotMapper.selectCurrentMonthlyPeriods(USER_ID, "2026-08", "2026-09"))
                 .thenReturn(List.of("2026-08", "2026-09"));
         when(snapshotMapper.selectCurrentMonthlyForUpdate(eq(USER_ID), any()))

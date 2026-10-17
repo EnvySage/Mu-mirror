@@ -93,6 +93,9 @@ public class ProfileSnapshot {
     /** 是否保存了本快照完整的输入来源依赖。 */
     private Boolean lineageTracked;
 
+    /** 该累计链是否从无法完整恢复的历史开始；后续镜子沿父依赖继续保留此标记。 */
+    private Boolean archiveDiscontinuity;
+
     /** 退出后续 AI 上下文的时间。 */
     private OffsetDateTime invalidatedAt;
 

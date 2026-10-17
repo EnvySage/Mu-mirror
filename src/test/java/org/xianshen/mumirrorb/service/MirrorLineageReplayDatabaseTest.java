@@ -16,18 +16,27 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.xianshen.mumirrorb.config.MirrorProperties;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
+import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
 
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -57,6 +66,12 @@ class MirrorLineageReplayDatabaseTest {
 
     @Autowired
     private AiGrpcClient aiGrpcClient;
+
+    @Autowired
+    private SnapshotLineageService snapshotLineageService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     private UUID userId;
     private String username;
@@ -211,6 +226,126 @@ class MirrorLineageReplayDatabaseTest {
                 "SELECT COUNT(*) FROM profile_snapshots WHERE user_id = ?", Integer.class, userId));
     }
 
+    @Test
+    void legacyAncestorThatIsNoLongerCurrentStillInvalidatesItsDescendants() {
+        ProfileSnapshot legacyAugust = ProfileSnapshot.builder()
+                .userId(userId)
+                .snapshotType("monthly")
+                .periodMonth("2026-08")
+                .versionNo(1)
+                .isCurrent(false)
+                .lineageTracked(false)
+                .invalidated(false)
+                .overallSummary("legacy August archive")
+                .createdAt(OffsetDateTime.parse("2026-09-01T02:00:00+08:00"))
+                .build();
+        snapshotMapper.insert(legacyAugust);
+
+        ProfileSnapshot septemberChild = insertMonthly("2026-09", false, true,
+                OffsetDateTime.parse("2026-10-01T02:00:00+08:00"));
+        jdbcTemplate.update("""
+                INSERT INTO snapshot_inputs (snapshot_id, input_kind, input_id, input_role)
+                VALUES (?, 'snapshot', ?, 'parent')
+                """, septemberChild.getId(), legacyAugust.getId());
+
+        ProfileSnapshot augustReplacement = insertMonthly("2026-08", false, true,
+                OffsetDateTime.parse("2026-10-02T02:00:00+08:00"));
+        long sourceRecordId = insertRecord(OffsetDateTime.parse("2026-08-12T10:00:00+08:00"), null);
+        insertChunk(sourceRecordId, true);
+        jdbcTemplate.update("""
+                INSERT INTO snapshot_inputs (snapshot_id, input_kind, input_id, input_role)
+                VALUES (?, 'record', ?, 'stats')
+                """, augustReplacement.getId(), sourceRecordId);
+
+        snapshotLineageService.invalidateSource(userId, "record", sourceRecordId, "record_deleted");
+
+        assertTrue(snapshotMapper.selectById(augustReplacement.getId()).getInvalidated());
+        assertTrue(snapshotMapper.selectById(legacyAugust.getId()).getInvalidated());
+        assertTrue(snapshotMapper.selectById(septemberChild.getId()).getInvalidated());
+    }
+
+    @Test
+    void replayIncludesAuthorizedMonthsMissingFromArchiveAndMarksUnrecoverableGap() {
+        YearMonth currentMonth = YearMonth.now(ZoneId.of("Asia/Shanghai"));
+        YearMonth archivedMonth = currentMonth.minusMonths(3);
+        YearMonth authorizedMonth = currentMonth.minusMonths(2);
+        YearMonth targetMonth = currentMonth.minusMonths(1);
+        ProfileSnapshot unrecoverableArchive = insertMonthly(archivedMonth.toString(), true, true,
+                archivedMonth.plusMonths(1).atDay(1).atStartOfDay(ZoneId.of("Asia/Shanghai")).toOffsetDateTime());
+
+        long activeRecordId = insertRecord(authorizedMonth.atDay(12).atTime(9, 0)
+                .atZone(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), null);
+        insertChunk(activeRecordId, true);
+
+        mirrorService.generateMonthlyFor(userId, targetMonth.toString());
+
+        List<ProfileSnapshot> rebuilt = snapshotMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                        .eq(ProfileSnapshot::getUserId, userId)
+                        .eq(ProfileSnapshot::getSnapshotType, "monthly")
+                        .eq(ProfileSnapshot::getIsCurrent, true)
+                        .eq(ProfileSnapshot::getInvalidated, false)
+                        .orderByAsc(ProfileSnapshot::getPeriodMonth));
+        assertEquals(List.of(authorizedMonth.toString(), targetMonth.toString()),
+                rebuilt.stream().map(ProfileSnapshot::getPeriodMonth).toList());
+        assertTrue(rebuilt.get(0).getArchiveDiscontinuity());
+        assertTrue(rebuilt.get(1).getArchiveDiscontinuity());
+        assertFalse(snapshotMapper.selectById(unrecoverableArchive.getId()).getIsCurrent(),
+                "an unreconstructable invalidated archive must no longer remain a replay trigger");
+
+        mirrorService.generateMonthlyFor(userId, targetMonth.toString());
+
+        verify(aiGrpcClient, times(3)).generateProfile(eq(userId), any());
+    }
+
+    @Test
+    void sourceInvalidationWaitsForInFlightGenerationThenInvalidatesItsSnapshot() throws Exception {
+        YearMonth targetMonth = YearMonth.now(ZoneId.of("Asia/Shanghai")).minusMonths(1);
+        long sourceRecordId = insertRecord(targetMonth.atDay(12).atTime(9, 0)
+                .atZone(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), null);
+        insertChunk(sourceRecordId, true);
+        CountDownLatch aiStarted = new CountDownLatch(1);
+        CountDownLatch releaseAi = new CountDownLatch(1);
+        CountDownLatch mutationStarted = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            aiStarted.countDown();
+            assertTrue(releaseAi.await(10, TimeUnit.SECONDS), "generation test was not released");
+            return MirrorProfileProto.GenerateProfileResponse.newBuilder().build();
+        }).when(aiGrpcClient).generateProfile(eq(userId), any());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> generation = executor.submit(() -> mirrorService.generateMonthlyFor(userId, targetMonth.toString()));
+            assertTrue(aiStarted.await(5, TimeUnit.SECONDS), "AI generation did not start");
+            TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+            Future<?> invalidation = executor.submit(() -> {
+                mutationStarted.countDown();
+                transactionTemplate.execute(status -> {
+                    jdbcTemplate.update("UPDATE records SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?", sourceRecordId);
+                    snapshotLineageService.invalidateSource(userId, "record", sourceRecordId, "record_deleted");
+                    return null;
+                });
+            });
+            assertTrue(mutationStarted.await(2, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> invalidation.get(250, TimeUnit.MILLISECONDS));
+            releaseAi.countDown();
+            generation.get(10, TimeUnit.SECONDS);
+            invalidation.get(10, TimeUnit.SECONDS);
+
+            ProfileSnapshot generated = snapshotMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
+                            .eq(ProfileSnapshot::getUserId, userId)
+                            .eq(ProfileSnapshot::getPeriodMonth, targetMonth.toString())
+                            .eq(ProfileSnapshot::getIsCurrent, true));
+            assertNotNull(generated);
+            assertTrue(generated.getInvalidated(), "the just-created snapshot must be invalidated after the source deletion");
+        } finally {
+            releaseAi.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
     private ProfileSnapshot insertMonthly(String month, boolean invalidated, boolean current,
                                           OffsetDateTime createdAt) {
         ProfileSnapshot snapshot = ProfileSnapshot.builder()
@@ -268,7 +403,7 @@ class MirrorLineageReplayDatabaseTest {
     @EnableAutoConfiguration
     @EnableConfigurationProperties(MirrorProperties.class)
     @MapperScan("org.xianshen.mumirrorb.mapper")
-    @Import(MirrorServiceImpl.class)
+    @Import({MirrorServiceImpl.class, SnapshotLineageService.class})
     static class TestApplication {
         @Bean
         AiGrpcClient aiGrpcClient() {

@@ -17,6 +17,14 @@ public class SnapshotLineageService {
 
     private final ProfileSnapshotMapper profileSnapshotMapper;
 
+    /** Hold the user's row lock for the surrounding transaction, shared with all source changes. */
+    @Transactional
+    public void lockUserLineage(UUID userId) {
+        if (userId == null || profileSnapshotMapper.lockUserLineage(userId) == null) {
+            throw new IllegalArgumentException("A persisted user is required for mirror lineage operations");
+        }
+    }
+
     @Transactional
     public void invalidateSource(UUID userId, String inputKind, Long inputId, String reason) {
         if (userId == null || inputId == null || inputKind == null || !SOURCE_KINDS.contains(inputKind)) {
@@ -26,7 +34,8 @@ public class SnapshotLineageService {
             throw new IllegalArgumentException("An invalidation reason is required");
         }
 
+        lockUserLineage(userId);
         profileSnapshotMapper.invalidateTrackedFromSource(userId, inputKind, inputId, reason);
-        profileSnapshotMapper.invalidateUntrackedCurrentForUser(userId);
+        profileSnapshotMapper.invalidateUntrackedForUser(userId);
     }
 }

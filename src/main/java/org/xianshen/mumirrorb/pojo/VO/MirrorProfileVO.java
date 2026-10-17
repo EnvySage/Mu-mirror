@@ -49,6 +49,9 @@ public class MirrorProfileVO {
     @Schema(description = "已删除或已清除的来源记录数")
     private Integer deletedSourceCount;
 
+    @Schema(description = "累计历史是否存在无法重建的归档断点")
+    private Boolean archiveDiscontinuity;
+
     @Schema(description = "情绪维度分析")
     private String moodAnalysis;
 

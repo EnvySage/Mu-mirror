@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
     ai_memory_approved BOOLEAN NOT NULL DEFAULT FALSE, -- 用户逐片段确认后才进入后续 AI 记忆
     todo_approved BOOLEAN NOT NULL DEFAULT FALSE,       -- 待办需另行确认
-    vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE,  -- vault 全消化产物挂链（vault 删除时级联清，向量库无孤儿）
+    vault_item_id BIGINT,               -- 外键在 vault_items 建表后补齐，解决两表循环引用
     embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS profile_snapshots (
     version_no INT NOT NULL DEFAULT 1,    -- 同一归属月份的历史版本号
     is_current BOOLEAN NOT NULL DEFAULT TRUE, -- monthly 每月最多一个当前版本；旧版本仍归档
     lineage_tracked BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE 表示已记录生成输入依赖
+      archive_discontinuity BOOLEAN NOT NULL DEFAULT FALSE, -- 累计链存在无法重建的历史断点
     invalidated_at TIMESTAMPTZ,            -- 退出后续 AI 上下文的时间
     invalidated_reason VARCHAR(80),        -- 退出上下文的原因
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -186,7 +187,7 @@ CREATE TABLE IF NOT EXISTS user_terms (
     content_hit_count INT DEFAULT 0,        -- 入库内容命中（过期沉底）
     last_confirmed_at TIMESTAMPTZ,          -- confirmed 卡片"最后确认于x日"
     last_seen_at TIMESTAMPTZ,               -- 最近语料出现（衰减依据）
-    source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,
+    source_chunk_id BIGINT,              -- 外键在 chunks 建表后补齐，解决两表循环引用
     source_record_id BIGINT,                -- 佐证 chunk 所在记录（F 契约：跳记录详情直接用；@agent-DB 已在活库补列）
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
@@ -224,6 +225,30 @@ CREATE TABLE IF NOT EXISTS vault_blobs (
     vault_item_id BIGINT PRIMARY KEY REFERENCES vault_items(id) ON DELETE CASCADE,
     data BYTEA NOT NULL
 );
+
+-- chunks 与 vault_items 双向引用，等两张表都创建后再补外键，保证空库可一次初始化。
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'chunks'::regclass
+          AND conname IN ('chunks_vault_item_id_fkey', 'fk_chunks_vault_item')
+    ) THEN
+        ALTER TABLE chunks
+            ADD CONSTRAINT fk_chunks_vault_item
+            FOREIGN KEY (vault_item_id) REFERENCES vault_items(id) ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'vault_items'::regclass
+          AND conname IN ('vault_items_source_chunk_id_fkey', 'fk_vault_items_source_chunk')
+    ) THEN
+        ALTER TABLE vault_items
+            ADD CONSTRAINT fk_vault_items_source_chunk
+            FOREIGN KEY (source_chunk_id) REFERENCES chunks(id) ON DELETE SET NULL;
+    END IF;
+END
+$$;
 
 -- toolcalling 审计（论文素材：工具使用频率/成功率/延迟分布）
 CREATE TABLE IF NOT EXISTS tool_calls (

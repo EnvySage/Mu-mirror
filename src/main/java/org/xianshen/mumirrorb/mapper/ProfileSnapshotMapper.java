@@ -20,6 +20,10 @@ import java.util.UUID;
 @Mapper
 public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
 
+    /** Serialize snapshot generation and source-authorization changes for one user. */
+    @Select("SELECT id FROM users WHERE id = #{userId}::uuid FOR UPDATE")
+    UUID lockUserLineage(@Param("userId") UUID userId);
+
     /**
      * 最新一份指定类型的快照
      *
@@ -159,6 +163,44 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                                              @Param("fromMonth") String fromMonth,
                                              @Param("throughMonth") String throughMonth);
 
+    @Select("""
+            SELECT period_month
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = FALSE
+              AND period_month IS NOT NULL
+              AND period_month < #{beforeMonth}
+            ORDER BY period_month DESC
+            LIMIT 1
+            """)
+    String selectLatestUsableMonthlyPeriodBefore(@Param("userId") UUID userId,
+                                                @Param("beforeMonth") String beforeMonth);
+
+    @Select("""
+            SELECT MIN(period_month)
+            FROM profile_snapshots
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND period_month IS NOT NULL
+            """)
+    String selectEarliestArchivedMonthlyPeriod(@Param("userId") UUID userId);
+
+    @Update("""
+            UPDATE profile_snapshots
+            SET is_current = FALSE
+            WHERE user_id = #{userId}::uuid
+              AND snapshot_type = 'monthly'
+              AND is_current = TRUE
+              AND invalidated = TRUE
+              AND period_month >= #{fromMonth}
+              AND period_month < #{beforeMonth}
+            """)
+    int retireUnreconstructableInvalidatedCurrentMonthlyVersions(@Param("userId") UUID userId,
+                                                                  @Param("fromMonth") String fromMonth,
+                                                                  @Param("beforeMonth") String beforeMonth);
+
     default List<ProfileSnapshot> selectSnapshotPage(UUID userId, OffsetDateTime beforeCreatedAt,
                                                      Long beforeId, int fetchLimit) {
         var query = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProfileSnapshot>()
@@ -267,7 +309,6 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
                 FROM profile_snapshots
                 WHERE user_id = #{userId}::uuid
                   AND lineage_tracked = FALSE
-                  AND is_current = TRUE
                   AND invalidated = FALSE
                 UNION
                 SELECT child.snapshot_id
@@ -286,5 +327,5 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
               AND target.invalidated = FALSE
               AND target.id IN (SELECT snapshot_id FROM affected)
             """)
-    int invalidateUntrackedCurrentForUser(@Param("userId") java.util.UUID userId);
+    int invalidateUntrackedForUser(@Param("userId") java.util.UUID userId);
 }

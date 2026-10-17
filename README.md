@@ -72,7 +72,7 @@ Swagger UI 在 `/api/doc.html`。
 
 ## 数据库
 
-PostgreSQL + pgvector，基础结构 14 张表。DDL 见 `src/main/resources/db/schema.sql`（幂等，唯一权威基线，需 `CREATE EXTENSION vector`）；v4 迁移另增 `snapshot_inputs`，记录镜子快照的来源 ID，不保存正文。
+PostgreSQL + pgvector，基础结构 14 张表。DDL 见 `src/main/resources/db/schema.sql`（幂等，唯一权威基线，需 `CREATE EXTENSION vector`）；v4 迁移增加镜子版本、来源依赖和历史断点状态，`snapshot_inputs` 只记录来源 ID，不保存正文。
 
 新环境按顺序执行 `schema.sql`、`migration-v3-record-ai-authorization.sql` 和 `migration-v4-mirror-archive-lineage.sql`。已有 v3 本地库只需应用 v4：
 
@@ -81,7 +81,7 @@ psql -h 127.0.0.1 -p 5432 -U postgres -d mu_mirror_test `
   -v ON_ERROR_STOP=1 -f src/main/resources/db/migration-v4-mirror-archive-lineage.sql
 ```
 
-v4 使用可重复执行的 DDL，不会重写镜子正文或 embedding。首次应用前先用一次性本地数据库验证；当前本地开发任务只更新代码和测试，生产数据库与服务部署需另行安排。
+v4 使用可重复执行的 DDL，不会重写镜子正文或 embedding。生成与来源变更按用户串行，避免 AI 生成期间的删除或撤权漏掉刚写入的镜子。首次应用前先用一次性本地数据库验证；当前本地开发任务只更新代码和测试，生产数据库与服务部署需另行安排。
 
 核心模型决策：**Chunk 是唯一业务单元**。一条用户输入 = 一条 Record（只存原文与状态）；AI 拆出的每个语义片段 = 一个 Chunk，承载 segment 文本、元数据（JSONB）与向量（1024 维，HNSW 索引）。
 

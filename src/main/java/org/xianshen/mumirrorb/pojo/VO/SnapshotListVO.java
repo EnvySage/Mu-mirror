@@ -50,6 +50,9 @@ public class SnapshotListVO {
     @Schema(description = "已删除或已清除的来源记录数")
     private Integer deletedSourceCount;
 
+    @Schema(description = "累计历史是否存在无法重建的归档断点")
+    private Boolean archiveDiscontinuity;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "快照生成时间")
     private OffsetDateTime createdAt;

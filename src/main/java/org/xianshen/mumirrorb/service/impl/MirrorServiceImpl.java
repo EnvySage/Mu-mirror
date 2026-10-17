@@ -76,6 +76,7 @@ public class MirrorServiceImpl implements MirrorService {
     private final GlossaryService glossaryService;
     private final MirrorProperties mirrorProperties;
     private final TransactionTemplate transactionTemplate;
+    private final SnapshotLineageService snapshotLineageService;
 
     @Override
     @Transactional(readOnly = true)
@@ -179,6 +180,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .invalidatedAt(snapshot.getInvalidatedAt())
                 .invalidatedReason(snapshot.getInvalidatedReason())
                 .deletedSourceCount(deletedSourceCount)
+                .archiveDiscontinuity(Boolean.TRUE.equals(snapshot.getArchiveDiscontinuity()))
                 .createdAt(snapshot.getCreatedAt())
                 .driftDistance(drift)
                 .overallSummary(truncateSummary(snapshot.getOverallSummary()))
@@ -216,6 +218,7 @@ public class MirrorServiceImpl implements MirrorService {
     @Transactional
     public MirrorProfileVO generate(UUID userId) {
         log.info("============ 画像生成开始，用户: {} ============", userId);
+        snapshotLineageService.lockUserLineage(userId);
 
         // 0. 校验用户已配置 LLM（否则 Python 端无法调用）
         UserSettings settings = settingsMapper.selectOne(
@@ -237,6 +240,7 @@ public class MirrorServiceImpl implements MirrorService {
         // （上期镜子=最新 monthly 或 manual，回看窗口=近 30 天）
         MirrorProfileProto.GenerateProfileResponse response =
                 aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats, null, sourceRefs));
+        boolean archiveDiscontinuity = hasDiscontinuousParent(sourceRefs);
 
         // 3. 存快照
         ProfileSnapshot snapshot = ProfileSnapshot.builder()
@@ -251,6 +255,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .versionNo(1)
                 .isCurrent(true)
                 .lineageTracked(true)
+                .archiveDiscontinuity(archiveDiscontinuity)
                 .createdAt(OffsetDateTime.now(ZONE))
                 .build();
         snapshotMapper.insert(snapshot);
@@ -445,6 +450,7 @@ public class MirrorServiceImpl implements MirrorService {
         // monthlySnapshot 调用本类方法时会绕过 Spring 的方法代理；显式事务确保重放链
         // 任一月份失败时，前面已写入的新版本和依赖行一起回滚。
         transactionTemplate.execute(status -> {
+            snapshotLineageService.lockUserLineage(userId);
             generateMonthlyThrough(userId, lastMonth);
             return null;
         });
@@ -464,6 +470,11 @@ public class MirrorServiceImpl implements MirrorService {
      */
     @Transactional
     public MirrorProfileVO generateMonthly(UUID userId, YearMonth month) {
+        snapshotLineageService.lockUserLineage(userId);
+        return generateMonthlyVersion(userId, month, false);
+    }
+
+    private MirrorProfileVO generateMonthlyVersion(UUID userId, YearMonth month, boolean replayDiscontinuity) {
         UserSettings settings = settingsMapper.selectOne(
                 new LambdaQueryWrapper<UserSettings>().eq(UserSettings::getUserId, userId));
         if (settings == null || settings.getAiApiKey() == null || settings.getAiApiKey().isBlank()) {
@@ -478,6 +489,7 @@ public class MirrorServiceImpl implements MirrorService {
         int versionNo = snapshotMapper.selectMaxVersionNo(userId, month.toString()) + 1;
         MirrorProfileProto.GenerateProfileResponse response =
                 aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats, month, sourceRefs));
+        boolean archiveDiscontinuity = replayDiscontinuity || hasDiscontinuousParent(sourceRefs);
 
         if (previousCurrent != null) {
             previousCurrent.setIsCurrent(false);
@@ -497,6 +509,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .versionNo(versionNo)
                 .isCurrent(true)
                 .lineageTracked(true)
+                .archiveDiscontinuity(archiveDiscontinuity)
                 .invalidated(false)
                 .createdAt(OffsetDateTime.now(ZONE))
                 .build();
@@ -533,6 +546,7 @@ public class MirrorServiceImpl implements MirrorService {
     @Override
     @Transactional
     public MirrorProfileVO generateMonthlyFor(UUID userId, String month) {
+        snapshotLineageService.lockUserLineage(userId);
         YearMonth target;
         if (month == null || month.isBlank()) {
             target = YearMonth.now(ZONE).minusMonths(1);
@@ -558,27 +572,18 @@ public class MirrorServiceImpl implements MirrorService {
      */
     @Transactional
     public MirrorProfileVO generateMonthlyThrough(UUID userId, YearMonth target) {
+        snapshotLineageService.lockUserLineage(userId);
         List<String> invalidatedPeriods = snapshotMapper.selectInvalidatedCurrentMonthlyPeriods(
                 userId, target.toString());
         if (invalidatedPeriods == null || invalidatedPeriods.isEmpty()) {
-            return generateMonthly(userId, target);
+            return generateMonthlyVersion(userId, target, false);
         }
 
         YearMonth earliestInvalidated = invalidatedPeriods.stream()
                 .map(YearMonth::parse)
                 .min(YearMonth::compareTo)
                 .orElse(target);
-        Set<YearMonth> periods = new TreeSet<>();
-        List<String> existingPeriods = snapshotMapper.selectCurrentMonthlyPeriods(
-                userId, earliestInvalidated.toString(), target.toString());
-        if (existingPeriods != null) existingPeriods.stream().map(YearMonth::parse).forEach(periods::add);
-        periods.add(target);
-
-        MirrorProfileVO result = MirrorProfileVO.builder().build();
-        for (YearMonth period : periods) {
-            result = generateMonthly(userId, period);
-        }
-        return result;
+        return replayMonthlyChainThrough(userId, target, earliestInvalidated);
     }
 
     /** Manual generation replays only when an existing monthly chain is stale. */
@@ -591,12 +596,69 @@ public class MirrorServiceImpl implements MirrorService {
                 .map(YearMonth::parse)
                 .min(YearMonth::compareTo)
                 .orElse(target);
+        replayMonthlyChainThrough(userId, target, earliestInvalidated);
+    }
+
+    /** Rebuild every authorized input month after the latest safe monthly checkpoint. */
+    private MirrorProfileVO replayMonthlyChainThrough(UUID userId, YearMonth target, YearMonth earliestInvalidated) {
+        String checkpointValue = snapshotMapper.selectLatestUsableMonthlyPeriodBefore(
+                userId, earliestInvalidated.toString());
+        YearMonth checkpoint = checkpointValue == null ? null : YearMonth.parse(checkpointValue);
+        boolean hasSafeCheckpoint = checkpoint != null;
+        YearMonth replayStart;
+        boolean archiveDiscontinuity = false;
+        if (hasSafeCheckpoint) {
+            replayStart = checkpoint.plusMonths(1);
+        } else {
+            List<String> authorizedMonthValues = statsMapper.selectAuthorizedRecordMonths(userId);
+            List<YearMonth> authorizedMonths = (authorizedMonthValues == null ? List.<String>of() : authorizedMonthValues).stream()
+                    .map(YearMonth::parse)
+                    .filter(month -> !month.isAfter(target))
+                    .toList();
+            replayStart = authorizedMonths.stream().min(YearMonth::compareTo).orElse(earliestInvalidated);
+            String earliestArchivedValue = snapshotMapper.selectEarliestArchivedMonthlyPeriod(userId);
+            if (earliestArchivedValue == null || authorizedMonths.isEmpty()) {
+                archiveDiscontinuity = true;
+            } else {
+                archiveDiscontinuity = replayStart.isAfter(YearMonth.parse(earliestArchivedValue));
+            }
+        }
+
         Set<YearMonth> periods = new TreeSet<>();
         List<String> existingPeriods = snapshotMapper.selectCurrentMonthlyPeriods(
-                userId, earliestInvalidated.toString(), target.toString());
+                userId, replayStart.toString(), target.toString());
         if (existingPeriods != null) existingPeriods.stream().map(YearMonth::parse).forEach(periods::add);
+        List<String> authorizedMonths = statsMapper.selectAuthorizedRecordMonths(userId);
+        if (authorizedMonths != null) {
+            authorizedMonths.stream().map(YearMonth::parse)
+                    .filter(month -> !month.isBefore(replayStart) && !month.isAfter(target))
+                    .forEach(periods::add);
+        }
         periods.add(target);
-        for (YearMonth period : periods) generateMonthly(userId, period);
+
+        MirrorProfileVO result = MirrorProfileVO.builder().build();
+        for (YearMonth period : periods) {
+            result = generateMonthlyVersion(userId, period, archiveDiscontinuity);
+        }
+        if (result.getId() != null && replayStart.isAfter(earliestInvalidated)) {
+            // These invalidated versions precede the first authorized month and cannot be rebuilt.
+            // Keep them as archives, but remove their stale "current" marker so future generations
+            // start from the new discontinuous baseline instead of replaying the same gap forever.
+            snapshotMapper.retireUnreconstructableInvalidatedCurrentMonthlyVersions(
+                    userId, earliestInvalidated.toString(), replayStart.toString());
+        }
+        return result;
+    }
+
+    private boolean hasDiscontinuousParent(List<SnapshotSourceRef> sourceRefs) {
+        if (sourceRefs == null) return false;
+        for (SnapshotSourceRef ref : sourceRefs) {
+            if (ref != null && "snapshot".equals(ref.getInputKind()) && ref.getInputId() != null) {
+                ProfileSnapshot parent = snapshotMapper.selectById(ref.getInputId());
+                if (parent != null && Boolean.TRUE.equals(parent.getArchiveDiscontinuity())) return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1165,6 +1227,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .invalidatedAt(snapshot.getInvalidatedAt())
                 .invalidatedReason(snapshot.getInvalidatedReason())
                 .deletedSourceCount(deletedSourceCount)
+                .archiveDiscontinuity(Boolean.TRUE.equals(snapshot.getArchiveDiscontinuity()))
                 .moodAnalysis(snapshot.getMoodAnalysis())
                 .learningAnalysis(snapshot.getLearningAnalysis())
                 .todoAnalysis(snapshot.getTodoAnalysis())
