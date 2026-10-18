@@ -110,6 +110,7 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND c.metadata->>'contentType' = 'learning'
             ORDER BY r.created_at DESC, c.id DESC
             LIMIT 30
@@ -126,6 +127,7 @@ public interface ProfileStatsMapper {
                   AND r.source = 'user'
                   AND r.status = 'done'
                   AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
                   AND c.metadata->>'contentType' = 'learning'
                 ORDER BY r.created_at DESC, c.id DESC
                 LIMIT 30
@@ -154,6 +156,7 @@ public interface ProfileStatsMapper {
                   AND r.source = 'user'
                   AND r.status = 'done'
                   AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
                   <if test="since != null">AND r.created_at &gt;= #{since}</if>
                   <if test="until != null">AND r.created_at &lt; #{until}</if>
             )
@@ -184,6 +187,7 @@ public interface ProfileStatsMapper {
               AND EXISTS (
                   SELECT 1 FROM chunks c
                   WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               )
             ORDER BY month
             """)
@@ -210,6 +214,7 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -240,6 +245,7 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -267,7 +273,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -293,6 +300,7 @@ public interface ProfileStatsMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -318,7 +326,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -341,7 +350,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -362,7 +372,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             </script>

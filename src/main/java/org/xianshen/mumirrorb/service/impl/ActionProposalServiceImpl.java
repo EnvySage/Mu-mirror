@@ -193,6 +193,11 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         int version = proposal.getVersion();
         proposal.setState(state);
         ObjectNode actual = (ObjectNode) execution.result().deepCopy();
+        if (proposal.getResult() != null && proposal.getResult().isObject()) {
+            proposal.getResult().fields().forEachRemaining(entry -> {
+                if (!actual.has(entry.getKey())) actual.set(entry.getKey(), entry.getValue().deepCopy());
+            });
+        }
         if ("SAVED_ONLY_FALLBACK".equals(actual.path("outcome").asText()))
             actual.put("message", "已仅保存，未加入记忆");
         proposal.setResult(actual);

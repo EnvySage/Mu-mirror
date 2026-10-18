@@ -28,7 +28,8 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             """)
@@ -49,6 +50,7 @@ public interface DailySummaryMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'contentType')
@@ -73,6 +75,7 @@ public interface DailySummaryMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'mood')
@@ -94,7 +97,8 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             GROUP BY 1
@@ -152,6 +156,7 @@ public interface DailySummaryMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND c.segment IS NOT NULL
               AND c.segment <> ''
               AND r.created_at >= #{dayStart}

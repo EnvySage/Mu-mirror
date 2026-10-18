@@ -61,7 +61,8 @@ public interface ChatSearchMapper {
               AND r.deleted_at IS NULL
               AND r.status = 'done'
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
@@ -119,7 +120,8 @@ public interface ChatSearchMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
@@ -169,7 +171,8 @@ public interface ChatSearchMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL

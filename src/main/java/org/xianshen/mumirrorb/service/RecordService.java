@@ -55,6 +55,10 @@ public interface RecordService {
     RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
                            List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions);
 
+    RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                           List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions,
+                           UUID actionId, Integer actionExecutionVersion);
+
     /**
      * 软删除记录
      */

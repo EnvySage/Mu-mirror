@@ -42,9 +42,7 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
               AND c.vault_item_id IS NULL
               AND c.ai_memory_approved IS TRUE
               AND c.segment IS NOT NULL AND btrim(c.segment) <> ''
-              AND r.source = 'user'
-              AND r.status = 'done'
-              AND r.deleted_at IS NULL
+              AND record_memory_is_complete(r.id)
             ORDER BY c.id
             """;
 
@@ -72,9 +70,7 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
                   SELECT 1 FROM records r
                   WHERE r.id = c.record_id
                     AND r.user_id = c.user_id
-                    AND r.source = 'user'
-                    AND r.status = 'done'
-                    AND r.deleted_at IS NULL
+                    AND record_memory_is_complete(r.id)
               )
             """;
 
@@ -108,9 +104,7 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
                           SELECT 1 FROM records r
                           WHERE r.id = c.record_id
                             AND r.user_id = c.user_id
-                            AND r.source = 'user'
-                            AND r.status = 'done'
-                            AND r.deleted_at IS NULL
+                            AND record_memory_is_complete(r.id)
                       )
                   )
                   OR

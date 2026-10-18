@@ -10,6 +10,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
 
 import java.time.OffsetDateTime;
@@ -89,6 +90,15 @@ public class Record {
 
     /** 异步处理代次；撤回/删除时递增，阻止旧任务回写。 */
     private Integer processingVersion;
+
+    private RecordMemoryState memoryState;
+    private UUID memoryActionId;
+    private Integer memoryActionExecutionVersion;
+    private String memoryFailureReason;
+    private Long correctionOfRecordId;
+
+    @TableField(exist = false)
+    private List<Long> queuedEmbeddingJobIds;
 
     /**
      * 用户是否已审核

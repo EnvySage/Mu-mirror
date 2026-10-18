@@ -7,6 +7,7 @@ import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Record;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDraftDTO;
 import org.xianshen.mumirrorb.service.impl.RecordDraftServiceImpl;
 
@@ -124,5 +125,30 @@ class RecordActionHandlerTest {
                 json.valueToTree(java.util.Map.of("sourceRecordId", 12L, "mode", "AI_ASSISTED"))));
 
         assertTrue(error.getMessage().contains("部分片段"));
+    }
+
+    @Test
+    void degradedOnlySaveRecordCanBeResubmittedForAiPreparation() {
+        RecordDraftService drafts = mock(RecordDraftService.class);
+        var draft = new RecordDraftDTO();
+        draft.setRawContent("可重新整理"); draft.setFinalContent("可重新整理");
+        draft.setMode("AI_ASSISTED"); draft.setPreparationStatus("READY");
+        var segment = new RecordDraftDTO.Segment(); segment.setText("可重新整理");
+        draft.setSegments(java.util.List.of(segment));
+        when(drafts.prepare(eq(userId), any())).thenReturn(draft);
+        var mapper = mock(RecordMapper.class);
+        Record degraded = Record.builder().id(12L).userId(userId).content("可重新整理").source("user")
+                .status(RecordStatus.RECORD_ONLY).memoryState(RecordMemoryState.NONE)
+                .aiProcessingAuthorized(false).processingVersion(4).updatedAt(java.time.OffsetDateTime.now()).build();
+        when(mapper.selectOne(any())).thenReturn(degraded);
+        var handler = new RecordActionHandler(drafts, mock(RecordService.class), mapper, mock(ChunkMapper.class), json,
+                mock(SettingsService.class));
+
+        var preview = handler.validateAndPreview(userId, "record.organize",
+                json.valueToTree(java.util.Map.of("sourceRecordId", 12L, "mode", "AI_ASSISTED")));
+
+        assertEquals("PENDING_USER_CONFIRMATION", preview.path("after").asText());
+        assertEquals(12L, preview.path("recordDraft").path("sourceRecordId").asLong());
+        verify(drafts).prepare(eq(userId), any());
     }
 }

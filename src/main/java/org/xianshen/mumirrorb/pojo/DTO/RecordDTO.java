@@ -31,4 +31,7 @@ public class RecordDTO {
     /** Legacy compatibility field; true is rejected in favor of a persisted review proposal. */
     @Schema(description = "兼容旧客户端；true 会拒绝并要求先准备操作卡", example = "false")
     private boolean requestAiProcessing = false;
+
+    /** Optional source for a new correction/supplement record. The source itself is immutable. */
+    private Long correctionOfRecordId;
 }

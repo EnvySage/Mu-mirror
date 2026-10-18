@@ -7,6 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -57,6 +58,12 @@ public class RecordVO {
 
     @Schema(description = "用户是否主动请求过本次AI整理")
     private Boolean aiProcessingAuthorized;
+
+    private RecordMemoryState memoryState;
+    private Integer processingVersion;
+    private Long correctionOfRecordId;
+    private String memoryFailureReason;
+    private List<Long> queuedEmbeddingJobIds;
 
     /**
      * 用户是否已审核

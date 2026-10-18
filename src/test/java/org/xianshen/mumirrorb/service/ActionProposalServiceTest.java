@@ -206,7 +206,7 @@ class ActionProposalServiceTest {
 
     @Test
     void asynchronousResultStaysExecutingUntilMatchingGenerationCompletes() {
-        handler.execution = ActionExecution.executing(json("{\"jobIds\":[12]}"));
+        handler.execution = ActionExecution.executing(json("{\"jobIds\":[12],\"todoResolutionsConfirmed\":2,\"todoEffectsPreserved\":true}"));
         var card = service.prepare(owner, request("key"));
         var executing = service.confirm(owner, card.getId(), new ActionConfirmDTO(1, "request"));
         assertEquals("EXECUTING", executing.getState());
@@ -220,6 +220,8 @@ class ActionProposalServiceTest {
         var completed = service.get(owner, card.getId());
         assertEquals("SUCCEEDED", completed.getState());
         assertEquals("已仅保存，未加入记忆", completed.getResult().path("message").asText());
+        assertEquals(2, completed.getResult().path("todoResolutionsConfirmed").asInt());
+        assertTrue(completed.getResult().path("todoEffectsPreserved").asBoolean());
         service.completeAsync(card.getId(), executing.getExecutionVersion(), json("{\"outcome\":\"APPLIED\"}"));
         assertEquals("SAVED_ONLY_FALLBACK", service.get(owner, card.getId()).getResult().path("outcome").asText());
         assertEquals(1, handler.executions);

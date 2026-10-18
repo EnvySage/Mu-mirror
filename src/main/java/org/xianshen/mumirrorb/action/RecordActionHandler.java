@@ -31,7 +31,7 @@ import java.util.*;
 public class RecordActionHandler implements ActionHandler {
     private static final Set<String> KINDS = Set.of("record.create", "record.organize");
     private static final Set<String> ALLOWED_FIELDS = Set.of("rawContent", "mode", "privateInput", "sourceRecordId",
-            "sourceRecordVersion", "recordDraft", "todoResolutions");
+            "sourceRecordVersion", "recordDraft", "todoResolutions", "correctionOfRecordId");
     private final RecordDraftService drafts;
     private final RecordService records;
     private final RecordMapper recordMapper;
@@ -54,6 +54,7 @@ public class RecordActionHandler implements ActionHandler {
         validatePayload(kind, payload);
         Record source = "record.organize".equals(kind) ? ownedSource(userId, sourceId(payload)) : null;
         validateOrganizeSource(userId, source);
+        Record correction = correctionSource(userId, payload);
         RecordDraftDTO draft = draftInput(payload, source);
         if (draft.getMode() == null || draft.getMode().isBlank())
             draft.setMode(source == null ? defaultMode(userId, payload) : "AI_ASSISTED");
@@ -65,7 +66,9 @@ public class RecordActionHandler implements ActionHandler {
         segment.setDraftId(UUID.randomUUID());
         segment.setText(draft.getRawContent());
         draft.setSegments(List.of(segment));
-        return preview(source, draft, "RUNNING");
+        ObjectNode preview = preview(source, draft, "RUNNING");
+        if (correction != null) preview.put("correctionOfRecordId", correction.getId());
+        return preview;
     }
 
     @Override
@@ -82,6 +85,7 @@ public class RecordActionHandler implements ActionHandler {
         sourcePayload.put("mode", "ONLY_SAVE");
         Record source = "record.organize".equals(kind) ? ownedSource(userId, sourceId(sourcePayload)) : null;
         validateOrganizeSource(userId, source);
+        Record correction = correctionSource(userId, sourcePayload);
         RecordDraftDTO fallback = draftInput(sourcePayload, source);
         fallback.setMode("ONLY_SAVE");
         fallback.setFinalContent(fallback.getRawContent());
@@ -93,7 +97,9 @@ public class RecordActionHandler implements ActionHandler {
         segment.setDraftId(UUID.randomUUID());
         segment.setText(fallback.getRawContent());
         fallback.setSegments(List.of(segment));
-        return preview(source, fallback, "READY");
+        ObjectNode preview = preview(source, fallback, "READY");
+        if (correction != null) preview.put("correctionOfRecordId", correction.getId());
+        return preview;
     }
 
     @Override
@@ -101,6 +107,7 @@ public class RecordActionHandler implements ActionHandler {
         validatePayload(kind, payload);
         Record source = "record.organize".equals(kind) ? ownedSource(userId, sourceId(payload)) : null;
         validateOrganizeSource(userId, source);
+        Record correction = correctionSource(userId, payload);
         if (payload.has("recordDraft")) validateDraftShape(payload.get("recordDraft"));
         RecordDraftDTO draft = payload.has("recordDraft")
                 ? json.convertValue(payload.get("recordDraft"), RecordDraftDTO.class)
@@ -110,7 +117,9 @@ public class RecordActionHandler implements ActionHandler {
         draft.setSourceRecordId(source == null ? null : source.getId());
         draft.setSourceRecordVersion(source == null ? null : version(source));
         normalizeSingleFinalContent(draft);
-        return preview(source, draft, draft.getPreparationStatus());
+        ObjectNode preview = preview(source, draft, draft.getPreparationStatus());
+        if (correction != null) preview.put("correctionOfRecordId", correction.getId());
+        return preview;
     }
 
     @Override
@@ -147,6 +156,8 @@ public class RecordActionHandler implements ActionHandler {
         JsonNode payload = action.getPayload();
         RecordDraftDTO draft = json.convertValue(payload.path("recordDraft"), RecordDraftDTO.class);
         Long sourceId = "record.organize".equals(action.getKind()) ? draft.getSourceRecordId() : null;
+        Long correctionOfId = payload.path("correctionOfRecordId").isIntegralNumber()
+                ? payload.path("correctionOfRecordId").asLong() : null;
         if ("ONLY_SAVE".equals(draft.getMode())) {
             if (sourceId != null) {
                 ObjectNode unchanged = json.createObjectNode().put("recordId", sourceId).put("savedOnly", true);
@@ -155,6 +166,7 @@ public class RecordActionHandler implements ActionHandler {
             }
             RecordDTO dto = new RecordDTO();
             dto.setContent(draft.getRawContent());
+            dto.setCorrectionOfRecordId(correctionOfId);
             var created = records.create(dto, action.getUserId());
             ObjectNode saved = json.createObjectNode().put("recordId", created.getId()).put("savedOnly", true);
             saved.put("outcome", "SAVED_ONLY_FALLBACK");
@@ -165,6 +177,7 @@ public class RecordActionHandler implements ActionHandler {
         if (sourceId == null) {
             RecordDTO dto = new RecordDTO();
             dto.setContent(draft.getRawContent());
+            dto.setCorrectionOfRecordId(correctionOfId);
             var created = records.create(dto, action.getUserId());
             record = ownedSource(action.getUserId(), created.getId());
         } else {
@@ -198,10 +211,18 @@ public class RecordActionHandler implements ActionHandler {
             chunkMapper.insert(chunk);
             if (segment.isMemoryEnabled()) approvedMemory.add(chunk.getId());
         }
-        records.confirmReview(record.getId(), action.getUserId(), approvedMemory, List.of(), resolutions(payload));
+        var confirmed = records.confirmReview(record.getId(), action.getUserId(), approvedMemory, List.of(),
+                resolutions(payload), action.getActionId(), action.getExecutionVersion());
         ObjectNode result = json.createObjectNode().put("recordId", record.getId()).put("reviewed", true)
-                .put("memorySelections", approvedMemory.size()).put("outcome", "APPLIED");
-        return ActionExecution.applied(result);
+                .put("memorySelections", approvedMemory.size()).put("memoryState", confirmed.getMemoryState().name());
+        int confirmedResolutions = (int) resolutions(payload).stream().filter(r -> "confirmed".equalsIgnoreCase(r.getAction())).count();
+        result.put("todoResolutionsConfirmed", confirmedResolutions).put("todoEffectsPreserved", true);
+        if (correctionOfId != null) result.put("correctionOfRecordId", correctionOfId);
+        if (confirmed.getQueuedEmbeddingJobIds() != null && !confirmed.getQueuedEmbeddingJobIds().isEmpty()) {
+            result.set("jobIds", json.valueToTree(confirmed.getQueuedEmbeddingJobIds()));
+            return ActionExecution.executing(result);
+        }
+        return ActionExecution.applied(result.put("outcome", "APPLIED"));
     }
 
     private RecordDraftDTO draftInput(JsonNode payload, Record source) {
@@ -226,6 +247,8 @@ public class RecordActionHandler implements ActionHandler {
     private void validatePayload(String kind, JsonNode payload) {
         if (!KINDS.contains(kind) || payload == null || !payload.isObject()) throw invalid("记录操作不合法");
         payload.fieldNames().forEachRemaining(field -> { if (!ALLOWED_FIELDS.contains(field)) throw invalid("记录候选不允许字段: " + field); });
+        if (payload.has("correctionOfRecordId") && (!payload.get("correctionOfRecordId").canConvertToLong()
+                || payload.get("correctionOfRecordId").longValue() < 1)) throw invalid("correctionOfRecordId 必须为正整数");
         if ("record.create".equals(kind) && !payload.has("recordDraft") && !payload.hasNonNull("rawContent"))
             throw invalid("缺少原始记录内容");
         if ("record.organize".equals(kind) && !payload.hasNonNull("sourceRecordId")) throw invalid("缺少待整理记录 ID");
@@ -310,6 +333,17 @@ public class RecordActionHandler implements ActionHandler {
                 .eq(Record::getUserId, userId).eq(Record::getSource, "user").isNull(Record::getDeletedAt));
         if (record == null) throw new BusinessException(4041, "记录不存在或已删除");
         return record;
+    }
+
+    private Record correctionSource(UUID userId, JsonNode payload) {
+        JsonNode id = payload.get("correctionOfRecordId");
+        if (id == null || id.isNull()) return null;
+        if (!id.canConvertToLong() || id.longValue() < 1) throw invalid("correctionOfRecordId 必须为正整数");
+        Record source = ownedSource(userId, id.longValue());
+        if (source.getMemoryState() != org.xianshen.mumirrorb.common.enums.RecordMemoryState.READY
+                && source.getMemoryState() != org.xianshen.mumirrorb.common.enums.RecordMemoryState.DISABLED)
+            throw invalid("更正来源必须是本人已确认或已停止使用的只读记录");
+        return source;
     }
 
     private void validateOrganizeSource(UUID userId, Record source) {

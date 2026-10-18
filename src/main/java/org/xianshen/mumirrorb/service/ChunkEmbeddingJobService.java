@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public interface ChunkEmbeddingJobService {
     void enqueue(Chunk chunk);
+    Long latestJobId(Long chunkId, UUID userId);
     void cancel(Long chunkId, UUID userId);
     boolean retry(Long chunkId, UUID userId);
     List<ChunkEmbeddingJob> claimDue(int limit, Duration lease);
