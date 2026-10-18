@@ -23,6 +23,7 @@ message PlanToolsRequest {
   repeated GlossaryTerm glossary = 2;     // confirmed 个人词典（与对话同口径）
   repeated ToolSpec tools = 3;            // Java 注册表快照（ToolSpec 定义在 common.proto）
   LlmConfig llm_config = 4;
+  AssistantContext assistant_context = 5;
 }
 
 // 工具计划响应
@@ -58,6 +59,7 @@ message ChatRequest {
   LlmConfig llm_config = 4;
   repeated GlossaryTerm glossary = 5;      // 用户个人词典（confirmed top 30，软约束注入）
   repeated ToolResult tool_results = 6;    // 工具执行结果（PlanTools→执行→塞入；空=未走工具）
+  AssistantContext assistant_context = 7;
 }
 
 message ChatMessage {
@@ -110,6 +112,7 @@ message PlanNextStepRequest {
   int32 step = 7;                            // 第几步（1-based）
   int32 max_steps = 8;                       // 步数预算，prompt 告知模型"还剩几步"
   bool has_retrieval = 9;                    // Deprecated: 保留 wire 兼容；Agent 根据实际工具结果判断检索状态
+  AssistantContext assistant_context = 10;
 }
 
 message PlanStepChunk {

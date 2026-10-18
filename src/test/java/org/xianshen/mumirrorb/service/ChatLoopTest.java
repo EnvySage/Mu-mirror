@@ -384,7 +384,7 @@ class ChatLoopTest {
     }
 
     @Test
-    @DisplayName("请求携带 step/max_steps/previous_results（Python 无状态所需的全量上下文）")
+    @DisplayName("规划请求携带循环上下文和服务端当前操作卡状态")
     void requestCarriesLoopContext() throws Exception {
         props.setMaxLoopSteps(3);
         stubTool("get_stats", "get_stats:记录12条/30天", Map.of("record_count", 12));
@@ -392,10 +392,17 @@ class ChatLoopTest {
                 List.of(finalFrame(false, "get_stats", "{\"days\":30}")),
                 List.of(finalFrame(true)));
 
-        orchestrator.loopAndExecute(USER_ID, SESSION_ID, QUESTION,
+        var actions = mock(org.xianshen.mumirrorb.service.ActionProposalService.class);
+        var cardId = UUID.randomUUID();
+        var card = org.xianshen.mumirrorb.pojo.VO.ActionProposalVO.builder()
+                .id(cardId).kind("todo.create").state("CANCELLED").version(2)
+                .payload(new ObjectMapper().valueToTree(Map.of("title", "周五交报告"))).build();
+        when(actions.listForSession(USER_ID, SESSION_ID)).thenReturn(List.of(card));
+
+        orchestrator.loopAndExecute(USER_ID, SESSION_ID, null, QUESTION,
                 List.of(MirrorChatProto.ChatMessage.newBuilder()
                         .setRole("user").setContent("上一轮问的开题报告").build()),
-                listener);
+                actions, listener);
 
         org.mockito.ArgumentCaptor<MirrorChatProto.PlanNextStepRequest> captor =
                 org.mockito.ArgumentCaptor.forClass(MirrorChatProto.PlanNextStepRequest.class);
@@ -406,11 +413,14 @@ class ChatLoopTest {
         assertFalse(first.getHasRetrieval()); // legacy proto 字段保留兼容，Agent 不再依赖它
         assertEquals(0, first.getPreviousResultsCount());
         assertEquals(1, first.getHistoryCount());
+        assertTrue(first.getAssistantContext().getActionStatusSummary().contains("state=CANCELLED"));
+        assertTrue(first.getAssistantContext().getActionStatusSummary().contains("周五交报告"));
         // 第 2 步必须看得见第 1 步的结果（循环的核心输入）
         MirrorChatProto.PlanNextStepRequest second = captor.getAllValues().get(1);
         assertEquals(2, second.getStep());
         assertEquals(1, second.getPreviousResultsCount());
         assertEquals("get_stats", second.getPreviousResults(0).getTool());
+        assertTrue(second.getAssistantContext().getActionStatusSummary().contains("state=CANCELLED"));
     }
 
     @Test

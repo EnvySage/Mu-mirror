@@ -31,6 +31,9 @@ public class ChatSessionVO {
     @Schema(description = "历史消息（仅 GET /mirror/sessions/{id} 返回；列表接口为 null）")
     private List<MessageVO> messages;
 
+    @Schema(description = "会话内关联的持久化操作卡")
+    private List<ActionProposalVO> actions;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;

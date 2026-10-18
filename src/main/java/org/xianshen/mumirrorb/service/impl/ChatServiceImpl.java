@@ -114,6 +114,8 @@ public class ChatServiceImpl implements ChatService {
     private final org.xianshen.mumirrorb.config.VaultProperties vaultProperties;
     /** 兜底分档要判"该用户一条记录都没有"——复用 get_stats 的现成计数，不新写 SQL */
     private final org.xianshen.mumirrorb.mapper.ProfileStatsMapper statsMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.service.ActionProposalService actionProposalService;
 
     @Override
     @Async
@@ -147,7 +149,7 @@ public class ChatServiceImpl implements ChatService {
             // 3.5 旧 PlanTools 单次规划（chat-loop-design.md 裁决 0.4 的回滚路径）：
             // 顺序、事件序都保持改造前原样——检索之前一次性规划，失败/空计划 → 空列表走纯 RAG
             if (!loopEnabled) {
-                toolResults = toolOrchestrator.planAndExecute(userId, session.getId(), sourceMessageId, question);
+                toolResults = toolOrchestrator.planAndExecute(userId, session.getId(), sourceMessageId, question, actionProposalService);
                 java.util.List<String> toolsUsed = toolResults.stream()
                         .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
                         .map(CommonProto.ToolResult::getSummary)
@@ -161,7 +163,8 @@ public class ChatServiceImpl implements ChatService {
             }
             sendEvent(emitter, "meta", Map.of(
                     "sessionId", session.getId().toString(),
-                    "route", route.toUpperCase()));
+                    "route", route.toUpperCase(),
+                    "sourceMessageId", sourceMessageId));
 
             // 4. 回滚路径保留旧检索；Agent 路径的记录检索由 search_records 工具负责。
             if (!loopEnabled) {
@@ -177,6 +180,7 @@ public class ChatServiceImpl implements ChatService {
                 final UUID sid = session.getId();
                 toolResults = toolOrchestrator.loopAndExecute(userId, sid, sourceMessageId, question,
                         planHistory(sid, userId),
+                        actionProposalService,
                         new org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener() {
                             @Override
                             public void onThinking(String delta) {
@@ -199,6 +203,7 @@ public class ChatServiceImpl implements ChatService {
             }
             // 工具轨迹落库（[{tool, summary}]）：历史回放时前端据此还原工具轨迹芯片
             java.util.List<Map<String, Object>> toolsUsedRecords = toolsUsedRecords(toolResults);
+            publishActionEvents(emitter, toolResults);
 
             // 5. 无材料也交给模型（2026-09-23 改）。
             //
@@ -505,7 +510,8 @@ public class ChatServiceImpl implements ChatService {
                                                          UUID sessionId,
                                                          List<CommonProto.ToolResult> toolResults) {
         MirrorChatProto.ChatRequest.Builder builder = MirrorChatProto.ChatRequest.newBuilder()
-                .setQuestion(question);
+                .setQuestion(question)
+                .setAssistantContext(assistantContext(userId, sessionId));
 
         // 工具结果注入（toolcalling-vault-design.md 第 6 节 ChatRequest.tool_results）
         if (toolResults != null && !toolResults.isEmpty()) {
@@ -590,9 +596,43 @@ public class ChatServiceImpl implements ChatService {
                 .id(session.getId())
                 .title(session.getTitle())
                 .messages(messages)
+                .actions(actionProposalService == null ? List.of() : actionProposalService.listForSession(userId, sessionId))
                 .createdAt(session.getCreatedAt())
                 .updatedAt(session.getUpdatedAt())
                 .build();
+    }
+
+    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId) {
+        StringBuilder summary = new StringBuilder();
+        for (var action : actionProposalService == null ? List.<org.xianshen.mumirrorb.pojo.VO.ActionProposalVO>of()
+                : actionProposalService.listForSession(userId, sessionId)) {
+            summary.append("id=").append(action.getId()).append(" kind=").append(action.getKind())
+                    .append(" state=").append(action.getState()).append(" version=").append(action.getVersion());
+            if (action.getPayload() != null) summary.append(" payload=").append(action.getPayload());
+            if (action.getResult() != null) summary.append(" result=").append(action.getResult());
+            summary.append('\n');
+        }
+        return CommonProto.AssistantContext.newBuilder()
+                .setRoleTone("温和、直接、基于用户提供的信息；操作只可描述为卡片的当前服务端状态")
+                .setCurrentDate(LocalDate.now(ZONE).toString())
+                .setTimezone("Asia/Shanghai")
+                .setActionStatusSummary(summary.toString()).build();
+    }
+
+    private void publishActionEvents(SseEmitter emitter, List<CommonProto.ToolResult> results) {
+        for (CommonProto.ToolResult result : results) {
+            if (!result.getSuccess() || result.getPayloadJson().isBlank()) continue;
+            try {
+                var payload = objectMapper.readTree(result.getPayloadJson());
+                var proposal = payload.get("proposal");
+                if (proposal != null && proposal.isObject()) {
+                    sendEvent(emitter, "action_proposal", proposal);
+                    sendEvent(emitter, "action_status", proposal);
+                }
+            } catch (Exception e) {
+                log.warn("操作卡 SSE 数据解析失败，按会话历史恢复: {}", e.getMessage());
+            }
+        }
     }
 
     @Override

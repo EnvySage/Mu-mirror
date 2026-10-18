@@ -57,6 +57,11 @@ public class ToolOrchestrator {
     }
 
     public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question) {
+        return planAndExecute(userId, sessionId, sourceMessageId, question, null);
+    }
+
+    public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
+                                                       org.xianshen.mumirrorb.service.ActionProposalService actions) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
         try {
             // 0. 未配置 LLM 直接跳过（与每日总结幂等口径一致）
@@ -69,6 +74,7 @@ public class ToolOrchestrator {
                     .addAllGlossary(org.xianshen.mumirrorb.grpc.GlossaryProtoMapper
                             .toProtoList(glossaryService.confirmedForInjection(userId)))
                     .addAllTools(registry.toProtoSpecs())
+                    .setAssistantContext(assistantContext(userId, sessionId, actions))
                     .build();
             MirrorChatProto.PlanToolsReply reply = aiGrpcClient.planTools(userId, request,
                     props.getPlanToolsTimeoutMs());
@@ -251,6 +257,13 @@ public class ToolOrchestrator {
     public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
                                                       List<MirrorChatProto.ChatMessage> history,
                                                       StepListener listener) {
+        return loopAndExecute(userId, sessionId, sourceMessageId, question, history, null, listener);
+    }
+
+    public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
+                                                      List<MirrorChatProto.ChatMessage> history,
+                                                      org.xianshen.mumirrorb.service.ActionProposalService actions,
+                                                      StepListener listener) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
         List<String> summaries = new ArrayList<>();
         // 指纹集：tool + 规范化 args JSON（终止条件 5 的判据）
@@ -290,7 +303,7 @@ public class ToolOrchestrator {
                 StepPlan plan;
                 try {
                     plan = planOneStep(userId, question, glossary, tools, safeHistory,
-                            results, step, maxSteps, listener);
+                            results, step, maxSteps, actions, sessionId, listener);
                 } catch (Exception e) {
                     // 终止 6：不重试，带着已有结果正常退出。
                     // 必须是 WARN：2026-09-21 联调时第 1 步因思考预算过大撞 60s deadline，这条是 INFO，
@@ -485,6 +498,7 @@ public class ToolOrchestrator {
                                  List<MirrorChatProto.ChatMessage> history,
                                  List<CommonProto.ToolResult> previousResults,
                                  int step, int maxSteps,
+                                 org.xianshen.mumirrorb.service.ActionProposalService actions, UUID sessionId,
                                  StepListener listener) {
         MirrorChatProto.PlanNextStepRequest request = MirrorChatProto.PlanNextStepRequest.newBuilder()
                 .setQuestion(question)
@@ -494,6 +508,7 @@ public class ToolOrchestrator {
                 .addAllPreviousResults(previousResults)
                 .setStep(step)
                 .setMaxSteps(maxSteps)
+                .setAssistantContext(assistantContext(userId, sessionId, actions))
                 .build();
         Iterator<MirrorChatProto.PlanStepChunk> stream =
                 aiGrpcClient.planNextStep(userId, request, props.getPlanToolsTimeoutMs());
@@ -508,6 +523,23 @@ public class ToolOrchestrator {
             }
         }
         throw new IllegalStateException("PlanNextStep 流结束但没有终帧（final=true）");
+    }
+
+    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId,
+            org.xianshen.mumirrorb.service.ActionProposalService actions) {
+        StringBuilder summary = new StringBuilder();
+        if (actions != null && sessionId != null && userId != null) {
+            for (var action : actions.listForSession(userId, sessionId)) {
+                summary.append("id=").append(action.getId()).append(" kind=").append(action.getKind())
+                        .append(" state=").append(action.getState()).append(" version=").append(action.getVersion());
+                if (action.getPayload() != null) summary.append(" payload=").append(action.getPayload());
+                if (action.getResult() != null) summary.append(" result=").append(action.getResult());
+                summary.append('\n');
+            }
+        }
+        return CommonProto.AssistantContext.newBuilder().setRoleTone("温和、直接、基于用户提供的信息，不夸大执行结果")
+                .setCurrentDate(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString())
+                .setTimezone("Asia/Shanghai").setActionStatusSummary(summary.toString()).build();
     }
 
     /** 参数指纹：tool + 规范化 args（key 排序后序列化，{"a":1,"b":2} 与 {"b":2,"a":1} 同指纹） */
