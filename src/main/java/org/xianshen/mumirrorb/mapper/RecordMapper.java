@@ -18,6 +18,9 @@ import java.util.UUID;
 @Mapper
 public interface RecordMapper extends BaseMapper<Record> {
 
+    @Select("SELECT * FROM records WHERE id = #{id} AND user_id = #{userId}::uuid AND source = 'user' AND deleted_at IS NULL FOR UPDATE")
+    Record selectOwnedForUpdate(@Param("userId") UUID userId, @Param("id") Long id);
+
     /**
      * 查询指定月份内每天的有效记录数（用于日历标记）
      *

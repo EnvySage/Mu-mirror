@@ -86,6 +86,11 @@ public class SettingsServiceImpl implements SettingsService {
             }
             settings.setReviewMode(reviewMode);
         }
+        if (dto.getDefaultRecordMode() != null) {
+            if (!"ONLY_SAVE".equals(dto.getDefaultRecordMode()) && !"AI_ASSISTED".equals(dto.getDefaultRecordMode()))
+                throw new BusinessException(ResultCode.PARAM_ERROR, "记录默认模式只允许 ONLY_SAVE 或 AI_ASSISTED");
+            settings.setDefaultRecordMode(dto.getDefaultRecordMode());
+        }
         if (dto.getRagHalfLife() != null) {
             settings.setRagHalfLife(dto.getRagHalfLife());
         }
@@ -211,6 +216,7 @@ public class SettingsServiceImpl implements SettingsService {
                 .aiProtocol("anthropic")
                 .embeddingSource("local")
                 .reviewMode("manual")
+                .defaultRecordMode("ONLY_SAVE")
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
                 .build();
@@ -238,6 +244,7 @@ public class SettingsServiceImpl implements SettingsService {
                 // 自动审核永久停用：存量偏好不再影响片段记忆与待办授权。
                 .reviewMode("manual")
                 .autoReviewAvailable(false)
+                .defaultRecordMode(settings.getDefaultRecordMode() == null ? "ONLY_SAVE" : settings.getDefaultRecordMode())
                 .ragHalfLife(settings.getRagHalfLife())
                 .mirrorLookback(settings.getMirrorLookback() == null ? 1 : settings.getMirrorLookback())
                 .createdAt(settings.getCreatedAt())

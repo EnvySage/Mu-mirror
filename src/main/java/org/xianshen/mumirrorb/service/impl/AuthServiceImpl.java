@@ -64,6 +64,7 @@ public class AuthServiceImpl implements AuthService {
                 .userId(UUID.fromString(user.getId()))
                 .embeddingSource("local")
                 .reviewMode("manual")
+                .defaultRecordMode("ONLY_SAVE")
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
                 .build();

@@ -66,6 +66,9 @@ public class SettingsVO {
     @Schema(description = "审核模式（固定 manual；长期记忆与待办需分别授权）", example = "manual")
     private String reviewMode;
 
+    @Schema(description = "新记录默认模式", example = "ONLY_SAVE", allowableValues = {"ONLY_SAVE", "AI_ASSISTED"})
+    private String defaultRecordMode;
+
     /**
      * auto 审核模式是否可用（当前固定关闭）
      *

@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 import org.xianshen.mumirrorb.pojo.DTO.RecordConfirmDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RecordQueryDTO;
+import org.xianshen.mumirrorb.pojo.DTO.ActionPrepareDTO;
+import org.xianshen.mumirrorb.pojo.VO.ActionProposalVO;
 import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChunkVO;
@@ -49,6 +51,8 @@ public class RecordController {
     private final RecordService recordService;
     private final ChunkService chunkService;
     private final TodoRegistryService todoRegistryService;
+    private final org.xianshen.mumirrorb.service.ActionProposalService actionProposalService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     /**
      * 获取当前登录用户的UUID
@@ -70,7 +74,7 @@ public class RecordController {
      */
     @Operation(
             summary = "创建记录",
-            description = "默认仅保存原文；requestAiProcessing=true 时才触发本次 AI 整理。AI 结果需用户确认后进入长期记忆。"
+            description = "本路由只保存用户明确提交的原文。AI 整理请使用操作卡准备接口；requestAiProcessing=true 为兼容字段但会被拒绝。"
     )
     @ApiResponses(value = {
             @ApiResponse(
@@ -93,13 +97,15 @@ public class RecordController {
     public R<RecordVO> create(@Valid @RequestBody RecordDTO dto) {
         UUID userId = getCurrentUserId();
         RecordVO record = recordService.create(dto, userId);
-        return R.ok(dto.isRequestAiProcessing() ? "已保存，Mirror 正在整理" : "已保存，仅供自己记录", record);
+        return R.ok("已保存，仅供自己记录", record);
     }
 
     @PostMapping("/{id}/organize")
-    @Operation(summary = "请求 AI 整理", description = "用户主动请求对已保存的仅记录原文进行本次 AI 整理。")
-    public R<RecordVO> organize(@PathVariable Long id) {
-        return R.ok("已请求 Mirror 整理", recordService.organize(id, getCurrentUserId()));
+    @Operation(summary = "准备 AI 整理候选", description = "保留旧路由；只生成待确认操作卡，不更改记录或 AI 授权。")
+    public R<ActionProposalVO> organize(@PathVariable Long id) {
+        var payload = objectMapper.createObjectNode().put("sourceRecordId", id).put("mode", "AI_ASSISTED");
+        var body = new ActionPrepareDTO("record.organize", payload, "record-organize:" + id + ":" + UUID.randomUUID(), null, null);
+        return R.ok("已准备整理候选，确认前不会修改记录或授权 AI", actionProposalService.prepare(getCurrentUserId(), body));
     }
 
     @PutMapping("/{id}/content")
@@ -301,12 +307,13 @@ public class RecordController {
             @ApiResponse(responseCode = "404", description = "记录不存在或已被删除")
     })
     @PostMapping("/{id}/retry")
-    public R<RecordVO> retry(
+    public R<ActionProposalVO> retry(
             @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id) {
         UUID userId = getCurrentUserId();
-        RecordVO record = recordService.retry(id, userId);
-        return R.ok("已重新提交处理", record);
+        var payload = objectMapper.createObjectNode().put("sourceRecordId", id).put("mode", "AI_ASSISTED");
+        var body = new ActionPrepareDTO("record.organize", payload, "record-retry:" + id + ":" + UUID.randomUUID(), null, null);
+        return R.ok("已准备重试候选；确认前不会修改记录或重新处理", actionProposalService.prepare(userId, body));
     }
 
     /**

@@ -152,6 +152,41 @@ class ActionProposalServiceTest {
     }
 
     @Test
+    void asynchronousPreparationPersistsRunningThenCompletesReady() {
+        AsyncHandler async = new AsyncHandler();
+        service = new ActionProposalServiceImpl(mapper, List.of(async));
+        var request = new ActionPrepareDTO("test.async", json("{}"), "async-key", null, null);
+        var running = service.prepare(owner, request);
+        assertEquals("RUNNING", running.getPreparationStatus());
+        assertEquals(1, running.getVersion());
+        assertEquals(0, async.completions);
+        when(mapper.lockOwned(owner, running.getId())).thenReturn(persisted);
+
+        service.completePreparation(owner, running.getId(), running.getVersion());
+
+        assertEquals("READY", persisted.getPreparationStatus());
+        assertEquals(2, persisted.getVersion());
+        assertEquals(1, async.completions);
+    }
+
+    @Test
+    void cancelledPreparationDiscardsLateCompletion() {
+        AsyncHandler async = new AsyncHandler();
+        service = new ActionProposalServiceImpl(mapper, List.of(async));
+        var request = new ActionPrepareDTO("test.async", json("{}"), "async-cancel", null, null);
+        var running = service.prepare(owner, request);
+        when(mapper.lockOwned(owner, running.getId())).thenReturn(persisted);
+        service.cancel(owner, running.getId(), running.getVersion());
+
+        service.completePreparation(owner, running.getId(), running.getVersion());
+
+        assertEquals("CANCELLED", persisted.getState());
+        assertEquals("RUNNING", persisted.getPreparationStatus());
+        assertEquals(2, persisted.getVersion());
+        assertEquals(0, async.completions);
+    }
+
+    @Test
     void asynchronousResultStaysExecutingUntilMatchingGenerationCompletes() {
         handler.execution = ActionExecution.executing(json("{\"jobIds\":[12]}"));
         var card = service.prepare(owner, request("key"));
@@ -264,5 +299,22 @@ class ActionProposalServiceTest {
             assertEquals("test.update", action.getKind());
             return execution;
         }
+    }
+
+    private static class AsyncHandler implements ActionHandler {
+        int completions;
+        @Override public Set<String> kinds() { return Set.of("test.async"); }
+        @Override public boolean asynchronousPreparation(UUID userId, String kind, JsonNode payload) { return true; }
+        @Override public JsonNode initialPreparationPreview(UUID userId, String kind, JsonNode payload) {
+            return json("{\"preparationStatus\":\"RUNNING\",\"targetVersions\":{}}");
+        }
+        @Override public JsonNode completePreparationPreview(UUID userId, String kind, JsonNode payload) {
+            completions++;
+            return json("{\"preparationStatus\":\"READY\",\"targetVersions\":{}}");
+        }
+        @Override public JsonNode validateAndPreview(UUID userId, String kind, JsonNode payload) {
+            return completePreparationPreview(userId, kind, payload);
+        }
+        @Override public ActionExecution execute(AuthorizedAction action) { return ActionExecution.applied(json("{}")); }
     }
 }

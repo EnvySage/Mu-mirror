@@ -28,7 +28,7 @@ public class RecordDTO {
     )
     private String content;
 
-    /** 显式授权本次 AI 整理；缺省为 false，保存记录本身不触发 AI。 */
-    @Schema(description = "是否请求本次AI整理；缺省false", example = "false")
+    /** Legacy compatibility field; true is rejected in favor of a persisted review proposal. */
+    @Schema(description = "兼容旧客户端；true 会拒绝并要求先准备操作卡", example = "false")
     private boolean requestAiProcessing = false;
 }

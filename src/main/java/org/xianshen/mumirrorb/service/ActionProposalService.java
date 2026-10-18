@@ -17,4 +17,6 @@ public interface ActionProposalService {
     List<ActionProposalVO> listForSession(UUID userId, UUID sessionId);
     /** Internal worker callback, never exposed as an HTTP endpoint or model tool. */
     void completeAsync(UUID actionId, int executionVersion, JsonNode result);
+    /** Internal preparation callback; stale/cancelled generations are discarded. */
+    void completePreparation(UUID userId, UUID actionId, int preparationVersion);
 }

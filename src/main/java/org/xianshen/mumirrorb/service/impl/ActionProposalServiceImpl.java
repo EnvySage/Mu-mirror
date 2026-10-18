@@ -3,6 +3,8 @@ package org.xianshen.mumirrorb.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.action.*;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
@@ -18,6 +20,7 @@ import java.util.*;
 public class ActionProposalServiceImpl implements ActionProposalService {
     private final ActionProposalMapper mapper;
     private final Map<String, ActionHandler> handlers;
+    private final ApplicationEventPublisher events;
     private static final ConfirmationPermit CONFIRMATION_PERMIT = new ConfirmationPermit();
 
     /** Only this enclosing service can construct a permit. It is never serialized or returned. */
@@ -31,7 +34,13 @@ public class ActionProposalServiceImpl implements ActionProposalService {
     }
 
     public ActionProposalServiceImpl(ActionProposalMapper mapper, List<ActionHandler> handlers) {
+        this(mapper, handlers, null);
+    }
+
+    @Autowired
+    public ActionProposalServiceImpl(ActionProposalMapper mapper, List<ActionHandler> handlers, ApplicationEventPublisher events) {
         this.mapper = mapper;
+        this.events = events;
         Map<String, ActionHandler> registry = new HashMap<>();
         for (ActionHandler handler : handlers) {
             for (String kind : handler.kinds()) {
@@ -55,8 +64,12 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         ActionHandler handler = handler(body.getKind());
         payload(body.getPayload());
         source(userId, body.getSourceSessionId(), body.getSourceMessageId());
-        JsonNode preview = preview(handler, userId, body.getKind(), body.getPayload());
-        handler.validatePreparation(body.getKind(), body.getPayload(), preview);
+        boolean asynchronous = handler.asynchronousPreparation(userId, body.getKind(), body.getPayload());
+        JsonNode preview = asynchronous
+                ? preparationPreview(handler.initialPreparationPreview(userId, body.getKind(), body.getPayload()))
+                : preview(handler, userId, body.getKind(), body.getPayload());
+        JsonNode preparedPayload = Objects.requireNonNull(handler.persistedPayload(body.getKind(), body.getPayload(), preview));
+        handler.validatePreparation(body.getKind(), preparedPayload, preview);
         ActionProposal proposal = new ActionProposal();
         proposal.setId(UUID.randomUUID());
         proposal.setUserId(userId);
@@ -64,8 +77,8 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         proposal.setPrepareKey(body.getPrepareKey());
         proposal.setState("PENDING");
         proposal.setVersion(1);
-        proposal.setPreparationStatus("READY");
-        proposal.setPayload(body.getPayload().deepCopy());
+        proposal.setPreparationStatus(asynchronous ? "RUNNING" : "READY");
+        proposal.setPayload(preparedPayload.deepCopy());
         proposal.setPreview(preview);
         proposal.setTargetVersions(preview.get("targetVersions").deepCopy());
         proposal.setSourceSessionId(body.getSourceSessionId());
@@ -78,6 +91,8 @@ public class ActionProposalServiceImpl implements ActionProposalService {
             if (winner == null) throw new IllegalStateException("Preparation conflict without durable card");
             return ActionProposalVO.from(winner);
         }
+        if (asynchronous && events != null)
+            events.publishEvent(new ActionPreparationRequestedEvent(userId, proposal.getId(), proposal.getVersion()));
         return ActionProposalVO.from(proposal);
     }
 
@@ -89,10 +104,13 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         pending(proposal, body.getExpectedVersion());
         ready(proposal);
         payload(body.getPayload());
+        handler(proposal.getKind()).validateEdit(proposal.getKind(), proposal.getPayload(), body.getPayload());
         JsonNode preview = preview(handler(proposal.getKind()), userId, proposal.getKind(), body.getPayload());
-        handler(proposal.getKind()).validatePreparation(proposal.getKind(), body.getPayload(), preview);
+        JsonNode preparedPayload = Objects.requireNonNull(handler(proposal.getKind())
+                .persistedPayload(proposal.getKind(), body.getPayload(), preview));
+        handler(proposal.getKind()).validatePreparation(proposal.getKind(), preparedPayload, preview);
         int version = proposal.getVersion();
-        proposal.setPayload(body.getPayload().deepCopy());
+        proposal.setPayload(preparedPayload.deepCopy());
         proposal.setPreview(preview);
         proposal.setTargetVersions(preview.get("targetVersions").deepCopy());
         save(proposal, version);
@@ -182,6 +200,54 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         save(proposal, version);
     }
 
+    @Override
+    @Transactional
+    public void completePreparation(UUID userId, UUID actionId, int preparationVersion) {
+        if (userId == null || actionId == null || preparationVersion < 1) return;
+        ActionProposal proposal = mapper.lockOwned(userId, actionId);
+        if (proposal == null || !"PENDING".equals(proposal.getState())
+                || !"RUNNING".equals(proposal.getPreparationStatus())
+                || proposal.getVersion() != preparationVersion) return;
+
+        ActionHandler handler = handler(proposal.getKind());
+        int oldVersion = proposal.getVersion();
+        try {
+            JsonNode completed = preparationPreview(handler.completePreparationPreview(userId,
+                    proposal.getKind(), proposal.getPayload()));
+            if (!proposal.getTargetVersions().equals(completed.path("targetVersions"))) {
+                proposal.setPreparationStatus("FAILED");
+                proposal.setErrorCode("TARGET_VERSION_CHANGED");
+                ((ObjectNode) proposal.getPreview()).put("preparationError", "来源记录已变化，请重新准备候选");
+            } else {
+                JsonNode preparedPayload = Objects.requireNonNull(handler.persistedPayload(
+                        proposal.getKind(), proposal.getPayload(), completed));
+                handler.validatePreparation(proposal.getKind(), preparedPayload, completed);
+                proposal.setPayload(preparedPayload.deepCopy());
+                proposal.setPreview(completed);
+                proposal.setTargetVersions(completed.path("targetVersions").deepCopy());
+                proposal.setPreparationStatus("READY");
+            }
+        } catch (Exception failure) {
+            try {
+                JsonNode fallback = preparationPreview(handler.failedPreparationPreview(userId,
+                        proposal.getKind(), proposal.getPayload(), failure));
+                JsonNode fallbackPayload = Objects.requireNonNull(handler.persistedPayload(
+                        proposal.getKind(), proposal.getPayload(), fallback));
+                handler.validatePreparation(proposal.getKind(), fallbackPayload, fallback);
+                proposal.setPayload(fallbackPayload.deepCopy());
+                proposal.setPreview(fallback);
+                proposal.setTargetVersions(fallback.path("targetVersions").deepCopy());
+                proposal.setPreparationStatus("READY");
+                proposal.setErrorCode("CLASSIFICATION_FAILED_SAVED_ONLY");
+            } catch (Exception fallbackFailure) {
+                proposal.setPreparationStatus("FAILED");
+                proposal.setErrorCode("PREPARATION_FAILED");
+                ((ObjectNode) proposal.getPreview()).put("preparationError", "候选准备失败，请稍后重新准备");
+            }
+        }
+        save(proposal, oldVersion);
+    }
+
     private ActionProposal owned(UUID userId, UUID actionId, boolean lock) {
         user(userId);
         if (actionId == null) throw invalid("缺少操作卡 ID");
@@ -204,6 +270,12 @@ public class ActionProposalServiceImpl implements ActionProposalService {
 
     private JsonNode preview(ActionHandler handler, UUID userId, String kind, JsonNode payload) {
         JsonNode preview = handler.validateAndPreview(userId, kind, payload.deepCopy());
+        if (preview == null || !preview.isObject() || !preview.path("targetVersions").isObject())
+            throw new IllegalStateException("Action preview requires server-derived targetVersions");
+        return preview.deepCopy();
+    }
+
+    private JsonNode preparationPreview(JsonNode preview) {
         if (preview == null || !preview.isObject() || !preview.path("targetVersions").isObject())
             throw new IllegalStateException("Action preview requires server-derived targetVersions");
         return preview.deepCopy();

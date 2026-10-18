@@ -75,6 +75,9 @@ public class SettingsDTO {
     @Schema(description = "审核模式", example = "manual", allowableValues = {"manual", "auto"})
     private String reviewMode;
 
+    @Schema(description = "新记录默认模式", example = "ONLY_SAVE", allowableValues = {"ONLY_SAVE", "AI_ASSISTED"})
+    private String defaultRecordMode;
+
     /**
      * RAG 时间衰减半衰期（天，7-365）
      */

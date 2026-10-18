@@ -124,6 +124,9 @@ public class UserSettings {
     @Schema(description = "审核模式", example = "manual", allowableValues = {"manual", "auto"})
     private String reviewMode;
 
+    /** Default mode for future records only; legacy rows migrate as ONLY_SAVE. */
+    private String defaultRecordMode;
+
     /**
      * RAG 时间衰减半衰期（天，7-365）
      *

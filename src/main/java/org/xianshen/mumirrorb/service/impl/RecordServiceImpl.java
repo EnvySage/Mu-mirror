@@ -74,6 +74,10 @@ public class RecordServiceImpl implements RecordService {
         if (dto.getContent() == null || dto.getContent().isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
         }
+        if (dto.isRequestAiProcessing()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "AI 整理必须先准备可审核的操作卡，请调用 /assistant/actions/prepare");
+        }
 
         Record record = Record.builder()
                 .userId(userId)
@@ -102,22 +106,8 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO organize(Long recordId, UUID userId) {
-        Record record = recordMapper.selectOne(new LambdaQueryWrapper<Record>()
-                .eq(Record::getId, recordId).eq(Record::getUserId, userId)
-                .eq(Record::getSource, "user").isNull(Record::getDeletedAt));
-        if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
-        if (record.getStatus() != RecordStatus.RECORD_ONLY) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有仅记录状态可以请求 AI 整理");
-        }
-        int version = (record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1;
-        record.setAiProcessingAuthorized(true);
-        record.setProcessingVersion(version);
-        record.setStatus(RecordStatus.PROCESSING);
-        record.setFailReason(null);
-        record.setUpdatedAt(OffsetDateTime.now());
-        recordMapper.updateById(record);
-        eventPublisher.publishEvent(new RecordCreatedEvent(this, recordId, userId, version));
-        return toVO(record);
+        throw new BusinessException(ResultCode.PARAM_ERROR,
+                "旧的直接整理入口已关闭，请先通过操作卡准备候选并由用户确认");
     }
 
     @Override
@@ -215,36 +205,7 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO retry(Long recordId, UUID userId) {
-        log.info("============ retry 开始，记录ID: {}, 用户: {} ============", recordId, userId);
-
-        Record record = recordMapper.selectOne(
-                new LambdaQueryWrapper<Record>()
-                        .eq(Record::getId, recordId)
-                        .eq(Record::getUserId, userId)
-                        .isNull(Record::getDeletedAt)
-        );
-
-        if (record == null) {
-            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
-        }
-
-        // 裁决 #21：仅 FAILED 可重试（重跑分类管道）
-        if (record.getStatus() != RecordStatus.FAILED) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有处理失败的记录才能重试");
-        }
-        if (!Boolean.TRUE.equals(record.getAiProcessingAuthorized())) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "该记录尚未获得 AI 整理授权");
-        }
-
-        record.setStatus(RecordStatus.PROCESSING);
-        record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
-        record.setFailReason(null); // 清除上次失败原因
-        record.setUpdatedAt(OffsetDateTime.now());
-        recordMapper.updateById(record);
-
-        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId, record.getProcessingVersion()));
-        log.info("记录已重置为 processing 并重新发布管道事件，ID: {}", recordId);
-        return toVO(record);
+        throw new BusinessException(ResultCode.PARAM_ERROR, "请通过记录重试操作卡准备候选，并由用户确认后执行");
     }
 
     @Override

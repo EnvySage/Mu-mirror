@@ -17,6 +17,24 @@ public interface ActionHandler {
      */
     JsonNode validateAndPreview(UUID userId, String kind, JsonNode payload);
 
+    /** Persist any server-produced draft alongside the caller payload for later edits/confirmation. */
+    default JsonNode persistedPayload(String kind, JsonNode payload, JsonNode preview) { return payload.deepCopy(); }
+
+    /** Preserve immutable privacy/source boundaries when a user edits a pending card. */
+    default void validateEdit(String kind, JsonNode originalPayload, JsonNode editedPayload) {}
+
+    /** Long-running candidate generation can persist a cancellable RUNNING proposal first. */
+    default boolean asynchronousPreparation(UUID userId, String kind, JsonNode payload) { return false; }
+    default JsonNode initialPreparationPreview(UUID userId, String kind, JsonNode payload) {
+        return validateAndPreview(userId, kind, payload);
+    }
+    default JsonNode completePreparationPreview(UUID userId, String kind, JsonNode payload) {
+        return validateAndPreview(userId, kind, payload);
+    }
+    default JsonNode failedPreparationPreview(UUID userId, String kind, JsonNode payload, Exception error) {
+        throw new IllegalStateException("Preparation failed", error);
+    }
+
     /** Preparation/edit-only preconditions; confirmation rechecks the authoritative snapshot. */
     default void validatePreparation(String kind, JsonNode payload, JsonNode preview) {}
 
