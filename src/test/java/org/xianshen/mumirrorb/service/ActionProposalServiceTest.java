@@ -170,6 +170,24 @@ class ActionProposalServiceTest {
     }
 
     @Test
+    void asynchronousPreparationBecomesStaleWhenTargetChanges() {
+        AsyncHandler async = new AsyncHandler();
+        async.completedTargetVersions = "{\"record:1\":\"v2\"}";
+        service = new ActionProposalServiceImpl(mapper, List.of(async));
+        var request = new ActionPrepareDTO("test.async", json("{}"), "async-stale", null, null);
+        var running = service.prepare(owner, request);
+        when(mapper.lockOwned(owner, running.getId())).thenReturn(persisted);
+
+        service.completePreparation(owner, running.getId(), running.getVersion());
+
+        assertEquals("STALE", persisted.getState());
+        assertEquals("FAILED", persisted.getPreparationStatus());
+        assertEquals("TARGET_VERSION_CHANGED", persisted.getErrorCode());
+        assertEquals(2, persisted.getVersion());
+        assertEquals(1, async.completions);
+    }
+
+    @Test
     void cancelledPreparationDiscardsLateCompletion() {
         AsyncHandler async = new AsyncHandler();
         service = new ActionProposalServiceImpl(mapper, List.of(async));
@@ -303,6 +321,7 @@ class ActionProposalServiceTest {
 
     private static class AsyncHandler implements ActionHandler {
         int completions;
+        String completedTargetVersions = "{}";
         @Override public Set<String> kinds() { return Set.of("test.async"); }
         @Override public boolean asynchronousPreparation(UUID userId, String kind, JsonNode payload) { return true; }
         @Override public JsonNode initialPreparationPreview(UUID userId, String kind, JsonNode payload) {
@@ -310,7 +329,7 @@ class ActionProposalServiceTest {
         }
         @Override public JsonNode completePreparationPreview(UUID userId, String kind, JsonNode payload) {
             completions++;
-            return json("{\"preparationStatus\":\"READY\",\"targetVersions\":{}}");
+            return json("{\"preparationStatus\":\"READY\",\"targetVersions\":" + completedTargetVersions + "}");
         }
         @Override public JsonNode validateAndPreview(UUID userId, String kind, JsonNode payload) {
             return completePreparationPreview(userId, kind, payload);

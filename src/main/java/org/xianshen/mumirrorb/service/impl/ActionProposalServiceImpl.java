@@ -215,6 +215,7 @@ public class ActionProposalServiceImpl implements ActionProposalService {
             JsonNode completed = preparationPreview(handler.completePreparationPreview(userId,
                     proposal.getKind(), proposal.getPayload()));
             if (!proposal.getTargetVersions().equals(completed.path("targetVersions"))) {
+                proposal.setState("STALE");
                 proposal.setPreparationStatus("FAILED");
                 proposal.setErrorCode("TARGET_VERSION_CHANGED");
                 ((ObjectNode) proposal.getPreview()).put("preparationError", "来源记录已变化，请重新准备候选");
