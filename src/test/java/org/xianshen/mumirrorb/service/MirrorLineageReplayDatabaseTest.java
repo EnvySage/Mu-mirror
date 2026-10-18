@@ -393,10 +393,24 @@ class MirrorLineageReplayDatabaseTest {
     }
 
     private void insertChunk(long recordId, boolean authorized) {
-        jdbcTemplate.update("""
-                INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved)
-                VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, ?)
-                """, userId, recordId, authorized);
+        if (authorized) {
+            jdbcTemplate.update("UPDATE records SET memory_state = 'READY' WHERE id = ? AND user_id = ?", recordId, userId);
+            jdbcTemplate.update("""
+                    INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved,
+                                        embedding, embedding_status)
+                    VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, TRUE, ?::vector, 'ready')
+                    """, userId, recordId, vectorLiteral());
+        } else {
+            jdbcTemplate.update("""
+                    INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved,
+                                        embedding_status)
+                    VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, FALSE, 'not_requested')
+                    """, userId, recordId);
+        }
+    }
+
+    private String vectorLiteral() {
+        return "[1" + ",0".repeat(1023) + "]";
     }
 
     @SpringBootConfiguration

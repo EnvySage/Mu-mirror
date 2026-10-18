@@ -15,6 +15,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 import org.mybatis.spring.annotation.MapperScan;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.mapper.ChatSearchMapper;
@@ -34,6 +35,7 @@ import org.xianshen.mumirrorb.pojo.DTO.SnapshotSourceRef;
 import org.xianshen.mumirrorb.service.impl.ChunkServiceImpl;
 import org.xianshen.mumirrorb.service.impl.ChunkEmbeddingJobServiceImpl;
 import org.xianshen.mumirrorb.service.impl.RecordServiceImpl;
+import org.xianshen.mumirrorb.service.impl.RecordMemoryLifecycleServiceImpl;
 import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
 import org.xianshen.mumirrorb.maintenance.ChunkEmbeddingWorker;
 
@@ -134,7 +136,12 @@ class RecordAiAuthorizationDatabaseTest {
                 .setModelName("integration-test");
         for (int i = 0; i < 1024; i++) embedding.addVector(i == 0 ? 1.0f : 0.0f);
         when(aiGrpcClient.embed(eq(userId), anyString())).thenReturn(embedding.build());
-        RecordServiceImpl service = service(aiGrpcClient);
+        SnapshotLineageService lineage = new SnapshotLineageService(profileSnapshotMapper);
+        RecordMemoryLifecycleServiceImpl lifecycle = new RecordMemoryLifecycleServiceImpl(recordMapper, chunkMapper,
+                chunkEmbeddingJobMapper, lineage, mock(ApplicationEventPublisher.class));
+        ChunkEmbeddingJobServiceImpl embeddingJobs = new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper,
+                chunkMapper, recordMapper, lifecycle);
+        RecordServiceImpl service = service(aiGrpcClient, embeddingJobs);
 
         service.confirmReview(record.getId(), userId,
                 List.of(memoryChunk.getId()), List.of(todoChunk.getId()), List.of());
@@ -143,12 +150,19 @@ class RecordAiAuthorizationDatabaseTest {
         assertTrue(pendingMemory.getAiMemoryApproved());
         assertNull(pendingMemory.getEmbedding());
         assertEquals("pending", pendingMemory.getEmbeddingStatus());
+        assertEquals(RecordMemoryState.PENDING, recordMapper.selectById(record.getId()).getMemoryState());
+        assertTrue(chunkMapper.searchBySimilarity(userId, vectorLiteral(), 10).isEmpty());
+        assertTrue(chatSearchMapper.searchStructured(userId, null, null, null, null, null, 10).isEmpty());
+        assertTrue(chatSearchMapper.searchSemantic(userId, vectorLiteral(), false, 30.0, null, 10).isEmpty());
+        assertTrue(chunkMapper.selectLookbackChunks(userId, null, null, 0).isEmpty());
         verify(aiGrpcClient, never()).embed(any(), any());
-        new ChunkEmbeddingWorker(new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper), aiGrpcClient)
-                .processDueJobs();
+        new ChunkEmbeddingWorker(embeddingJobs, aiGrpcClient).processDueJobs();
+        // This test is wrapped in an outer rollback transaction, so its AFTER_COMMIT listener is deferred.
+        lifecycle.onInitialIndexComplete(userId, record.getId(), recordMapper.selectById(record.getId()).getProcessingVersion());
 
         Chunk approvedMemory = chunkMapper.selectById(memoryChunk.getId());
         Chunk approvedTodo = chunkMapper.selectById(todoChunk.getId());
+        assertEquals(RecordMemoryState.READY, recordMapper.selectById(record.getId()).getMemoryState());
         assertTrue(approvedMemory.getAiMemoryApproved());
         assertNotNull(approvedMemory.getEmbedding());
         assertEquals(1024, approvedMemory.getEmbedding().size());
@@ -294,6 +308,9 @@ class RecordAiAuthorizationDatabaseTest {
                 .createdAt(record.getCreatedAt())
                 .build();
         chunkMapper.insert(chunk);
+        jdbcTemplate.update("UPDATE records SET memory_state = 'READY' WHERE id = ? AND user_id = ?", record.getId(), userId);
+        jdbcTemplate.update("UPDATE chunks SET embedding = ?::vector, embedding_status = 'ready' WHERE id = ? AND user_id = ?",
+                vectorLiteral(), chunk.getId(), userId);
         jdbcTemplate.update("""
                 INSERT INTO todo_registry (user_id, title, current_status, source_chunk_id)
                 VALUES (?, ?, 'not_started', ?)
@@ -424,12 +441,16 @@ class RecordAiAuthorizationDatabaseTest {
     }
 
     private RecordServiceImpl service(AiGrpcClient aiGrpcClient) {
+        return service(aiGrpcClient, new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper));
+    }
+
+    private RecordServiceImpl service(AiGrpcClient aiGrpcClient, ChunkEmbeddingJobServiceImpl embeddingJobs) {
         ApplicationContext applicationContext = mock(ApplicationContext.class);
         TodoRegistryService todoRegistryService = mock(TodoRegistryService.class);
         when(applicationContext.getBean(TodoRegistryService.class)).thenReturn(todoRegistryService);
         return new RecordServiceImpl(recordMapper, chunkMapper, new SnapshotLineageService(profileSnapshotMapper),
                 mock(ApplicationEventPublisher.class), aiGrpcClient, applicationContext,
-                new ChunkEmbeddingJobServiceImpl(chunkEmbeddingJobMapper, chunkMapper));
+                embeddingJobs);
     }
 
     private String vectorLiteral() {

@@ -67,7 +67,7 @@ public class RecordActionHandler implements ActionHandler {
         segment.setText(draft.getRawContent());
         draft.setSegments(List.of(segment));
         ObjectNode preview = preview(source, draft, "RUNNING");
-        if (correction != null) preview.put("correctionOfRecordId", correction.getId());
+        addCorrectionTarget(preview, correction);
         return preview;
     }
 
@@ -98,7 +98,7 @@ public class RecordActionHandler implements ActionHandler {
         segment.setText(fallback.getRawContent());
         fallback.setSegments(List.of(segment));
         ObjectNode preview = preview(source, fallback, "READY");
-        if (correction != null) preview.put("correctionOfRecordId", correction.getId());
+        addCorrectionTarget(preview, correction);
         return preview;
     }
 
@@ -118,7 +118,7 @@ public class RecordActionHandler implements ActionHandler {
         draft.setSourceRecordVersion(source == null ? null : version(source));
         normalizeSingleFinalContent(draft);
         ObjectNode preview = preview(source, draft, draft.getPreparationStatus());
-        if (correction != null) preview.put("correctionOfRecordId", correction.getId());
+        addCorrectionTarget(preview, correction);
         return preview;
     }
 
@@ -158,6 +158,13 @@ public class RecordActionHandler implements ActionHandler {
         Long sourceId = "record.organize".equals(action.getKind()) ? draft.getSourceRecordId() : null;
         Long correctionOfId = payload.path("correctionOfRecordId").isIntegralNumber()
                 ? payload.path("correctionOfRecordId").asLong() : null;
+        Record correction = correctionOfId == null ? null : lockCorrectionSource(action.getUserId(), correctionOfId);
+        if (correction != null) {
+            String expectedCorrectionVersion = action.getTargetVersions()
+                    .path(String.valueOf(correction.getId())).asText(null);
+            if (expectedCorrectionVersion == null || !expectedCorrectionVersion.equals(targetVersion(correction)))
+                throw new BusinessException(409, "更正来源已变化，请重新准备候选");
+        }
         if ("ONLY_SAVE".equals(draft.getMode())) {
             if (sourceId != null) {
                 ObjectNode unchanged = json.createObjectNode().put("recordId", sourceId).put("savedOnly", true);
@@ -340,10 +347,27 @@ public class RecordActionHandler implements ActionHandler {
         if (id == null || id.isNull()) return null;
         if (!id.canConvertToLong() || id.longValue() < 1) throw invalid("correctionOfRecordId 必须为正整数");
         Record source = ownedSource(userId, id.longValue());
+        validateCorrectionSource(source);
+        return source;
+    }
+
+    private Record lockCorrectionSource(UUID userId, Long id) {
+        Record source = recordMapper.selectOwnedForUpdate(userId, id);
+        if (source == null) throw new BusinessException(4041, "更正来源不存在或已删除");
+        validateCorrectionSource(source);
+        return source;
+    }
+
+    private void validateCorrectionSource(Record source) {
         if (source.getMemoryState() != org.xianshen.mumirrorb.common.enums.RecordMemoryState.READY
                 && source.getMemoryState() != org.xianshen.mumirrorb.common.enums.RecordMemoryState.DISABLED)
             throw invalid("更正来源必须是本人已确认或已停止使用的只读记录");
-        return source;
+    }
+
+    private void addCorrectionTarget(ObjectNode preview, Record correction) {
+        if (correction == null) return;
+        preview.put("correctionOfRecordId", correction.getId());
+        preview.with("targetVersions").put(String.valueOf(correction.getId()), targetVersion(correction));
     }
 
     private void validateOrganizeSource(UUID userId, Record source) {
