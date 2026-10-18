@@ -115,7 +115,7 @@ class RecordAiAuthorizationDatabaseTest {
     }
 
     @Test
-    void confirmAndRevokePersistSeparateApprovalsAndRemoveRevokedMemoryFromSearch() {
+    void confirmDisablePersistSeparateApprovalsAndRemoveDisabledMemoryFromSearch() {
         UUID userId = createUser();
         Record record = createReviewingRecord(userId);
         Chunk memoryChunk = createChunk(userId, record.getId(), "approved memory",
@@ -180,9 +180,21 @@ class RecordAiAuthorizationDatabaseTest {
         assertEquals(List.of(memoryChunk.getId()), chunkMapper.selectLookbackChunks(
                         userId, null, null, 0).stream().map(Chunk::getId).toList());
 
-        service.confirmReview(record.getId(), userId, List.of(), List.of(), List.of());
+        assertThrows(org.xianshen.mumirrorb.common.exception.BusinessException.class,
+                () -> service.confirmReview(record.getId(), userId, List.of(), List.of(), List.of()));
+        Record stillReadonly = recordMapper.selectById(record.getId());
+        Chunk stillApproved = chunkMapper.selectById(memoryChunk.getId());
+        assertEquals(RecordMemoryState.READY, stillReadonly.getMemoryState());
+        assertEquals("authorization review fixture", stillReadonly.getContent());
+        assertTrue(stillApproved.getAiMemoryApproved());
+        assertEquals("approved memory", stillApproved.getSegment());
+
+        lifecycle.disable(userId, record.getId(), stillReadonly.getProcessingVersion());
 
         Chunk revokedMemory = chunkMapper.selectById(memoryChunk.getId());
+        assertEquals(RecordMemoryState.DISABLED, recordMapper.selectById(record.getId()).getMemoryState());
+        assertEquals("authorization review fixture", recordMapper.selectById(record.getId()).getContent());
+        assertEquals("approved memory", revokedMemory.getSegment());
         assertFalse(revokedMemory.getAiMemoryApproved());
         assertNull(revokedMemory.getEmbedding());
         assertTrue(chunkMapper.searchBySimilarity(userId, vectorLiteral(), 10).isEmpty());
