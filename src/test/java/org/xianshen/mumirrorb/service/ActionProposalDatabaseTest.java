@@ -16,9 +16,14 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.xianshen.mumirrorb.action.*;
 import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
+import org.xianshen.mumirrorb.controller.AssistantActionController;
 import org.xianshen.mumirrorb.mapper.ActionProposalMapper;
+import org.xianshen.mumirrorb.pojo.DO.ActionProposal;
 import org.xianshen.mumirrorb.pojo.DTO.*;
 import org.xianshen.mumirrorb.service.impl.ActionProposalServiceImpl;
 
@@ -30,6 +35,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
  * Real PostgreSQL + MyBatis + Spring transaction tests. No application context/config defaults.
@@ -114,6 +121,7 @@ class ActionProposalDatabaseTest {
         targetId = jdbc.queryForObject("INSERT INTO test_targets(user_id,title) VALUES (?, 'before') RETURNING id", Long.class, owner);
         handler.executions.set(0);
         handler.throwAfterWrite = false;
+        handler.throwConflictAfterWrite = false;
         handler.async = false;
     }
 
@@ -146,6 +154,33 @@ class ActionProposalDatabaseTest {
         assertNull(service.get(owner, card.getId()).getResult());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM test_effects WHERE target_id = ?", Integer.class, targetId));
         assertEquals("before", jdbc.queryForObject("SELECT title FROM test_targets WHERE id = ?", String.class, targetId));
+    }
+
+    @Test
+    void handlerConflictAfterWritesRollsBackDomainAndExecutingCardAndReturns409() throws Exception {
+        var card = service.prepare(owner, request("handler-conflict"));
+        handler.throwConflictAfterWrite = true;
+        var mvc = MockMvcBuilders.standaloneSetup(new AssistantActionController(service)).build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(owner.toString(), "test", List.of()));
+        try {
+            mvc.perform(post("/assistant/actions/" + card.getId() + "/confirm")
+                            .contentType("application/json")
+                            .content("{\"expectedVersion\":1,\"requestId\":\"handler-conflict\"}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(409));
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+        var recovered = service.get(owner, card.getId());
+        assertEquals("PENDING", recovered.getState());
+        assertEquals(1, recovered.getVersion());
+        assertNull(recovered.getExecutionVersion());
+        assertNull(recovered.getResult());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM test_effects WHERE action_id = ?", Integer.class, card.getId()));
+        assertEquals("before", jdbc.queryForObject("SELECT title FROM test_targets WHERE id = ?", String.class, targetId));
+        assertEquals(1, jdbc.queryForObject("SELECT version FROM test_targets WHERE id = ?", Integer.class, targetId));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM test_jobs WHERE action_id = ?", Integer.class, card.getId()));
     }
 
     @Test
@@ -271,6 +306,7 @@ class ActionProposalDatabaseTest {
         final JdbcTemplate jdbc;
         final AtomicInteger executions = new AtomicInteger();
         boolean throwAfterWrite;
+        boolean throwConflictAfterWrite;
         boolean async;
 
         DatabaseHandler(JdbcTemplate jdbc) { this.jdbc = jdbc; }
@@ -287,6 +323,13 @@ class ActionProposalDatabaseTest {
             jdbc.update("UPDATE test_targets SET version = version + 1, title = ? WHERE id = ? AND user_id = ?",
                     action.getPayload().path("title").asText(), id, action.getUserId());
             if (throwAfterWrite) throw new IllegalStateException("Deliberate failure after domain writes");
+            if (throwConflictAfterWrite) {
+                ActionProposal original = new ActionProposal();
+                original.setId(action.getActionId());
+                original.setState("PENDING");
+                original.setVersion(action.getExecutionVersion() - 1);
+                throw new ActionConflictException("Deliberate target conflict after domain writes", original);
+            }
             if (async) {
                 long jobId = jdbc.queryForObject("INSERT INTO test_jobs(action_id) VALUES (?) RETURNING id", Long.class, action.getActionId());
                 return ActionExecution.executing(json("{\"jobIds\":[" + jobId + "]}"));

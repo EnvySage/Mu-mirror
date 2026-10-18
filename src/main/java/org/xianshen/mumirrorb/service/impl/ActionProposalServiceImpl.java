@@ -23,6 +23,13 @@ public class ActionProposalServiceImpl implements ActionProposalService {
     /** Only this enclosing service can construct a permit. It is never serialized or returned. */
     public static final class ConfirmationPermit { private ConfirmationPermit() {} }
 
+    /** Only the service's pre-execution target check may commit a STALE card on conflict. */
+    private static final class StaleProposalException extends ActionConflictException {
+        private StaleProposalException(ActionProposal proposal) {
+            super("目标已变化，请查看最新信息并重新准备", proposal);
+        }
+    }
+
     public ActionProposalServiceImpl(ActionProposalMapper mapper, List<ActionHandler> handlers) {
         this.mapper = mapper;
         Map<String, ActionHandler> registry = new HashMap<>();
@@ -91,7 +98,7 @@ public class ActionProposalServiceImpl implements ActionProposalService {
     }
 
     @Override
-    @Transactional(noRollbackFor = ActionConflictException.class)
+    @Transactional(noRollbackFor = StaleProposalException.class)
     public ActionProposalVO confirm(UUID userId, UUID actionId, ActionConfirmDTO body) {
         ActionProposal proposal = owned(userId, actionId, true);
         if (body == null) throw invalid("缺少确认内容");
@@ -110,7 +117,7 @@ public class ActionProposalServiceImpl implements ActionProposalService {
             proposal.setErrorCode("TARGET_VERSION_CHANGED");
             proposal.setPreview(current);
             save(proposal, version);
-            throw new ActionConflictException("目标已变化，请查看最新信息并重新准备", proposal);
+            throw new StaleProposalException(proposal);
         }
         int version = proposal.getVersion();
         proposal.setState("EXECUTING");
