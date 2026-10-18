@@ -232,7 +232,7 @@ class ChatRetrievalTest {
     @DisplayName("检索为空但工具查到文件 → 不走兜底，chatStream 仍被调用（工具结果不被丢弃）")
     void emptyRetrieval_withUsableToolData_stillCallsLlm() {
         vaultProperties.setChatLoopEnabled(true);
-        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any()))
+        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(
                 org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
                         .setTool("find_item").setSummary("find_item:1个文件").setSuccess(true)
@@ -256,7 +256,7 @@ class ChatRetrievalTest {
     @DisplayName("Agent 工具零命中仍交给 Chat 判断；模型空流才回落兜底")
     void emptyRetrieval_withEmptyToolPayload_emptyStreamFallsBack() {
         vaultProperties.setChatLoopEnabled(true);
-        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any()))
+        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(
                 org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
                         .setTool("find_item").setSummary("find_item:0个文件").setSuccess(true)
@@ -473,7 +473,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
                 .thenReturn(hit());
-        when(toolOrchestrator.planAndExecute(any(), any(), any())).thenReturn(List.of(
+        when(toolOrchestrator.planAndExecute(any(), any(), any(), any())).thenReturn(List.of(
                 org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
                         .setTool("search_records").setSummary("search_records:3条").setSuccess(true)
                         .setPayloadJson("{\"count\":3}").build()));
@@ -483,8 +483,8 @@ class ChatRetrievalTest {
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), emitter);
 
-        verify(toolOrchestrator).planAndExecute(eq(USER_ID), eq(SESSION_ID), eq("最近学了什么"));
-        verify(toolOrchestrator, never()).loopAndExecute(any(), any(), any(), any(), any());
+        verify(toolOrchestrator).planAndExecute(eq(USER_ID), eq(SESSION_ID), any(), eq("最近学了什么"));
+        verify(toolOrchestrator, never()).loopAndExecute(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -497,7 +497,7 @@ class ChatRetrievalTest {
         chatService.chat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), emitter);
 
-        verify(toolOrchestrator).loopAndExecute(eq(USER_ID), eq(SESSION_ID), eq("最近学了什么"),
+        verify(toolOrchestrator).loopAndExecute(eq(USER_ID), eq(SESSION_ID), any(), eq("最近学了什么"),
                 any(), any());
         verify(aiGrpcClient, never()).extractIntent(any(), anyString(), any());
         verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt());
@@ -516,9 +516,9 @@ class ChatRetrievalTest {
     void loopCallbacks_streamThinkingAndToolChips() {
         vaultProperties.setChatLoopEnabled(true);
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
-        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any()))
+        when(toolOrchestrator.loopAndExecute(any(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> {
-                    org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener listener = inv.getArgument(4);
+                    org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener listener = inv.getArgument(5);
                     listener.onThinking("先看看");
                     listener.onThinking("他写过什么");
                     listener.onStepDone(List.of("get_stats:记录12条/30天"));

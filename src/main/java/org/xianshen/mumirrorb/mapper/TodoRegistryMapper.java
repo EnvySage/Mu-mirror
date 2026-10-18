@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+import org.xianshen.mumirrorb.pojo.DTO.TodoCommandDTO;
 import org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO;
 import org.xianshen.mumirrorb.pojo.DO.TodoRegistry;
 
@@ -11,90 +13,79 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * 待办登记 Mapper（todo-registry-design.md §2/§3.2）
- *
- * <p>核心查询 selectOpenTodos 是判别期注入清单的唯一口径：</p>
- * <ul>
- *   <li>current_status != 'completed'（完成的不注入）</li>
- *   <li>JOIN chunks 判 orphan：原 chunk 被删（registry.source_chunk_id 置 NULL
- *       或 chunk 物理不存在）→ <b>排除</b>（orphan 关闭逻辑不物理改行，JOIN 实现）</li>
- *   <li>登记时间最近优先，LIMIT 20（判别注入 prompt 膨胀防线）</li>
- * </ul>
- */
+/** Active independent todos and authorized record todos share hints/chains; record orphans stay visible only in the full list. */
 @Mapper
 public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
 
-    /**
-     * 未完成待办清单（Classify 判别期注入 + GET /todos 列表共用口径）
-     *
-     * <p>orphan 判据：INNER JOIN chunks（source_chunk_id IS NOT NULL 且 chunk 存在即关联；
-     * chunks 物理删除后 INNER JOIN 天然排除，registry 行保留不动）。</p>
-     *
-     * @param limit 注入上限（判别期 20；列表侧传大值如 200 全量）
-     */
+    @Update("""
+            UPDATE todo_registry SET title = #{command.title}, notes = #{command.notes}, due_at = #{command.dueAt},
+                current_status = #{command.currentStatus},
+                closed_at = CASE WHEN #{command.currentStatus} = 'completed' THEN COALESCE(closed_at, now()) ELSE NULL END,
+                updated_at = now(), version = version + 1
+            WHERE id = #{todoId} AND user_id = #{userId}::uuid AND version = #{expectedVersion} AND deleted_at IS NULL
+            """)
+    int updateVersioned(@Param("userId") UUID userId, @Param("todoId") Long todoId,
+                        @Param("expectedVersion") long expectedVersion, @Param("command") TodoCommandDTO command);
+
+    @Update("""
+            UPDATE todo_registry SET deleted_at = now(), updated_at = now(), version = version + 1
+            WHERE id = #{todoId} AND user_id = #{userId}::uuid AND version = #{expectedVersion} AND deleted_at IS NULL
+            """)
+    int deleteVersioned(@Param("userId") UUID userId, @Param("todoId") Long todoId,
+                        @Param("expectedVersion") long expectedVersion);
+
     @Select("""
             SELECT t.id AS todoId,
                    t.user_id AS userId,
                    t.title AS title,
+                   t.origin_kind AS originKind, t.version AS version, t.notes AS notes, t.due_at AS dueAt,
                    t.current_status AS currentStatus,
                    t.source_chunk_id AS sourceChunkId,
+                   (t.origin_kind = 'record' AND c.id IS NULL) AS orphan,
                    c.segment AS sourceExcerpt,
                    c.metadata->>'summary' AS sourceSummary,
                    TO_CHAR(t.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt,
                    t.closed_at AS closedAt
             FROM todo_registry t
-            JOIN chunks c ON c.id = t.source_chunk_id
+            LEFT JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.user_id = #{userId}::uuid
               AND t.current_status != 'completed'
               AND t.deleted_at IS NULL
-              AND c.todo_approved = TRUE
+              AND (t.origin_kind = 'direct' OR (t.origin_kind = 'record' AND c.todo_approved = TRUE AND c.user_id = t.user_id))
             ORDER BY t.created_at DESC, t.id DESC
             LIMIT #{limit}
             """)
     List<TodoRegistryDTO.TodoItem> selectOpenTodos(@Param("userId") UUID userId,
                                                    @Param("limit") int limit);
 
-    /**
-     * 未完成待办基础行（GET /todos/open-chain 证据链聚合第一段查询）
-     *
-     * <p>口径与 selectOpenTodos 完全一致（current_status != 'completed' + INNER JOIN chunks
-     * 天然排除 orphan + created_at DESC, id DESC），仅两点差异：</p>
-     * <ul>
-     *   <li>currentStatus 即 <b>registry.current_status</b>（todo-status-removal-design.md §11：
-     *       待办状态类读取统一以 registry 为准，chunk.metadata.taskStatus 只是"登记时初值"，
-     *       状态变更只写 registry，chunk 快照会过期）。原"取 chunk 实时值 + 脏值回退 registry"
-     *       的双源逻辑已移除，Service 侧只对 registry 脏值兜底 not_started。</li>
-     *   <li>created_at 输出 yyyy-MM-dd HH:mm:ss（Asia/Shanghai，AT TIME ZONE 口径照 ProfileStatsMapper）</li>
-     * </ul>
-     */
     @Select("""
             SELECT t.id AS todoId,
                    t.title AS title,
+                   t.origin_kind AS originKind, t.version AS version, t.notes AS notes, t.due_at AS dueAt,
                    t.current_status AS currentStatus,
                    t.source_chunk_id AS sourceChunkId,
+                   (t.origin_kind = 'record' AND c.id IS NULL) AS orphan,
                    TO_CHAR(t.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS createdAt
             FROM todo_registry t
-            JOIN chunks c ON c.id = t.source_chunk_id
+            LEFT JOIN chunks c ON c.id = t.source_chunk_id
             WHERE t.user_id = #{userId}::uuid
               AND t.current_status != 'completed'
               AND t.deleted_at IS NULL
-              AND c.todo_approved = TRUE
+              AND (t.origin_kind = 'direct' OR (t.origin_kind = 'record' AND c.todo_approved = TRUE AND c.user_id = t.user_id))
             ORDER BY t.created_at DESC, t.id DESC
             LIMIT #{limit}
             """)
     List<Map<String, Object>> selectOpenChainBase(@Param("userId") UUID userId,
                                                   @Param("limit") int limit);
 
-    /**
-     * 单条登记行（带 source chunk 摘要；ownership 过滤在 SQL 层——非本人查不到，防存在性探测）
-     */
     @Select("""
             SELECT t.id AS todoId,
                    t.user_id AS userId,
                    t.title AS title,
+                   t.origin_kind AS originKind, t.version AS version, t.notes AS notes, t.due_at AS dueAt,
                    t.current_status AS currentStatus,
                    t.source_chunk_id AS sourceChunkId,
+                   (t.origin_kind = 'record' AND c.id IS NULL) AS orphan,
                    c.segment AS sourceExcerpt,
                    c.metadata->>'summary' AS sourceSummary,
                    TO_CHAR(t.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt,
@@ -108,22 +99,14 @@ public interface TodoRegistryMapper extends BaseMapper<TodoRegistry> {
     TodoRegistryDTO.TodoItem selectOneByUser(@Param("todoId") Long todoId,
                                              @Param("userId") UUID userId);
 
-    /**
-     * 全部登记行（含 completed/orphan；GET /todos 全量列表）
-     *
-     * <p>JOIN LATERAL 计 evidence 关联数；isOrphan = source chunk 已被物理删除
-     * （LEFT JOIN 不上即 true，行保留但不进注入清单）。</p>
-     *
-     * <p>排序（todo-status-removal-design.md §10）：<b>未完成在前</b>——PG 布尔 false &lt; true，
-     * {@code (current_status = 'completed')} 升序即未完成（false）优先；同组内 created_at DESC。
-     * 过滤（deleted_at IS NULL）与返回字段不变。</p>
-     */
     @Select("""
             SELECT t.id AS todoId,
                    t.user_id AS userId,
                    t.title AS title,
+                   t.origin_kind AS originKind, t.version AS version, t.notes AS notes, t.due_at AS dueAt,
                    t.current_status AS currentStatus,
                    t.source_chunk_id AS sourceChunkId,
+                   (t.origin_kind = 'record' AND c.id IS NULL) AS orphan,
                    c.segment AS sourceExcerpt,
                    c.metadata->>'summary' AS sourceSummary,
                    TO_CHAR(t.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt,

@@ -301,13 +301,18 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_user ON tool_calls(user_id, created_at
 CREATE TABLE IF NOT EXISTS todo_registry (
     id BIGSERIAL PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title VARCHAR(100) NOT NULL,              -- 来自 chunk metadata.title
+    title VARCHAR(200) NOT NULL,
+    origin_kind VARCHAR(16) NOT NULL DEFAULT 'record' CHECK (origin_kind IN ('record', 'direct')),
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    notes TEXT,
+    due_at TIMESTAMPTZ,
     current_status VARCHAR(20) NOT NULL DEFAULT 'not_started',  -- not_started/in_progress/completed
     source_chunk_id BIGINT REFERENCES chunks(id) ON DELETE SET NULL,  -- 原始待办片段；被删→orphan 关闭
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     closed_at TIMESTAMPTZ,                    -- completed 时刻（追溯）
-    deleted_at TIMESTAMPTZ                    -- 软删时间戳（保留行；所有视图过滤；todo-status-removal-design.md）
+    deleted_at TIMESTAMPTZ,                    -- registry is authoritative; sources remain read only
+    CHECK (origin_kind != 'direct' OR source_chunk_id IS NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_todo_reg_user ON todo_registry(user_id, current_status);
 -- 活行部分索引：查询口径一律 deleted_at IS NULL，命中该索引避免全表筛

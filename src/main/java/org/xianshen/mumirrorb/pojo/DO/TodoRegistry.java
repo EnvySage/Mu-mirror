@@ -14,19 +14,7 @@ import org.xianshen.mumirrorb.common.handler.UuidTypeHandler;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-/**
- * 待办登记实体（对应 todo_registry 表，todo-registry-design.md §2）
- *
- * <p>跨日记待办状态跟踪的状态实体。核心哲学（设计稿 §1 裁决）：</p>
- * <ul>
- *   <li>真源唯一（裁决 #33）：chunk.metadata.taskStatus 保持唯一真源，
- *       registry.current_status 是索引（物化），状态变更时事务内双写</li>
- *   <li>独立 todo 字典，不混 user_terms（裁决 #1）：有生命周期的状态实体，
- *       非解释性词条（top30 注入对话），混用挤占注入上限</li>
- *   <li>orphan 语义：source_chunk_id 被删（ON DELETE SET NULL）→ 注册表行保留，
- *       注入清单 JOIN 排除（不物理改行）</li>
- * </ul>
- */
+/** Current todo state, with explicit record/direct origin and an optimistic version. */
 @Data
 @Builder
 @NoArgsConstructor
@@ -48,7 +36,17 @@ public class TodoRegistry {
     @Schema(description = "待办标题", example = "补作业")
     private String title;
 
-    /** 当前状态（物化索引；not_started/in_progress/completed） */
+    @Builder.Default
+    private String originKind = "record";
+
+    @Builder.Default
+    private Long version = 1L;
+
+    private String notes;
+
+    private OffsetDateTime dueAt;
+
+    /** 当前状态（真源；not_started/in_progress/completed） */
     @Schema(description = "当前状态", example = "not_started",
             allowableValues = {"not_started", "in_progress", "completed"})
     private String currentStatus;
@@ -72,7 +70,7 @@ public class TodoRegistry {
      *
      * <p>删除 = 特例（侧栏直删+弹框）：registry 行保留 + deleted_at 落值（不动 auto 已定稿代码）。
      * 非 null = 已删除：所有视图（清单/注入/证据链/统计）过滤，不再产生新建议、不可改状态。
-     * 源头片段 metadata 另加 {@code todoRemoved: true} 标记（chunk 口径统计排除）。</p>
+     * 来源片段保留，只更新本表和关联建议。</p>
      */
     @Schema(description = "软删时间戳（非 null = 已删除）")
     private OffsetDateTime deletedAt;

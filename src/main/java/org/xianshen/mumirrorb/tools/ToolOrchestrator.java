@@ -53,6 +53,10 @@ public class ToolOrchestrator {
      * @return 执行结果列表（空 = 本轮无工具；上层旧对话路径继续执行 RAG）
      */
     public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, String question) {
+        return planAndExecute(userId, sessionId, null, question);
+    }
+
+    public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
         try {
             // 0. 未配置 LLM 直接跳过（与每日总结幂等口径一致）
@@ -113,7 +117,7 @@ public class ToolOrchestrator {
                     log.info("recall_item 未给 vault_item_id，自动接 find_item 命中 id={}", lastFoundItemId);
                 }
                 try {
-                    ToolExecutionResult result = executor.get().execute(userId, args);
+                    ToolExecutionResult result = executeAllowed(executor.get(), userId, sessionId, sourceMessageId, args);
                     long latency = System.currentTimeMillis() - start;
                     auditService.record(userId, sessionId, toolName, args,
                             result.getSummary(), result.isSuccess(), latency);
@@ -161,7 +165,7 @@ public class ToolOrchestrator {
                 autoArgs.put("query", question);
                 long start = System.currentTimeMillis();
                 try {
-                    ToolExecutionResult auto = recallExecutor.get().execute(userId, autoArgs);
+                    ToolExecutionResult auto = executeAllowed(recallExecutor.get(), userId, sessionId, sourceMessageId, autoArgs);
                     auditService.record(userId, sessionId, "recall_item", autoArgs,
                             auto.getSummary(), auto.isSuccess(), System.currentTimeMillis() - start);
                     results.add(CommonProto.ToolResult.newBuilder()
@@ -239,6 +243,12 @@ public class ToolOrchestrator {
      * @return 累积的工具结果（空 = 本轮无工具；上层仍调用 Chat 生成回答）
      */
     public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, String question,
+                                                      List<MirrorChatProto.ChatMessage> history,
+                                                      StepListener listener) {
+        return loopAndExecute(userId, sessionId, null, question, history, listener);
+    }
+
+    public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
                                                       List<MirrorChatProto.ChatMessage> history,
                                                       StepListener listener) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
@@ -355,7 +365,7 @@ public class ToolOrchestrator {
                         recallExecuted = true;
                     }
                     try {
-                        ToolExecutionResult result = executor.get().execute(userId, args);
+                        ToolExecutionResult result = executeAllowed(executor.get(), userId, sessionId, sourceMessageId, args);
                         long latency = System.currentTimeMillis() - callStart;
                         // 审计一步不漏（成功/失败都落 tool_calls，论文的步数/成功率/延迟素材）
                         auditService.record(userId, sessionId, toolName, args,
@@ -418,7 +428,7 @@ public class ToolOrchestrator {
                     autoArgs.put("query", question);
                     long start = System.currentTimeMillis();
                     try {
-                        ToolExecutionResult auto = recallExecutor.get().execute(userId, autoArgs);
+                        ToolExecutionResult auto = executeAllowed(recallExecutor.get(), userId, sessionId, sourceMessageId, autoArgs);
                         // 审计要认得出这是兜底补的（args 加标记 + summary 前缀）：论文里
                         // "模型自己续的" 和 "执行器补的" 不能混成一个数
                         Map<String, Object> auditArgs = new java.util.LinkedHashMap<>(autoArgs);
@@ -507,6 +517,34 @@ public class ToolOrchestrator {
         } catch (Exception e) {
             return tool + "#" + String.valueOf(args);
         }
+    }
+
+    /** Every planned and automatic call passes the Java effect gate. Model arguments carry no authority. */
+    private ToolExecutionResult executeAllowed(ToolExecutor executor, UUID userId, UUID sessionId,
+                                               Long sourceMessageId, Map<String, Object> args) throws Exception {
+        if (args == null || hasAuthorityArgument(args)) throw new IllegalArgumentException("Untrusted authority argument");
+        if (executor.effect() == ToolEffect.READ) return executor.execute(userId, args);
+        if (executor.effect() != ToolEffect.PREPARE_WRITE) throw new IllegalArgumentException("Tool effect is not allowed");
+        if (sessionId == null || sourceMessageId == null) throw new IllegalArgumentException("Preparation requires a persisted user turn");
+        String normalized = objectMapper.writer().with(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+                .writeValueAsString(args);
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest((executor.name() + "#" + normalized).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String key = "tool:" + sourceMessageId + ":" + java.util.HexFormat.of().formatHex(digest);
+        return executor.execute(userId, args, new ToolCallContext(sessionId, sourceMessageId, key));
+    }
+
+    private boolean hasAuthorityArgument(Object value) {
+        if (value instanceof Map<?,?> map) {
+            for (var entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey()).replace("_", "").toLowerCase(java.util.Locale.ROOT);
+                if (java.util.Set.of("userid", "confirmed", "confirmation", "preparekey", "sourcesessionid", "sourcemessageid", "requestid").contains(key)
+                        || hasAuthorityArgument(entry.getValue())) return true;
+            }
+        } else if (value instanceof Iterable<?> list) {
+            for (Object child : list) if (hasAuthorityArgument(child)) return true;
+        }
+        return false;
     }
 
     private Map<String, Object> parseArgs(String argsJson) throws Exception {

@@ -124,7 +124,7 @@ public class ChatServiceImpl implements ChatService {
             ChatSession session = resolveSession(userId, dto.getSessionId(), question);
 
             // 2. user 消息落库（先落，失败重试时历史不丢）
-            insertMessage(userId, session.getId(), "user", question, null);
+            Long sourceMessageId = insertMessage(userId, session.getId(), "user", question, null);
 
             boolean loopEnabled = vaultProperties.isChatLoopEnabled();
             MirrorChatProto.ExtractIntentResponse intent = null;
@@ -147,7 +147,7 @@ public class ChatServiceImpl implements ChatService {
             // 3.5 旧 PlanTools 单次规划（chat-loop-design.md 裁决 0.4 的回滚路径）：
             // 顺序、事件序都保持改造前原样——检索之前一次性规划，失败/空计划 → 空列表走纯 RAG
             if (!loopEnabled) {
-                toolResults = toolOrchestrator.planAndExecute(userId, session.getId(), question);
+                toolResults = toolOrchestrator.planAndExecute(userId, session.getId(), sourceMessageId, question);
                 java.util.List<String> toolsUsed = toolResults.stream()
                         .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
                         .map(CommonProto.ToolResult::getSummary)
@@ -175,7 +175,7 @@ public class ChatServiceImpl implements ChatService {
             if (loopEnabled) {
                 final String routeUpper = route.toUpperCase();
                 final UUID sid = session.getId();
-                toolResults = toolOrchestrator.loopAndExecute(userId, sid, question,
+                toolResults = toolOrchestrator.loopAndExecute(userId, sid, sourceMessageId, question,
                         planHistory(sid, userId),
                         new org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener() {
                             @Override
@@ -630,23 +630,23 @@ public class ChatServiceImpl implements ChatService {
         return session;
     }
 
-    private void insertMessage(UUID userId, UUID sessionId, String role, String content,
+    private Long insertMessage(UUID userId, UUID sessionId, String role, String content,
                                List<Map<String, Object>> sources) {
-        insertMessage(userId, sessionId, role, content, sources, null, null, false);
+        return insertMessage(userId, sessionId, role, content, sources, null, null, false);
     }
 
-    private void insertMessage(UUID userId, UUID sessionId, String role, String content,
+    private Long insertMessage(UUID userId, UUID sessionId, String role, String content,
                                List<Map<String, Object>> sources,
                                List<Map<String, Object>> toolsUsed,
                                List<Map<String, Object>> vaultRefs) {
-        insertMessage(userId, sessionId, role, content, sources, toolsUsed, vaultRefs, false);
+        return insertMessage(userId, sessionId, role, content, sources, toolsUsed, vaultRefs, false);
     }
 
     /**
      * @param isFallback true = 系统兜底文案，落 {@code conversation_history.is_fallback}，
      *                   后续轮次加载历史时跳过（§6.2）
      */
-    private void insertMessage(UUID userId, UUID sessionId, String role, String content,
+    private Long insertMessage(UUID userId, UUID sessionId, String role, String content,
                                List<Map<String, Object>> sources,
                                List<Map<String, Object>> toolsUsed,
                                List<Map<String, Object>> vaultRefs,
@@ -663,6 +663,7 @@ public class ChatServiceImpl implements ChatService {
                 .createdAt(OffsetDateTime.now(ZONE))
                 .build();
         historyMapper.insert(message);
+        return message.getId();
     }
 
     /**

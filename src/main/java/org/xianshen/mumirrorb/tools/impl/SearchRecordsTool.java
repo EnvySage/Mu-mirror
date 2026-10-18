@@ -30,6 +30,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SearchRecordsTool implements ToolExecutor {
 
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
+
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int MAX_LIMIT = 20;
     private static final double DEFAULT_HALF_LIFE = 30.0;

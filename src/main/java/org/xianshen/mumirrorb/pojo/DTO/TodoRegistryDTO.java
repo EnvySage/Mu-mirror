@@ -28,6 +28,10 @@ public final class TodoRegistryDTO {
     @AllArgsConstructor
     @Schema(description = "待办条目")
     public static class TodoItem {
+        private String originKind;
+        private Long version;
+        private String notes;
+        private OffsetDateTime dueAt;
         @Schema(description = "登记ID", example = "1")
         private Long todoId;
 

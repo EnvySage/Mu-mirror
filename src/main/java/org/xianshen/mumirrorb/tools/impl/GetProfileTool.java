@@ -31,6 +31,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class GetProfileTool implements ToolExecutor {
 
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
+
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
 

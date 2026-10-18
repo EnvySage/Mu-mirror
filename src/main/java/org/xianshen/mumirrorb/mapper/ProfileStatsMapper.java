@@ -24,38 +24,23 @@ import java.util.List;
 @Mapper
 public interface ProfileStatsMapper {
 
-    /**
-     * 未完成待办（<b>registry 口径</b>：todo-status-removal-design.md §11）
-     *
-     * <p>主表 = todo_registry（状态真源），chunks/records 只补展示字段（title/summary/recordId/createdAt）：</p>
-     * <ul>
-     *   <li>状态取 {@code t.current_status != 'completed'}——chunk.metadata.taskStatus 只是"登记时初值"，
-     *       状态变更只更新 registry，chunk 快照会过期（统计不准的根因，2026-09-12 用户实测）</li>
-     *   <li>{@code t.deleted_at IS NULL}：软删待办不可见；删除时同时打的 chunk 标记
-     *       {@code todoRemoved} 无需重复过滤（registry 软删即是权威判据）</li>
-     *   <li>INNER JOIN chunks（source_chunk_id）：天然排除 orphan，与
-     *       {@code TodoRegistryMapper.selectOpenTodos} 同口径；registry 行只由 todo/plan
-     *       片段登记产生（TodoRegistryServiceImpl.registerFromRecord），无需再判 contentType</li>
-     *   <li>records 侧过滤保留（source='user'、status='done'、deleted_at IS NULL）：消费口径收口</li>
-     * </ul>
-     */
+    // Registry state is authoritative. Direct rows require no source; record rows retain source authorization filters.
     @Select("""
             SELECT r.id AS recordId,
-                   COALESCE(c.metadata->>'title', t.title) AS title,
-                   c.metadata->>'summary' AS summary,
+                   t.title AS title,
+                   COALESCE(t.notes, c.metadata->>'summary') AS summary,
                    t.current_status AS taskStatus,
-                   TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
+                   TO_CHAR(COALESCE(r.created_at, t.created_at), 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
             FROM todo_registry t
-            JOIN chunks c ON c.id = t.source_chunk_id
-            JOIN records r ON r.id = c.record_id
+            LEFT JOIN chunks c ON c.id = t.source_chunk_id
+            LEFT JOIN records r ON r.id = c.record_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
               AND t.current_status != 'completed'
-              AND r.deleted_at IS NULL
-              AND r.source = 'user'
-              AND r.status = 'done'
-              AND c.todo_approved = TRUE
-            ORDER BY r.created_at DESC, c.id DESC
+              AND (t.origin_kind = 'direct' OR (t.origin_kind = 'record'
+                   AND r.deleted_at IS NULL AND r.source = 'user' AND r.status = 'done'
+                   AND c.todo_approved = TRUE AND c.user_id = t.user_id AND r.user_id = t.user_id))
+            ORDER BY COALESCE(r.created_at, t.created_at) DESC, t.id DESC
             LIMIT 50
             """)
     List<ProfileStatsDTO.TodoItemDTO> selectOpenTodos(@Param("userId") java.util.UUID userId);
@@ -90,25 +75,17 @@ public interface ProfileStatsMapper {
     })
     List<SnapshotSourceRef> selectTodoSourceRefs(@Param("userId") java.util.UUID userId);
 
-    /**
-     * 待办状态计数（<b>registry 口径</b>：todo-status-removal-design.md §11）
-     *
-     * <p>状态取 {@code t.current_status}（NOT NULL DEFAULT 'not_started'，无需 COALESCE），
-     * total = 各状态之和（含 completed）；JOIN/filter 口径与 {@link #selectOpenTodos} 完全一致
-     * （仅不排除 completed——计数卡要展示完成数）。</p>
-     */
     @Select("""
             SELECT t.current_status AS status,
                    COUNT(*) AS count
             FROM todo_registry t
-            JOIN chunks c ON c.id = t.source_chunk_id
-            JOIN records r ON r.id = c.record_id
+            LEFT JOIN chunks c ON c.id = t.source_chunk_id
+            LEFT JOIN records r ON r.id = c.record_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
-              AND r.deleted_at IS NULL
-              AND r.source = 'user'
-              AND r.status = 'done'
-              AND c.todo_approved = TRUE
+              AND (t.origin_kind = 'direct' OR (t.origin_kind = 'record'
+                   AND r.deleted_at IS NULL AND r.source = 'user' AND r.status = 'done'
+                   AND c.todo_approved = TRUE AND c.user_id = t.user_id AND r.user_id = t.user_id))
             GROUP BY 1
             """)
     List<java.util.Map<String, Object>> selectTodoStatusCounts(@Param("userId") java.util.UUID userId);

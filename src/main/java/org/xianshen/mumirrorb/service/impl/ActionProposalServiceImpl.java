@@ -56,6 +56,7 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         payload(body.getPayload());
         source(userId, body.getSourceSessionId(), body.getSourceMessageId());
         JsonNode preview = preview(handler, userId, body.getKind(), body.getPayload());
+        handler.validatePreparation(body.getKind(), body.getPayload(), preview);
         ActionProposal proposal = new ActionProposal();
         proposal.setId(UUID.randomUUID());
         proposal.setUserId(userId);
@@ -89,6 +90,7 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         ready(proposal);
         payload(body.getPayload());
         JsonNode preview = preview(handler(proposal.getKind()), userId, proposal.getKind(), body.getPayload());
+        handler(proposal.getKind()).validatePreparation(proposal.getKind(), body.getPayload(), preview);
         int version = proposal.getVersion();
         proposal.setPayload(body.getPayload().deepCopy());
         proposal.setPreview(preview);

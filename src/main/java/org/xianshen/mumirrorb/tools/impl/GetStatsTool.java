@@ -21,6 +21,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class GetStatsTool implements ToolExecutor {
 
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
+
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ProfileStatsMapper statsMapper;

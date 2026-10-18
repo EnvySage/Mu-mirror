@@ -105,6 +105,7 @@ class ChatLoopTest {
     private ToolExecutor stubTool(String name, String summary, Map<String, Object> payload)
             throws Exception {
         ToolExecutor executor = mock(ToolExecutor.class);
+        when(executor.effect()).thenReturn(org.xianshen.mumirrorb.tools.ToolEffect.READ);
         when(executor.name()).thenReturn(name);
         when(executor.execute(eq(USER_ID), any())).thenAnswer(inv -> {
             timeline.add("exec:" + name);
@@ -221,6 +222,7 @@ class ChatLoopTest {
         props.setMaxLoopSteps(4);
         props.setLoopBudgetMs(30); // 一步执行就会吃穿预算
         ToolExecutor slow = mock(ToolExecutor.class);
+        when(slow.effect()).thenReturn(org.xianshen.mumirrorb.tools.ToolEffect.READ);
         when(slow.name()).thenReturn("search_records");
         when(slow.execute(eq(USER_ID), any())).thenAnswer(inv -> {
             timeline.add("exec:search_records");
@@ -294,6 +296,7 @@ class ChatLoopTest {
     @DisplayName("工具执行抛异常 → 该步跳过并落失败审计，循环继续，不打穿上层")
     void toolThrows_loopContinues() throws Exception {
         ToolExecutor boom = mock(ToolExecutor.class);
+        when(boom.effect()).thenReturn(org.xianshen.mumirrorb.tools.ToolEffect.READ);
         when(boom.name()).thenReturn("search_records");
         when(boom.execute(eq(USER_ID), any())).thenThrow(new RuntimeException("db down"));
         when(registry.get("search_records")).thenReturn(Optional.of(boom));
@@ -530,6 +533,7 @@ class ChatLoopTest {
     @DisplayName("兜底补读④：find_item 失败 / 零命中拿不到 vault_item_id → 不补")
     void backstop_skipped_whenFindItemFailed() throws Exception {
         ToolExecutor failing = mock(ToolExecutor.class);
+        when(failing.effect()).thenReturn(org.xianshen.mumirrorb.tools.ToolEffect.READ);
         when(failing.name()).thenReturn("find_item");
         when(failing.execute(eq(USER_ID), any())).thenAnswer(inv -> {
             timeline.add("exec:find_item");

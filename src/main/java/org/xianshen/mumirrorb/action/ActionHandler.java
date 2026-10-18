@@ -17,6 +17,9 @@ public interface ActionHandler {
      */
     JsonNode validateAndPreview(UUID userId, String kind, JsonNode payload);
 
+    /** Preparation/edit-only preconditions; confirmation rechecks the authoritative snapshot. */
+    default void validatePreparation(String kind, JsonNode payload, JsonNode preview) {}
+
     /**
      * All domain SQL and durable async job enqueueing MUST join the confirmation transaction.
      * No REQUIRES_NEW, unmanaged external effect, or dispatch before commit. Async result

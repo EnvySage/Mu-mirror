@@ -20,6 +20,7 @@ import org.xianshen.mumirrorb.pojo.DO.TodoRegistry;
 import org.xianshen.mumirrorb.pojo.DO.TodoRegistryLink;
 import org.xianshen.mumirrorb.pojo.DO.TodoSuggestion;
 import org.xianshen.mumirrorb.pojo.DTO.TodoRegistryDTO;
+import org.xianshen.mumirrorb.pojo.DTO.TodoCommandDTO;
 import org.xianshen.mumirrorb.pojo.DTO.TodoResolutionDTO;
 import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
@@ -38,19 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * 待办登记服务实现（todo-registry-design.md §3/§4-B）
- *
- * <p>核心裁决落地：</p>
- * <ul>
- *   <li>真源唯一（#33）：状态变更一律双写——chunk.metadata.taskStatus（真源，定向 SET 不触发
- *       classified_segment 重置，5.3 既有语义：元数据变更不影响文本状态机）
- *       + registry.current_status（物化索引）</li>
- *   <li>关联是用户背书的产物（#22 一脉）：origin 登记时落，evidence 只在 resolve confirmed 落</li>
- *   <li>dismissed 永久静默（#5）：同一 evidence chunk 不再提示；新证据（新 chunk）可再建议</li>
- *   <li>完成时刻 closed_at 用 Asia/Shanghai（ZONE 模式照 VaultServiceImpl）</li>
- * </ul>
- */
+/** Registry owns current todo state. Source chunks remain immutable historical evidence. */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -59,17 +48,11 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /** 注入上限（§3.2：判别期 prompt 膨胀防线） */
     static final int HINT_LIMIT = 20;
-    /** 判别期原始片段摘要截断（§3.2：100 字符） */
     static final int EXCERPT_LIMIT = 100;
-    /** 建议卡片段展示截断 */
     static final int CARD_EXCERPT_LIMIT = 160;
-    /** 证据链片段摘录截断（GET /todos/open-chain 契约：60 字符） */
     static final int CHAIN_EXCERPT_LIMIT = 60;
-    /** 证据链返回上限（侧栏全量口径；列表侧传大值，同 GET /todos 不限 20 的语义） */
     static final int CHAIN_LIMIT = 200;
-    /** 三态合法值 */
     private static final Set<String> VALID_STATUSES = Set.of("not_started", "in_progress", "completed");
 
     private final TodoRegistryMapper registryMapper;
@@ -77,6 +60,84 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     private final TodoSuggestionMapper suggestionMapper;
     private final ChunkMapper chunkMapper;
     private final RecordMapper recordMapper;
+
+    @Override
+    @Transactional
+    public TodoItemVO createDirect(UUID userId, TodoCommandDTO command) {
+        if (command == null) throw new BusinessException(ResultCode.PARAM_ERROR, "缺少待办内容");
+        if (command.getCurrentStatus() == null) command.setCurrentStatus("not_started");
+        command.validate();
+        OffsetDateTime now = OffsetDateTime.now(ZONE);
+        TodoRegistry todo = TodoRegistry.builder().userId(userId).title(command.getTitle().trim())
+                .notes(command.getNotes()).dueAt(command.getDueAt()).currentStatus(command.getCurrentStatus())
+                .originKind("direct").version(1L).createdAt(now).updatedAt(now)
+                .closedAt("completed".equals(command.getCurrentStatus()) ? now : null).build();
+        registryMapper.insert(todo);
+        return item(todo);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public TodoRegistry ownedActive(UUID userId, Long todoId) {
+        TodoRegistry todo = ownedSnapshot(userId, todoId);
+        if (todo.getDeletedAt() != null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "待办不存在");
+        return todo;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public TodoRegistry ownedSnapshot(UUID userId, Long todoId) {
+        TodoRegistry todo = registryMapper.selectById(todoId);
+        if (todo == null || !userId.equals(todo.getUserId()))
+            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "待办不存在");
+        return todo;
+    }
+
+    @Override
+    @Transactional
+    public TodoItemVO updateDirect(UUID userId, Long todoId, long expectedVersion, TodoCommandDTO command) {
+        TodoRegistry todo = ownedActive(userId, todoId);
+        if (command == null) throw new BusinessException(ResultCode.PARAM_ERROR, "缺少待办内容");
+        if (command.getTitle() == null) command.setTitle(todo.getTitle());
+        if (command.getCurrentStatus() == null) command.setCurrentStatus(todo.getCurrentStatus());
+        if (!command.isNotesProvided()) command.setNotes(todo.getNotes());
+        if (!command.isDueAtProvided()) command.setDueAt(todo.getDueAt());
+        command.validate();
+        if (expectedVersion < 1 || !Long.valueOf(expectedVersion).equals(todo.getVersion())
+                || registryMapper.updateVersioned(userId, todoId, expectedVersion, command) != 1)
+            throw new BusinessException(409, "待办已变更，请刷新后重新确认");
+        todo.setTitle(command.getTitle().trim()); todo.setNotes(command.getNotes()); todo.setDueAt(command.getDueAt());
+        todo.setCurrentStatus(command.getCurrentStatus()); todo.setVersion(expectedVersion + 1);
+        todo.setClosedAt("completed".equals(command.getCurrentStatus())
+                ? (todo.getClosedAt() == null ? OffsetDateTime.now(ZONE) : todo.getClosedAt()) : null);
+        return item(todo);
+    }
+
+    @Override
+    @Transactional
+    public void deleteTodo(Long todoId, UUID userId, long expectedVersion) {
+        TodoRegistry todo = ownedActive(userId, todoId);
+        if (expectedVersion < 1 || !Long.valueOf(expectedVersion).equals(todo.getVersion())
+                || registryMapper.deleteVersioned(userId, todoId, expectedVersion) != 1)
+            throw new BusinessException(409, "待办已变更，请刷新后重新确认");
+        dismissPending(todoId, OffsetDateTime.now(ZONE));
+    }
+
+    private void dismissPending(Long todoId, OffsetDateTime now) {
+        suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
+                .eq(TodoSuggestion::getTodoId, todoId).eq(TodoSuggestion::getStatus, "pending")
+                .set(TodoSuggestion::getStatus, "dismissed").set(TodoSuggestion::getResolvedAt, now));
+    }
+
+    private TodoItemVO item(TodoRegistry todo) {
+        return TodoItemVO.builder().id(todo.getId()).title(todo.getTitle()).originKind(todo.getOriginKind())
+                .version(todo.getVersion()).notes(todo.getNotes())
+                .dueAt(todo.getDueAt() == null ? null : todo.getDueAt().toString())
+                .currentStatus(todo.getCurrentStatus()).sourceChunkId(todo.getSourceChunkId())
+                .orphan("record".equals(todo.getOriginKind()) && todo.getSourceChunkId() == null)
+                .createdAt(todo.getCreatedAt() == null ? null : todo.getCreatedAt().toString())
+                .closedAt(todo.getClosedAt() == null ? null : todo.getClosedAt().toString()).build();
+    }
 
     // ==================== 登记期（§3.1 零门禁） ====================
 
@@ -115,6 +176,8 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                     .userId(userId)
                     .title(trunc(title, 100))
                     .currentStatus(taskStatus)
+                    .originKind("record")
+                    .version(1L)
                     .sourceChunkId(chunk.getId())
                     .createdAt(OffsetDateTime.now(ZONE))
                     .updatedAt(OffsetDateTime.now(ZONE))
@@ -212,11 +275,6 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         }
     }
 
-    /**
-     * 确认：事务内五写——① （todo 存在时）终态回写源头片段 taskStatus（新需求，补齐现状缺口）
-     * ② chunk.metadata.taskStatus（证据片段真源，定向改）③ registry.current_status
-     * 同步 + completed 时 closed_at ④ evidence 关联落库（用户背书才落）⑤ 建议行 confirmed
-     */
     private void doConfirm(TodoSuggestion suggestion, UUID userId, String status) {
         String newStatus = status != null && !status.isBlank()
                 ? normalizeStatus(status) : suggestion.getSuggestedStatus();
@@ -226,24 +284,10 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         OffsetDateTime now = OffsetDateTime.now(ZONE);
         Chunk evidenceChunk = chunkMapper.selectById(suggestion.getEvidenceChunkId());
 
-        // 已删除的 todo 不可改状态（防御；正常路径删除时 pending 建议已作废，
-        // todo==null 为脏数据，降级跳过源头回写）
-        TodoRegistry todo = registryMapper.selectById(suggestion.getTodoId());
-        if (todo != null) {
-            if (todo.getDeletedAt() != null) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, "该待办已删除，无法变更状态");
-            }
-            // ① 终态回写源头片段（todo-status-removal-design.md §5：补齐现状缺口——原建议裁决
-            //    路径只写 evidence 片段；source chunk 已删/orphan 时 patchChunkTaskStatus 内部跳过）
-            patchChunkTaskStatus(todo.getSourceChunkId(), newStatus);
-        }
-
-        // ② chunk.metadata.taskStatus（证据片段真源；定向 SET 不触发 classified_segment 重置——
-        //    元数据变更不影响文本状态机，5.3 既有语义；保留现状语义）
-        patchChunkTaskStatus(suggestion.getEvidenceChunkId(), newStatus);
-
-        // ③ registry.current_status 同步 + completed 时 closed_at
-        applyRegistryStatus(suggestion.getTodoId(), newStatus, now);
+        TodoRegistry todo = ownedActive(userId, suggestion.getTodoId());
+        if (evidenceChunk != null && !userId.equals(evidenceChunk.getUserId()))
+            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "证据不存在");
+        applyRegistryStatus(todo.getId(), newStatus, now);
 
         // ④ evidence 关联（用户背书才落；UNIQUE(todo_id, chunk_id) 已有 origin 时跳过）
         if (evidenceChunk != null
@@ -265,9 +309,6 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
                 suggestion.getTodoId(), suggestion.getEvidenceChunkId(), newStatus, userId);
     }
 
-    /**
-     * 忽略：建议行 dismissed（永久静默），todo 不动，关联不落
-     */
     private void doDismiss(TodoSuggestion suggestion) {
         OffsetDateTime now = OffsetDateTime.now(ZONE);
         suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
@@ -312,11 +353,15 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
             result.add(TodoItemVO.builder()
                     .id(longOf(row.get("todoid")))
                     .title(str(row.get("title")))
+                    .originKind(str(row.get("originkind")))
+                    .version(longOf(row.get("version")))
+                    .notes(str(row.get("notes")))
+                    .dueAt(str(row.get("dueat")))
                     .currentStatus(str(row.get("currentstatus")))
                     .sourceChunkId(longOf(row.get("sourcechunkid")))
                     .sourceExcerpt(trunc(firstNonBlank(str(row.get("sourceexcerpt")),
                             str(row.get("sourcesummary"))), EXCERPT_LIMIT))
-                    .orphan(row.get("sourcechunkid") == null)
+                    .orphan("record".equals(str(row.get("originkind"))) && (Boolean.TRUE.equals(row.get("orphan")) || row.get("sourcechunkid") == null))
                     .linkCount(longOf(row.get("linkcount")))
                     .pendingSuggestionCount(longOf(row.get("pendingcount")))
                     .createdAt(str(row.get("createdat")))
@@ -329,9 +374,7 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
     @Override
     @Transactional(readOnly = true)
     public List<TodoChainVO> listOpenChains(UUID userId) {
-        // ① open registry 基础行（selectOpenTodos 同口径：!= completed + INNER JOIN chunks 排 orphan，
-        //    createdAt DESC；currentStatus 取 registry 值——待办状态类读取统一 registry 口径，
-        //    todo-status-removal-design.md §11）
+        // Direct todos participate without a source; record orphans do not enter hints/chains.
         List<Map<String, Object>> bases = registryMapper.selectOpenChainBase(userId, CHAIN_LIMIT);
         if (bases.isEmpty()) {
             return List.of();
@@ -402,6 +445,10 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
             chains.add(TodoChainVO.builder()
                     .todoId(todoId)
                     .title(str(row.get("title")))
+                    .originKind(str(row.get("originkind")))
+                    .version(longOf(row.get("version")))
+                    .notes(str(row.get("notes")))
+                    .dueAt(str(row.get("dueat")))
                     .currentStatus(status)
                     .createdAt(str(row.get("createdat")))
                     .origin(origins.get(todoId)) // 理论必有；links 行丢失时判空不报错
@@ -421,26 +468,8 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         if (todo == null || !todo.getUserId().equals(userId)) {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "待办不存在");
         }
-        OffsetDateTime now = OffsetDateTime.now(ZONE);
-        if (todo.getDeletedAt() != null) {
-            log.info("待办已删除（幂等返回成功）：todo={}, 用户={}", todoId, userId);
-            return;
-        }
-        // ① registry 软删（行保留 + deleted_at；所有视图过滤）
-        registryMapper.update(null, new LambdaUpdateWrapper<TodoRegistry>()
-                .eq(TodoRegistry::getId, todoId)
-                .set(TodoRegistry::getDeletedAt, now)
-                .set(TodoRegistry::getUpdatedAt, now));
-        // ② 源头片段 metadata 加 todoRemoved=true（source_chunk_id 空 / chunk 不存在则跳过）
-        patchChunkTodoRemoved(todo.getSourceChunkId());
-        // ③ 该 todo 全部 pending 建议作废（永久静默；resolved_at 落）
-        suggestionMapper.update(null, new LambdaUpdateWrapper<TodoSuggestion>()
-                .eq(TodoSuggestion::getTodoId, todoId)
-                .eq(TodoSuggestion::getStatus, "pending")
-                .set(TodoSuggestion::getStatus, "dismissed")
-                .set(TodoSuggestion::getResolvedAt, now));
-        log.info("待办已删除（软删 + 源头标记 + pending 建议作废）：todo={}, title={}, 用户={}",
-                todoId, todo.getTitle(), userId);
+        if (todo.getDeletedAt() != null) return;
+        deleteTodo(todoId, userId, todo.getVersion());
     }
 
     // ==================== 审核窗口：记录确认应用待办决议 ====================
@@ -562,11 +591,6 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
 
     // ==================== 内部工具 ====================
 
-    /**
-     * 契约校验：每条决议的 suggestionId / todoId 恰好提供其一（都无 / 都有 → 400 防歧义）
-     *
-     * <p>先于一切副作用执行（含"记录无 chunk 短路"之前），保证非法 body 无论记录形态如何都报 400。</p>
-     */
     private void validateResolutions(List<TodoResolutionDTO> resolutions) {
         if (resolutions == null) {
             return;
@@ -584,23 +608,6 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         }
     }
 
-    /**
-     * 用户主动挂载：把已注册 todo 关联到本记录并同步其状态（todoResolutions 的 todoId 分支）
-     *
-     * <p>事务内（由 applyRecordResolutions 外层事务包裹）：</p>
-     * <ol>
-     *   <li>todo 不存在 / 非本人 / 已删除（deleted_at 非空）→ 静默忽略该条 + warn（防御，
-     *       不阻断 confirm；与"越窗忽略"防御哲学一致）</li>
-     *   <li>回写源头片段 taskStatus（真源；source chunk orphan 则跳过，惯例）</li>
-     *   <li>registry.current_status 物化 + closed_at（状态相同也统一走，幂等）</li>
-     *   <li>本记录<b>全部</b> chunk 落 evidence link（UNIQUE(todo_id, chunk_id) 已存在则跳过）</li>
-     *   <li>该 todo <b>全部</b> pending 建议一并置 confirmed + resolved_at（防孤儿建议；
-     *       与 deleteTodo 的"todo 级 pending 作废"对称——todo 状态已由用户直接拍板，
-     *       任何证据来源的待处理建议均不再有意义）</li>
-     * </ol>
-     *
-     * @return 本次被合并确认的建议 id 集合（供"未处理一律作废"排除，避免误将 confirmed 改回 dismissed）
-     */
     private Set<Long> mountTodo(Long todoId, UUID userId, String status, List<Long> recordChunkIds,
                                 OffsetDateTime now) {
         TodoRegistry todo = registryMapper.selectById(todoId);
@@ -614,9 +621,7 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         }
         // 调用方已保证 status 为合法三态
         String newStatus = normalizeStatus(status);
-        // ① 真源回写：源头片段 taskStatus（source chunk orphan 则内部跳过）
-        patchChunkTaskStatus(todo.getSourceChunkId(), newStatus);
-        // ② registry 物化 + closed_at（completed 落值 / 非 completed 清空；状态相同也幂等走）
+        // Current state changes only in the registry; evidence text stays immutable.
         applyRegistryStatus(todoId, newStatus, now);
         // ③ 本记录全部 chunk 落 evidence link（UNIQUE 已存在——含 origin——则跳过）
         int linked = 0;
@@ -649,66 +654,13 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         return confirmed;
     }
 
-    /**
-     * chunk.metadata.taskStatus 定向改（真源写）
-     *
-     * <p>与 ChunkServiceImpl.update 同款语义但只动 taskStatus 一个键。LambdaUpdateWrapper
-     * 的 .set(metadata) 传 Map 会走 hstore 默认 Handler（库无 hstore 扩展，实测报
-     * "No hstore extension installed"——updateById + autoResultMap 才走 JsonbMapTypeHandler），
-     * 故用 updateById 全实体回写：先查快照只改 taskStatus 键再落。与 DigestService 竞态
-     * 场景不同，这里改的是用户日记 chunk（无异步线程并发写 metadata），全列回写安全。</p>
-     *
-     * <p>不碰 classified_segment / user_edited——元数据变更不影响文本状态机（5.3 既有语义）。</p>
-     */
-    private void patchChunkTaskStatus(Long chunkId, String taskStatus) {
-        if (chunkId == null) {
-            return; // source chunk 已删（orphan）：真源不存在，registry 是唯一落点
-        }
-        Chunk chunk = chunkMapper.selectById(chunkId);
-        if (chunk == null) {
-            return;
-        }
-        Map<String, Object> metadata = chunk.getMetadata() == null
-                ? new java.util.HashMap<>() : chunk.getMetadata();
-        if ("not_started".equals(taskStatus)) {
-            metadata.remove("taskStatus"); // 缺省语义（COALESCE 口径），与 ChunkDTO 清空语义一致
-        } else {
-            metadata.put("taskStatus", taskStatus);
-        }
-        chunk.setMetadata(metadata);
-        chunkMapper.updateById(chunk);
-    }
-
-    /**
-     * 源头片段 metadata 加 {@code todoRemoved: true} 标记（删除特例）
-     *
-     * <p>与 patchChunkTaskStatus 同款 updateById 全实体回写（JsonbMapTypeHandler 生效），
-     * 只动 todoRemoved 一个键。source_chunk_id 为空（orphan）或 chunk 物理不存在则跳过——
-     * registry 的 deleted_at 仍保证所有视图过滤，标记仅用于 chunk 口径统计排除。</p>
-     */
-    private void patchChunkTodoRemoved(Long chunkId) {
-        if (chunkId == null) {
-            return;
-        }
-        Chunk chunk = chunkMapper.selectById(chunkId);
-        if (chunk == null) {
-            return;
-        }
-        Map<String, Object> metadata = chunk.getMetadata() == null
-                ? new java.util.HashMap<>() : chunk.getMetadata();
-        metadata.put("todoRemoved", true);
-        chunk.setMetadata(metadata);
-        chunkMapper.updateById(chunk);
-    }
-
-    /**
-     * registry.current_status 物化写 + completed 时 closed_at（Asia/Shanghai）
-     */
     private void applyRegistryStatus(Long todoId, String newStatus, OffsetDateTime now) {
         LambdaUpdateWrapper<TodoRegistry> wrapper = new LambdaUpdateWrapper<TodoRegistry>()
                 .eq(TodoRegistry::getId, todoId)
+                .isNull(TodoRegistry::getDeletedAt)
                 .set(TodoRegistry::getCurrentStatus, newStatus)
-                .set(TodoRegistry::getUpdatedAt, now);
+                .set(TodoRegistry::getUpdatedAt, now)
+                .setSql("version = version + 1");
         if ("completed".equals(newStatus)) {
             wrapper.set(TodoRegistry::getClosedAt, now);
         } else {
@@ -717,10 +669,7 @@ public class TodoRegistryServiceImpl implements TodoRegistryService {
         registryMapper.update(null, wrapper);
     }
 
-    /**
-     * 三态归一：null/非法 → null；兼容 TaskStatus 枚举名大写（TodoRef suggested_status）与前端小写
-     */
-    static String normalizeStatus(String raw) {
+        static String normalizeStatus(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
         }

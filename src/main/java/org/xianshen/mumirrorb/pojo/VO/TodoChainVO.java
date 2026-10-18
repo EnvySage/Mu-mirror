@@ -25,6 +25,11 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class TodoChainVO {
 
+    private String originKind;
+    private Long version;
+    private String notes;
+    private String dueAt;
+
     @Schema(description = "登记ID", example = "5")
     private Long todoId;
 

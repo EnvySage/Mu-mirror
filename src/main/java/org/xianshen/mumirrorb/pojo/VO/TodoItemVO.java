@@ -29,6 +29,11 @@ public class TodoItemVO {
     @Schema(description = "待办标题", example = "补作业")
     private String title;
 
+    private String originKind;
+    private Long version;
+    private String notes;
+    private String dueAt;
+
     @Schema(description = "当前状态", example = "not_started")
     private String currentStatus;
 

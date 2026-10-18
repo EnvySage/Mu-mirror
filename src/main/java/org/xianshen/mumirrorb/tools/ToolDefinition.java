@@ -13,7 +13,11 @@ import java.util.Map;
  * @param description 功能描述（进 prompt）
  * @param argsSchema  参数说明（进 prompt，简化 JSON 文档）
  */
-public record ToolDefinition(String name, String description, String argsSchema) {
+public record ToolDefinition(String name, String description, String argsSchema, ToolEffect effect) {
+
+    public ToolDefinition(String name, String description, String argsSchema) {
+        this(name, description, argsSchema, ToolEffect.READ);
+    }
 
     /**
      * → proto ToolSpec（定义在 common.proto）
@@ -23,6 +27,7 @@ public record ToolDefinition(String name, String description, String argsSchema)
                 .setName(name)
                 .setDescription(description)
                 .setArgsSchema(argsSchema)
+                .setEffect(effect.name())
                 .build();
     }
 
@@ -34,6 +39,7 @@ public record ToolDefinition(String name, String description, String argsSchema)
         m.put("tool", name);
         m.put("description", description);
         m.put("args", argsSchema);
+        m.put("effect", effect.name());
         return m;
     }
 }

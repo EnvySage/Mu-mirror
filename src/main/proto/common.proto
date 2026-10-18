@@ -89,6 +89,7 @@ message ToolSpec {
   string name = 1;          // 工具名（B 侧执行查找键，如 search_records）
   string description = 2;   // 用途描述（Python prompt 逐条渲染）
   string args_schema = 3;   // 参数说明（JSON Schema 简化文本，prompt 渲染）
+  string effect = 4;       // READ | PREPARE_WRITE; submission tools are not available
 }
 
 // 工具执行结果（B 执行后塞 ChatRequest.tool_results，Python 渲染成上下文块）

@@ -3,18 +3,20 @@ package org.xianshen.mumirrorb.tools;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * 工具执行器接口（8 只读工具 + B1/B2 扩展位；toolcalling-vault-design.md 第 2 节）
- *
- * <p>工具执行权在 Java（裁决 0.1）：查库组装摘要，Python 只做计划与渲染。
- * 实现必须幂等只读（写操作红线：上传=显式动作，对话内删除/覆盖需确认卡——首批不开放）。</p>
- */
+/** Java-owned tools declare READ or PREPARE_WRITE; no submission tool exists. */
 public interface ToolExecutor {
 
     /**
      * 工具名（注册表 key，= PlannedCall.tool）
      */
     String name();
+
+    ToolEffect effect();
+
+    default ToolExecutionResult execute(UUID userId, Map<String, Object> args, ToolCallContext context) throws Exception {
+        if (effect() != ToolEffect.READ) throw new IllegalStateException("Preparation requires a contextual executor");
+        return execute(userId, args);
+    }
 
     /**
      * 定义（进 PlanToolsRequest.tools）

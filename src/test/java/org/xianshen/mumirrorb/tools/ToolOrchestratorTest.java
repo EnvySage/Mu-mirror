@@ -40,6 +40,52 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ToolOrchestratorTest {
 
+    static final class PreparationProbe implements ToolExecutor {
+        int calls;
+        ToolCallContext context;
+        @Override public String name() { return "prepare_probe"; }
+        @Override public ToolEffect effect() { return ToolEffect.PREPARE_WRITE; }
+        @Override public ToolDefinition definition() { return new ToolDefinition(name(), "prepare", "{}", effect()); }
+        @Override public ToolExecutionResult execute(UUID user, Map<String,Object> args) { throw new AssertionError("context required"); }
+        @Override public ToolExecutionResult execute(UUID user, Map<String,Object> args, ToolCallContext context) {
+            this.context=context; calls++;
+            return ToolExecutionResult.builder().success(true).summary("待确认").payload(Map.of()).build();
+        }
+    }
+
+    @Test
+    void preparationRequiresTrustedTurnAndUsesStableNormalizedCallKey() {
+        var tool=new PreparationProbe();
+        var registry=new ToolRegistry(List.of(tool));
+        var runner=new ToolOrchestrator(aiGrpcClient, registry, auditService, glossaryService, new VaultProperties(), new com.fasterxml.jackson.databind.ObjectMapper());
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply("prepare_probe", "{\"title\":\"材料\",\"notes\":\"明天\"}"));
+        assertTrue(runner.planAndExecute(USER_ID,SESSION_ID,"创建待办").isEmpty()); assertEquals(0,tool.calls);
+        runner.planAndExecute(USER_ID,SESSION_ID,71L,"创建待办");
+        String key=tool.context.prepareKey(); assertEquals(71L,tool.context.sourceMessageId());
+        assertEquals("PREPARE_WRITE",registry.toProtoSpecs().get(0).getEffect());
+        when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply("prepare_probe", "{\"notes\":\"明天\",\"title\":\"材料\"}"));
+        runner.planAndExecute(USER_ID,SESSION_ID,71L,"创建待办"); assertEquals(key,tool.context.prepareKey());
+        runner.planAndExecute(USER_ID,SESSION_ID,72L,"新的明确指令"); org.junit.jupiter.api.Assertions.assertNotEquals(key,tool.context.prepareKey());
+    }
+
+    @Test
+    void forgedIdentityAndConfirmationAreRejectedBeforeExecutionInBothPlanningPaths() {
+        var tool=(EchoTool)registry.get("echo_tool").orElseThrow();
+        when(aiGrpcClient.planTools(eq(USER_ID),any(),anyLong())).thenReturn(reply("echo_tool","{\"userId\":\"foreign\",\"confirmed\":true}"));
+        assertTrue(orchestrator.planAndExecute(USER_ID,SESSION_ID,71L,"hi").isEmpty());
+        when(aiGrpcClient.planNextStep(eq(USER_ID),any(),anyLong())).thenAnswer(inv -> List.of(MirrorChatProto.PlanStepChunk.newBuilder().setFinal(true).setDone(true)
+                .addCalls(MirrorChatProto.PlannedCall.newBuilder().setTool("echo_tool").setArgsJson("{\"nested\":{\"user_id\":\"foreign\"}}" )).build()).iterator());
+        assertTrue(orchestrator.loopAndExecute(USER_ID,SESSION_ID,71L,"hi",List.of(),null).isEmpty()); assertEquals(0,tool.calls);
+    }
+
+    @Test
+    void registryRejectsMissingOrMismatchedEffectAndHasNoSubmissionEffect() {
+        ToolExecutor undeclared=org.mockito.Mockito.mock(ToolExecutor.class);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,()->new ToolRegistry(List.of(undeclared)));
+        assertEquals(List.of(ToolEffect.READ,ToolEffect.PREPARE_WRITE),List.of(ToolEffect.values()));
+        assertEquals("READ",registry.toProtoSpecs().get(0).getEffect());
+    }
+
     @Mock
     private AiGrpcClient aiGrpcClient;
     @Mock
@@ -55,6 +101,9 @@ class ToolOrchestratorTest {
 
     /** 可控的测试工具 */
     static final class EchoTool implements ToolExecutor {
+
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
         int calls = 0;
 
         @Override
@@ -175,6 +224,7 @@ class ToolOrchestratorTest {
     @DisplayName("工具执行抛异常 → 记审计不炸对话，其余计划继续")
     void planAndExecute_executorThrows() {
         ToolExecutor throwing = new ToolExecutor() {
+            @Override public ToolEffect effect() { return ToolEffect.READ; }
             @Override
             public String name() {
                 return "boom_tool";
@@ -216,6 +266,7 @@ class ToolOrchestratorTest {
     @DisplayName("工具执行失败（success=false）结果也进上下文（LLM 知情后改走 RAG）")
     void planAndExecute_failedResult_stillInContext() {
         ToolExecutor failing = new ToolExecutor() {
+            @Override public ToolEffect effect() { return ToolEffect.READ; }
             @Override
             public String name() {
                 return "fail_tool";
@@ -246,6 +297,9 @@ class ToolOrchestratorTest {
 
     /** 记录收到的 args 的桩工具（验证步骤间传参） */
     static final class RecordingTool implements ToolExecutor {
+
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
         private final String toolName;
         private final ToolExecutionResult result;
         Map<String, Object> lastArgs;
