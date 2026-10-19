@@ -14,13 +14,13 @@ import java.util.*;
 public class PrepareRecordTool implements ToolExecutor {
     private final ActionProposalService actions;
     private final ObjectMapper json;
-    private static final Set<String> FIELDS = Set.of("kind", "rawContent", "mode", "sourceRecordId");
+    private static final Set<String> FIELDS = Set.of("kind", "rawContent", "mode", "sourceRecordId", "recordId");
 
     @Override public String name() { return "prepare_record"; }
     @Override public ToolEffect effect() { return ToolEffect.PREPARE_WRITE; }
     @Override public ToolDefinition definition() {
-        return new ToolDefinition(name(), "准备创建或整理记录的可编辑操作卡；等待用户确认后才保存或授权。",
-                "{kind:record.create|record.organize,rawContent?:string(1..2000),mode?:ONLY_SAVE|AI_ASSISTED,sourceRecordId?:integer}", effect());
+        return new ToolDefinition(name(), "准备创建、整理或删除记录的可编辑操作卡；等待用户确认后才保存、授权或删除。",
+                "{kind:record.create|record.organize|record.delete,rawContent?:string(1..2000),mode?:ONLY_SAVE|AI_ASSISTED,sourceRecordId?:integer,recordId?:integer}", effect());
     }
 
     @Override public ToolExecutionResult execute(UUID userId, Map<String, Object> args) {
@@ -33,7 +33,8 @@ public class PrepareRecordTool implements ToolExecutor {
         if (context == null || context.sessionId() == null || context.sourceMessageId() == null || context.prepareKey() == null)
             throw new IllegalArgumentException("缺少可信用户消息上下文");
         String kind = Objects.toString(args.get("kind"), "");
-        if (!Set.of("record.create", "record.organize").contains(kind)) throw new IllegalArgumentException("未知记录操作");
+        if (!Set.of("record.create", "record.organize", "record.delete").contains(kind)) throw new IllegalArgumentException("未知记录操作");
+        if ("record.delete".equals(kind) && !(args.get("recordId") instanceof Number)) throw new IllegalArgumentException("删除操作缺少记录 ID");
         Object raw = args.get("rawContent");
         if ("record.create".equals(kind) && (!(raw instanceof String text) || text.isBlank() || text.length() > 2000))
             throw new IllegalArgumentException("记录内容不能为空且不能超过 2000 字");

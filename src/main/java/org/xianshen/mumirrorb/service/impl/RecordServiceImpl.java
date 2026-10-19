@@ -381,7 +381,6 @@ public class RecordServiceImpl implements RecordService {
         }
         record.setUserReviewed(true);
         record.setUpdatedAt(OffsetDateTime.now());
-        recordMapper.updateById(record);
         if (approvedIds.isEmpty()) {
             record.setGrowthSuggestions("[]"); record.setGrowthAxesVersion(0L);
         } else if (growthAdjustments != null && !growthAdjustments.isEmpty()) {
@@ -391,6 +390,16 @@ public class RecordServiceImpl implements RecordService {
             try { record.setGrowthSuggestions(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(growthAdjustments)); }
             catch (Exception e) { throw new BusinessException(400, "成长调整格式无效"); }
             record.setGrowthAxesVersion(axesVersion);
+        }
+        recordMapper.updateById(record);
+        if (record.getMemoryState() == RecordMemoryState.READY && record.getGrowthSuggestions() != null
+                && !"[]".equals(record.getGrowthSuggestions()) && growthService != null) {
+            try {
+                var adjustments = new com.fasterxml.jackson.databind.ObjectMapper().readValue(record.getGrowthSuggestions(),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO>>() {});
+                growthService.applyConfirmedRecord(userId, recordId, actionId, adjustments, record.getGrowthAxesVersion());
+            } catch (RuntimeException e) { throw e; }
+            catch (Exception e) { throw new BusinessException(400, "成长调整格式无效"); }
         }
         for (Long revokedChunkId : revokedMemoryChunkIds) {
             snapshotLineageService.invalidateSource(userId, "chunk", revokedChunkId, "memory_revoked");

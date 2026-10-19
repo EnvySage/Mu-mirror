@@ -356,12 +356,13 @@ public class RecordController {
             )
     })
     @DeleteMapping("/{id}")
-    public R<String> softDelete(
+    public R<ActionProposalVO> softDelete(
             @Parameter(description = "记录ID", required = true, example = "1")
             @PathVariable Long id) {
         UUID userId = getCurrentUserId();
-        recordService.softDelete(id, userId);
-        return R.ok("记录已删除");
+        var payload = objectMapper.createObjectNode().put("recordId", id);
+        var request = new ActionPrepareDTO("record.delete", payload, "record-delete:" + id + ":" + UUID.randomUUID(), null, null);
+        return R.ok("已准备删除确认卡；确认前不会删除记录", actionProposalService.prepare(userId, request));
     }
 
     /**

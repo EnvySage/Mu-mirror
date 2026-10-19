@@ -29,7 +29,7 @@ import java.util.*;
 @Component
 @RequiredArgsConstructor
 public class RecordActionHandler implements ActionHandler {
-    private static final Set<String> KINDS = Set.of("record.create", "record.organize");
+    private static final Set<String> KINDS = Set.of("record.create", "record.organize", "record.delete");
     private static final Set<String> ALLOWED_FIELDS = Set.of("rawContent", "mode", "privateInput", "sourceRecordId",
             "sourceRecordVersion", "recordDraft", "todoResolutions", "correctionOfRecordId");
     private final RecordDraftService drafts;
@@ -105,6 +105,7 @@ public class RecordActionHandler implements ActionHandler {
 
     @Override
     public JsonNode validateAndPreview(UUID userId, String kind, JsonNode payload) {
+        if ("record.delete".equals(kind)) return deletePreview(userId, payload);
         validatePayload(kind, payload);
         Record source = "record.organize".equals(kind) ? ownedSource(userId, sourceId(payload)) : null;
         validateOrganizeSource(userId, source);
@@ -155,6 +156,14 @@ public class RecordActionHandler implements ActionHandler {
     @Transactional
     public ActionExecution execute(AuthorizedAction action) {
         JsonNode payload = action.getPayload();
+        if ("record.delete".equals(action.getKind())) {
+            Record target = ownedSource(action.getUserId(), payload.path("recordId").asLong());
+            if (target == null) throw new BusinessException(404, "记录不存在或已删除");
+            String expected = action.getTargetVersions().path(String.valueOf(target.getId())).asText(null);
+            if (expected == null || !expected.equals(targetVersion(target))) throw new BusinessException(409, "记录已变化，请重新准备删除卡");
+            records.softDelete(target.getId(), action.getUserId());
+            return ActionExecution.applied(json.createObjectNode().put("recordId", target.getId()).put("deleted", true));
+        }
         RecordDraftDTO draft = json.convertValue(payload.path("recordDraft"), RecordDraftDTO.class);
         if (!draft.getGrowthSuggestions().isEmpty() && growthService != null
                 && growthService.axesVersion(action.getUserId()) != draft.getAxesVersion())
@@ -259,6 +268,11 @@ public class RecordActionHandler implements ActionHandler {
     }
 
     private void validatePayload(String kind, JsonNode payload) {
+        if ("record.delete".equals(kind)) {
+            if (payload == null || !payload.isObject() || !payload.path("recordId").canConvertToLong() || payload.path("recordId").asLong() < 1)
+                throw invalid("缺少待删除记录 ID");
+            return;
+        }
         if (!KINDS.contains(kind) || payload == null || !payload.isObject()) throw invalid("记录操作不合法");
         payload.fieldNames().forEachRemaining(field -> { if (!ALLOWED_FIELDS.contains(field)) throw invalid("记录候选不允许字段: " + field); });
         if (payload.has("correctionOfRecordId") && (!payload.get("correctionOfRecordId").canConvertToLong()
@@ -273,6 +287,21 @@ public class RecordActionHandler implements ActionHandler {
         if (payload.has("sourceRecordId") && (!payload.get("sourceRecordId").canConvertToLong() || payload.get("sourceRecordId").longValue() < 1))
             throw invalid("sourceRecordId 必须为正整数");
         if (payload.has("recordDraft")) validateDraftShape(payload.get("recordDraft"));
+    }
+
+    private JsonNode deletePreview(UUID userId, JsonNode payload) {
+        validatePayload("record.delete", payload);
+        Record target = ownedSource(userId, payload.path("recordId").asLong());
+        if (target == null) throw new BusinessException(404, "记录不存在或已删除");
+        long points = 0; int count = 0;
+        if (growthService != null) for (Object raw : growthService.entries(userId)) {
+            var entry = json.convertValue(raw, org.xianshen.mumirrorb.pojo.VO.GrowthOverviewVO.Entry.class);
+            if (Objects.equals(entry.getSourceRecordId(), target.getId())) { points += entry.getPoints() == null ? 0 : entry.getPoints(); count++; }
+        }
+        ObjectNode preview = json.createObjectNode().put("recordId", target.getId()).put("growthEntriesRemoved", count)
+                .put("growthPointsRemoved", points).put("warning", "确认后会删除该记录关联的成长贡献");
+        preview.putObject("targetVersions").put(String.valueOf(target.getId()), targetVersion(target));
+        return preview;
     }
 
     private void validateDraftShape(JsonNode draft) {
