@@ -3,9 +3,9 @@ package org.xianshen.mumirrorb.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
@@ -26,10 +26,11 @@ import java.security.MessageDigest;
 import java.time.*;
 import java.util.*;
 
-@Slf4j @Service @RequiredArgsConstructor
+@Slf4j @Service
 public class ChatMemoryServiceImpl implements ChatMemoryService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final Set<String> KINDS = Set.of("fact", "preference", "plan", "event");
+
     private final ChatDaySummaryMapper summaries;
     private final ChatSessionMapper sessions;
     private final ConversationHistoryMapper history;
@@ -37,6 +38,19 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
     private final AiGrpcClient ai;
     private final ActionProposalService actions;
     private final ObjectMapper json;
+
+    public ChatMemoryServiceImpl(ChatDaySummaryMapper summaries, ChatSessionMapper sessions,
+            ConversationHistoryMapper history, ChatMemoryMapper memories, AiGrpcClient ai,
+            @Lazy ActionProposalService actions, ObjectMapper json) {
+        this.summaries = summaries;
+        this.sessions = sessions;
+        this.history = history;
+        this.memories = memories;
+        this.ai = ai;
+        this.actions = actions;
+        this.json = json;
+    }
+
     @org.springframework.beans.factory.annotation.Autowired
     private org.xianshen.mumirrorb.mapper.ChatSourceExclusionMapper exclusions;
     @org.springframework.beans.factory.annotation.Autowired
