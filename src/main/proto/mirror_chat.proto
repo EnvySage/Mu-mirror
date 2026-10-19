@@ -141,7 +141,7 @@ message PlanNextStepRequest {
   repeated ToolResult previous_results = 6;  // 已执行步骤的结果（循环的核心输入；首步为空）
   int32 step = 7;                            // 第几步（1-based）
   int32 max_steps = 8;                       // 步数预算，prompt 告知模型"还剩几步"
-  bool has_retrieval = 9;                    // Deprecated: 保留 wire 兼容；Agent 根据实际工具结果判断检索状态
+  bool has_retrieval = 9;                    // Deprecated：保留 wire 兼容，当前 planner 忽略；根据工具结果判断检索状态
   AssistantContext assistant_context = 10;
 }
 

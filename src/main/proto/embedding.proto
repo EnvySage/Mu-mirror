@@ -12,6 +12,9 @@ service EmbeddingService {
   // 文本转向量
   rpc Embed (EmbedRequest) returns (EmbedResponse);
 
+  // 批量文本转向量
+  rpc EmbedBatch (EmbedBatchRequest) returns (EmbedBatchResponse);
+
   // 查询当前 embedding 模型信息
   rpc GetModelInfo (ModelInfoRequest) returns (ModelInfoResponse);
 }
@@ -27,6 +30,15 @@ message EmbedResponse {
   repeated float vector = 1;    // 向量
   int32 dimension = 2;          // 维度
   string model_name = 3;        // 使用的模型名
+}
+
+message EmbedBatchRequest {
+  repeated string texts = 1;
+  EmbeddingConfig embedding_config = 2;
+}
+
+message EmbedBatchResponse {
+  repeated EmbedResponse results = 1;
 }
 
 // 模型信息请求

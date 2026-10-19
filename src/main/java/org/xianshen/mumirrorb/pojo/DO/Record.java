@@ -92,6 +92,7 @@ public class Record {
     private Integer processingVersion;
 
     private RecordMemoryState memoryState;
+    @TableField(typeHandler = UuidTypeHandler.class)
     private UUID memoryActionId;
     private Integer memoryActionExecutionVersion;
     private String memoryFailureReason;

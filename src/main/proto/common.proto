@@ -46,6 +46,8 @@ enum TaskStatus {
 
 // 模型协议
 enum AiProtocol {
+  option allow_alias = true;
+  AI_PROTOCOL_UNKNOWN = 0;
   PROTOCOL_UNKNOWN = 0;
   OPENAI = 1;       // OpenAI 兼容协议（OpenAI、通义千问、智谱等）
   ANTHROPIC = 2;    // Anthropic 协议（Claude 系列）

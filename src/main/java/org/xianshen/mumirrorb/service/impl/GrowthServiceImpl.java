@@ -23,9 +23,13 @@ public class GrowthServiceImpl implements GrowthService {
  @org.springframework.beans.factory.annotation.Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
  @Override @Transactional public List<GrowthAxis> axes(UUID userId){
   List<GrowthAxis> found=axesMapper.selectList(new LambdaQueryWrapper<GrowthAxis>().eq(GrowthAxis::getUserId,userId));
-  if(found==null)found=new ArrayList<>();
+  found=found==null?new ArrayList<>():new ArrayList<>(found);
   if(found.isEmpty()){ for(var d:properties.getDefaults()){var a=new GrowthAxis();a.setUserId(userId);a.setDimensionId(d.getId());a.setName(d.getName());a.setDescription(d.getDescription());a.setDefinitionVersion(1L);a.setUpdatedAt(OffsetDateTime.now());axesMapper.insert(a);found.add(a);if(jdbc!=null)jdbc.update("INSERT INTO growth_axis_history(user_id,dimension_id,definition_version,name,description) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING",userId,d.getId(),1,d.getName(),d.getDescription());} }
-  if(found.size()!=5) throw new BusinessException(409,"成长维度定义无效"); return found;
+  if(found.size()!=5) throw new BusinessException(409,"成长维度定义无效");
+  Map<String,Integer> order=new HashMap<>();
+  for(int i=0;i<properties.getDefaults().size();i++)order.put(properties.getDefaults().get(i).getId(),i);
+  found.sort(Comparator.comparingInt(a->order.getOrDefault(a.getDimensionId(),Integer.MAX_VALUE)));
+  return found;
  }
  // The aggregate version must advance when any fixed axis changes. max(definitionVersion)
  // can stay unchanged when a second axis catches up to the current maximum.

@@ -312,7 +312,8 @@ CREATE TABLE IF NOT EXISTS todo_registry (
     updated_at TIMESTAMPTZ DEFAULT now(),
     closed_at TIMESTAMPTZ,                    -- completed 时刻（追溯）
     deleted_at TIMESTAMPTZ,                    -- registry is authoritative; sources remain read only
-    CHECK (origin_kind != 'direct' OR source_chunk_id IS NULL)
+    CONSTRAINT todo_registry_direct_source_check
+        CHECK (origin_kind != 'direct' OR source_chunk_id IS NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_todo_reg_user ON todo_registry(user_id, current_status);
 -- 活行部分索引：查询口径一律 deleted_at IS NULL，命中该索引避免全表筛
@@ -339,3 +340,284 @@ CREATE TABLE IF NOT EXISTS todo_suggestions (
     resolved_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_todo_sug_user ON todo_suggestions(user_id, status);
+
+-- ============================================================
+-- Assistant growth redesign final shape (v6-v10).
+-- Kept in migration order so an empty database starts at the same catalog
+-- shape as an existing database upgraded through migration-v10.
+-- These statements are intentionally idempotent with the corresponding
+-- migration files; the migration files remain the upgrade path for old DBs.
+-- ============================================================
+
+
+-- Begin migration-v6-assistant-actions.sql (fresh-install final schema parity).
+-- Persistent assistant proposals only. No business data backfill and no model calls.
+-- UNIQUE(user_id, prepare_key) survives cancellation; never delete a key to retry a model call.
+CREATE TABLE IF NOT EXISTS assistant_actions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    kind VARCHAR(100) NOT NULL,
+    prepare_key VARCHAR(240) NOT NULL,
+    state VARCHAR(24) NOT NULL DEFAULT 'PENDING'
+        CHECK (state IN ('PENDING', 'EXECUTING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'STALE')),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    preparation_status VARCHAR(24) NOT NULL DEFAULT 'READY'
+        CHECK (preparation_status IN ('RUNNING', 'READY', 'FAILED')),
+    payload JSONB NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
+    preview JSONB NOT NULL CHECK (jsonb_typeof(preview) = 'object'),
+    target_versions JSONB NOT NULL CHECK (jsonb_typeof(target_versions) = 'object'),
+    source_session_id UUID REFERENCES chat_sessions(id) ON DELETE SET NULL,
+    source_message_id BIGINT REFERENCES conversation_history(id) ON DELETE SET NULL,
+    request_id VARCHAR(240),
+    execution_version INTEGER,
+    result JSONB,
+    error_code VARCHAR(100),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_assistant_actions_prepare UNIQUE (user_id, prepare_key),
+    CONSTRAINT ck_assistant_actions_success CHECK
+        (state <> 'SUCCEEDED' OR (result IS NOT NULL AND
+            result->>'outcome' IS NOT NULL AND result->>'outcome' IN ('APPLIED', 'SAVED_ONLY_FALLBACK'))),
+    CONSTRAINT ck_assistant_actions_execution CHECK
+        (state NOT IN ('EXECUTING', 'SUCCEEDED', 'FAILED') OR
+            (execution_version IS NOT NULL AND execution_version > 0 AND request_id IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_assistant_actions_session
+    ON assistant_actions(user_id, source_session_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_assistant_actions_state
+    ON assistant_actions(user_id, state, updated_at);
+CREATE INDEX IF NOT EXISTS idx_assistant_actions_executing
+    ON assistant_actions(updated_at, id) WHERE state = 'EXECUTING';
+
+COMMENT ON TABLE assistant_actions IS
+    'AI business proposal: only authenticated explicit confirmation may submit; cancelled preparation keys are retained';
+
+-- Confirmation transaction boundary (Spring @Transactional, PostgreSQL READ COMMITTED):
+-- 1. SELECT ... WHERE id=:id AND user_id=:authenticatedOwner FOR UPDATE.
+-- 2. Check proposal version/READY; handler locks targets in stable order and supplies current versions.
+-- 3. Mismatch persists STALE and returns code 409 plus the current card (no domain write).
+-- 4. Transition EXECUTING, execute domain SQL/enqueue durable jobs, persist actual result, COMMIT together.
+--    A thrown handler/SQL/commit error rolls back all effects; the caller must GET before retrying.
+--    Handler adapters must join this transaction; no external effects before commit / REQUIRES_NEW.
+-- 5. Duplicate confirms lock the same card and return its durable state, regardless of request_id.
+--    request_id is audit metadata, NOT the once-only execution gate.
+-- Async recovery query (worker internal, never model-facing):
+-- SELECT id, kind, user_id, execution_version, result FROM assistant_actions
+-- WHERE state='EXECUTING' ORDER BY updated_at, id;
+-- result.jobIds contains handler-specific durable job IDs. Reconcile existing job status, do not execute again.
+-- completeAsync(id, execution_version, terminalResult) locks the card and only changes a matching
+-- EXECUTING generation. Duplicate/late callbacks cannot overwrite terminal or cancelled state.
+-- terminalResult includes state=SUCCEEDED|FAILED (SUCCEEDED default), actual object IDs/effects,
+-- outcome=APPLIED|SAVED_ONLY_FALLBACK for success, errorCode for failure.
+-- Validate migration, concurrent confirmation, and rollback in an isolated PostgreSQL test DB;
+-- Mockito tests alone do not prove the transaction or concurrency contract.
+
+
+-- Begin migration-v7-todo-direct-operations.sql (fresh-install final schema parity).
+-- Registry owns current todo state. Existing NULL-source rows remain record orphans.
+-- This migration never updates source chunks or authorizes their use as memory.
+ALTER TABLE todo_registry ADD COLUMN IF NOT EXISTS origin_kind VARCHAR(16) NOT NULL DEFAULT 'record';
+ALTER TABLE todo_registry ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE todo_registry ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE todo_registry ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
+ALTER TABLE todo_registry ALTER COLUMN title TYPE VARCHAR(200);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'todo_registry_origin_kind_check' AND conrelid = 'todo_registry'::regclass) THEN
+        ALTER TABLE todo_registry ADD CONSTRAINT todo_registry_origin_kind_check CHECK (origin_kind IN ('record', 'direct'));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'todo_registry_version_check' AND conrelid = 'todo_registry'::regclass) THEN
+        ALTER TABLE todo_registry ADD CONSTRAINT todo_registry_version_check CHECK (version > 0);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'todo_registry_direct_source_check' AND conrelid = 'todo_registry'::regclass) THEN
+        ALTER TABLE todo_registry ADD CONSTRAINT todo_registry_direct_source_check CHECK (origin_kind != 'direct' OR source_chunk_id IS NULL);
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_todo_registry_active_owner ON todo_registry(user_id, created_at DESC, id DESC) WHERE deleted_at IS NULL;
+-- All domain updates/deletes use owner + version + deleted_at predicates and increment version.
+-- Run only in a provisioned isolated database until the application migration is approved.
+
+
+-- Begin migration-v8-record-memory-state.sql (fresh-install final schema parity).
+-- Assistant record preference and the record memory lifecycle.
+-- Existing users remain ONLY_SAVE; preference changes apply to future records only.
+ALTER TABLE user_settings
+    ADD COLUMN IF NOT EXISTS default_record_mode VARCHAR(20) NOT NULL DEFAULT 'ONLY_SAVE';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'user_settings_default_record_mode_check'
+    ) THEN
+        ALTER TABLE user_settings
+            ADD CONSTRAINT user_settings_default_record_mode_check
+            CHECK (default_record_mode IN ('ONLY_SAVE', 'AI_ASSISTED'));
+    END IF;
+END $$;
+
+ALTER TABLE records
+    ADD COLUMN IF NOT EXISTS memory_state VARCHAR(16) NOT NULL DEFAULT 'NONE',
+    ADD COLUMN IF NOT EXISTS memory_action_id UUID,
+    ADD COLUMN IF NOT EXISTS memory_action_execution_version INTEGER,
+    ADD COLUMN IF NOT EXISTS memory_failure_reason TEXT,
+    ADD COLUMN IF NOT EXISTS correction_of_record_id BIGINT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'records_correction_of_record_id_fkey') THEN
+        ALTER TABLE records ADD CONSTRAINT records_correction_of_record_id_fkey
+            FOREIGN KEY (correction_of_record_id) REFERENCES records(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'records_memory_state_check'
+    ) THEN
+        ALTER TABLE records ADD CONSTRAINT records_memory_state_check
+            CHECK (memory_state IN ('NONE', 'PENDING', 'READY', 'DISABLED'));
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_records_memory_state_user
+    ON records(user_id, memory_state, id) WHERE deleted_at IS NULL;
+
+-- Conservative metadata-only backfill. READY requires proof that every explicitly
+-- approved chunk has a stored vector and is marked ready. No model calls are made.
+-- Existing records that cannot be proven complete remain NONE and can be reviewed again.
+UPDATE records r
+SET memory_state = 'READY'
+WHERE r.memory_state = 'NONE'
+  AND r.source = 'user'
+  AND r.deleted_at IS NULL
+  AND r.status = 'done'
+  AND r.user_reviewed = TRUE
+  AND EXISTS (
+      SELECT 1 FROM chunks c
+      WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM chunks c
+      WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE
+        AND (c.embedding IS NULL OR c.embedding_status <> 'ready')
+  );
+
+COMMENT ON COLUMN records.memory_state IS
+    'Record-level memory gate: only READY with all approved chunks ready is available to AI; NONE/PENDING/DISABLED are excluded';
+
+CREATE OR REPLACE FUNCTION record_memory_is_complete(target_record_id BIGINT)
+RETURNS BOOLEAN
+LANGUAGE SQL
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM records r
+        WHERE r.id = target_record_id AND r.source = 'user' AND r.deleted_at IS NULL
+          AND r.memory_state = 'READY'
+          AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id
+                      AND c.ai_memory_approved = TRUE)
+          AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id
+                          AND c.ai_memory_approved = TRUE
+                          AND (c.embedding IS NULL OR c.embedding_status <> 'ready'))
+    );
+$$;
+
+
+-- Begin migration-v9-growth.sql (fresh-install final schema parity).
+CREATE TABLE IF NOT EXISTS growth_axes (
+ user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ dimension_id VARCHAR(40) NOT NULL, name VARCHAR(80) NOT NULL, description TEXT NOT NULL DEFAULT '',
+ definition_version BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(user_id, dimension_id), CHECK(definition_version > 0)
+);
+ALTER TABLE records ADD COLUMN IF NOT EXISTS growth_suggestions TEXT NOT NULL DEFAULT '[]',
+ ADD COLUMN IF NOT EXISTS growth_axes_version BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS growth_entries (
+ id BIGSERIAL PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ dimension_id VARCHAR(40) NOT NULL, points INTEGER NOT NULL CHECK(points BETWEEN 0 AND 100),
+ reason TEXT NOT NULL, definition_version BIGINT NOT NULL, source_type VARCHAR(20) NOT NULL,
+ source_record_id BIGINT REFERENCES records(id) ON DELETE CASCADE, action_id UUID, correction_of BIGINT REFERENCES growth_entries(id),
+ version BIGINT NOT NULL DEFAULT 1, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ CONSTRAINT growth_entry_source_check CHECK(source_type IN ('record','manual')),
+ CONSTRAINT growth_entry_manual_record_check CHECK((source_type='manual' AND source_record_id IS NULL) OR (source_type='record' AND source_record_id IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS growth_axis_history (
+ user_id UUID NOT NULL, dimension_id VARCHAR(40) NOT NULL, definition_version BIGINT NOT NULL,
+ name VARCHAR(80) NOT NULL, description TEXT NOT NULL, captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(user_id, dimension_id, definition_version)
+);
+CREATE TABLE IF NOT EXISTS growth_entry_history (
+ id BIGSERIAL PRIMARY KEY, entry_id BIGINT NOT NULL, user_id UUID NOT NULL, dimension_id VARCHAR(40) NOT NULL,
+ points INTEGER NOT NULL, reason TEXT NOT NULL, definition_version BIGINT NOT NULL, entry_version BIGINT NOT NULL,
+ replaced_at TIMESTAMPTZ NOT NULL DEFAULT now(), replacement_request_id UUID
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_growth_record_axis ON growth_entries(user_id, source_record_id, dimension_id) WHERE source_record_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_growth_entries_user_recent ON growth_entries(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_growth_entries_record ON growth_entries(user_id, source_record_id) WHERE source_record_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_growth_manual_request ON growth_entries(user_id, action_id) WHERE source_type='manual' AND action_id IS NOT NULL;
+
+
+-- Begin migration-v10-daily-memory.sql (fresh-install final schema parity).
+-- Per-user daily sessions and review-only chat-memory candidates.
+-- Legacy sessions intentionally retain NULL day_key/timezone; no history backfill.
+-- Existing snapshots remain usable until a forget event conservatively retires unknown chat lineage.
+ALTER TABLE profile_snapshots
+    ADD COLUMN IF NOT EXISTS chat_lineage_known BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE profile_snapshots ALTER COLUMN chat_lineage_known SET DEFAULT TRUE;
+COMMENT ON COLUMN profile_snapshots.chat_lineage_known IS
+    'Whether chat-message lineage is complete; migrated snapshots remain unknown until rebuilt';
+
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS day_key DATE;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS timezone VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_sessions_user_day
+    ON chat_sessions(user_id, day_key) WHERE day_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS chat_day_summaries (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_date DATE NOT NULL,
+    source_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    summary TEXT,
+    source_hash CHAR(64) NOT NULL,
+    state VARCHAR(20) NOT NULL CHECK (state IN ('PROCESSING','READY','FAILED')),
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    lease_until TIMESTAMPTZ,
+    error_code VARCHAR(100),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, source_date)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_day_summary_session ON chat_day_summaries(source_session_id);
+
+CREATE TABLE IF NOT EXISTS chat_memories (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    kind VARCHAR(30) NOT NULL,
+    source_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    source_message_ids JSONB NOT NULL,
+    source_date DATE NOT NULL,
+    event_date DATE,
+    expires_at TIMESTAMPTZ,
+    state VARCHAR(20) NOT NULL CHECK (state IN ('ACTIVE','FORGOTTEN')),
+    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_memories_user_state ON chat_memories(user_id, state, expires_at);
+
+-- Tombstones contain provenance IDs only, never copies of forgotten chat content.
+CREATE TABLE IF NOT EXISTS chat_source_exclusions (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_kind VARCHAR(24) NOT NULL,
+    source_id BIGINT NOT NULL,
+    source_version BIGINT,
+    source_fingerprint CHAR(64),
+    reason VARCHAR(40) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, source_kind, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_source_exclusions_source
+    ON chat_source_exclusions(source_kind, source_id);
+
+-- IDs only: assistant turns can depend on older remembered chat sources.
+ALTER TABLE conversation_history
+    ADD COLUMN IF NOT EXISTS context_source_message_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
