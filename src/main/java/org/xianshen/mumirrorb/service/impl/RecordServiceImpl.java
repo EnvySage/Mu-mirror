@@ -381,9 +381,9 @@ public class RecordServiceImpl implements RecordService {
         }
         record.setUserReviewed(true);
         record.setUpdatedAt(OffsetDateTime.now());
-        if (approvedIds.isEmpty()) {
+        if (approvedIds.isEmpty() || growthAdjustments == null || growthAdjustments.isEmpty()) {
             record.setGrowthSuggestions("[]"); record.setGrowthAxesVersion(0L);
-        } else if (growthAdjustments != null && !growthAdjustments.isEmpty()) {
+        } else {
             long currentAxesVersion = growthService.axesVersion(userId);
             if (axesVersion == null || axesVersion != currentAxesVersion)
                 throw new BusinessException(409, "成长维度已变化，请刷新审核建议");

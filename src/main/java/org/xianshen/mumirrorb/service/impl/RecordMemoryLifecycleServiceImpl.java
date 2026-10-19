@@ -66,6 +66,8 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
         record.setMemoryFailureReason(reason == null ? "Embedding 重试耗尽" : reason.substring(0, Math.min(500, reason.length())));
         record.setStatus(RecordStatus.RECORD_ONLY);
         record.setUserReviewed(false);
+        record.setGrowthSuggestions("[]");
+        record.setGrowthAxesVersion(0L);
         record.setFailReason(reason == null ? "记忆索引失败，已降级为仅保存" : reason.substring(0, Math.min(500, reason.length())));
         record.setUpdatedAt(OffsetDateTime.now());
         records.updateById(record);

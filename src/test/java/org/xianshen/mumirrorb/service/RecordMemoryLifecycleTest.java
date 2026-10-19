@@ -63,6 +63,8 @@ class RecordMemoryLifecycleTest {
     @Test
     void initialExhaustionInvalidatesGenerationBeforeCleaningAndPreservesTodoEffects() {
         Record record = record(7, RecordMemoryState.PENDING);
+        record.setGrowthSuggestions("[{\"dimensionId\":\"knowledge\",\"points\":5}]");
+        record.setGrowthAxesVersion(5L);
         record.setMemoryActionId(UUID.randomUUID());
         record.setMemoryActionExecutionVersion(4);
         Chunk memoryOnly = chunk(1L, "pending", null);
@@ -81,6 +83,8 @@ class RecordMemoryLifecycleTest {
         assertEquals(RecordStatus.RECORD_ONLY, record.getStatus());
         assertFalse(record.getAiProcessingAuthorized());
         assertEquals("embedding timeout", record.getMemoryFailureReason());
+        assertEquals("[]", record.getGrowthSuggestions(), "failed initial indexing must discard staged growth");
+        assertEquals(0L, record.getGrowthAxesVersion());
         assertFalse(confirmedTodo.getAiMemoryApproved());
         assertFalse(memoryOnly.getAiMemoryApproved());
         assertEquals("用户审核确认的最终片段，不允许在降级时丢失", memoryOnly.getSegment());
