@@ -107,6 +107,10 @@ message AssistantContext {
   string action_status_summary = 4;
 }
 
+message GrowthAxis { string id = 1; string name = 2; string description = 3; int64 definition_version = 4; }
+message GrowthContext { repeated GrowthAxis axes = 1; }
+message GrowthSuggestion { string dimension_id = 1; int32 points = 2; string reason = 3; }
+
 // Embedding 配置（每次请求携带）
 message EmbeddingConfig {
   string source = 1;        // local / api

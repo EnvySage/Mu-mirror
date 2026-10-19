@@ -64,6 +64,12 @@ public class RecordDraftServiceImpl implements RecordDraftService {
             String resolved = TimeSubstitutionApplier.apply(raw, item.getTimeSubstitutionsList());
             draft.setFinalContent(resolved);
             draft.setSegments(List.of(segment(item, resolved)));
+            draft.setAxesVersion(Math.toIntExact(aiGrpcClient.growthAxesVersion(userId)));
+            var allowedAxes = aiGrpcClient.growthAxisIds(userId);
+            draft.setGrowthSuggestions(response.getGrowthSuggestionsList().stream().filter(s -> allowedAxes.contains(s.getDimensionId())).map(s -> {
+                var suggestion = new java.util.LinkedHashMap<String,Object>();
+                suggestion.put("dimensionId", s.getDimensionId()); suggestion.put("points", s.getPoints() < 0 || s.getPoints() > 5 ? 0 : s.getPoints()); suggestion.put("reason", s.getReason()); return (Object)suggestion;
+            }).toList());
             draft.setPreparationStatus("READY");
             draft.setPreparationError(null);
         } catch (Exception e) {
@@ -94,7 +100,7 @@ public class RecordDraftServiceImpl implements RecordDraftService {
         segment.setContentType(ClassifyItemConverter.convertContentType(item.getContentType()));
         segment.setMoods(ClassifyItemConverter.convertMoods(item.getMoodsList()));
         segment.setKeywords(item.getKeywordsList());
-        segment.setTags(new ArrayList<>());
+        segment.setTags(new ArrayList<>(item.getUserTagsList()));
         segment.setTaskStatus(ClassifyItemConverter.convertTaskStatus(item.getStatus()));
         segment.setMemoryEnabled(false);
         return segment;

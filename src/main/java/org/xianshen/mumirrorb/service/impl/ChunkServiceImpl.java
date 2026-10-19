@@ -25,6 +25,7 @@ import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -96,6 +97,12 @@ public class ChunkServiceImpl implements ChunkService {
         }
         if (dto.getKeywords() != null) {
             metadata.put("keywords", dto.getKeywords());
+            metadataChanged = true;
+        }
+        if (dto.getUserTags() != null) {
+            List<String> tags = dto.getUserTags().stream().filter(Objects::nonNull).map(String::trim)
+                    .filter(s -> !s.isBlank()).distinct().limit(30).toList();
+            metadata.put("tags", tags);
             metadataChanged = true;
         }
         // taskStatus（F 第八轮欠账）：null = 清空（用户"点已选项取消"），非空 = 覆盖

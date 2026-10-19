@@ -38,6 +38,7 @@ public class RecordActionHandler implements ActionHandler {
     private final ChunkMapper chunkMapper;
     private final ObjectMapper json;
     private final org.xianshen.mumirrorb.service.SettingsService settingsService;
+    @org.springframework.beans.factory.annotation.Autowired private org.xianshen.mumirrorb.service.GrowthService growthService;
 
     @Override public Set<String> kinds() { return KINDS; }
 
@@ -155,6 +156,9 @@ public class RecordActionHandler implements ActionHandler {
     public ActionExecution execute(AuthorizedAction action) {
         JsonNode payload = action.getPayload();
         RecordDraftDTO draft = json.convertValue(payload.path("recordDraft"), RecordDraftDTO.class);
+        if (!draft.getGrowthSuggestions().isEmpty() && growthService != null
+                && growthService.axesVersion(action.getUserId()) != draft.getAxesVersion())
+            throw new BusinessException(409, "成长维度已变化，请重新准备审核卡");
         Long sourceId = "record.organize".equals(action.getKind()) ? draft.getSourceRecordId() : null;
         Long correctionOfId = payload.path("correctionOfRecordId").isIntegralNumber()
                 ? payload.path("correctionOfRecordId").asLong() : null;
@@ -197,6 +201,9 @@ public class RecordActionHandler implements ActionHandler {
         record.setAiProcessingAuthorized(true);
         record.setProcessingVersion(Math.max(1, record.getProcessingVersion() == null ? 0 : record.getProcessingVersion() + 1));
         record.setStatus(RecordStatus.REVIEWING);
+        try { record.setGrowthSuggestions(json.writeValueAsString(draft.getGrowthSuggestions())); }
+        catch (Exception e) { throw new BusinessException(400, "成长建议格式无效"); }
+        record.setGrowthAxesVersion((long) draft.getAxesVersion());
         record.setFailReason(null);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
@@ -293,8 +300,15 @@ public class RecordActionHandler implements ActionHandler {
         if (!Set.of("ONLY_SAVE", "AI_ASSISTED").contains(draft.getMode())) throw invalid("记录模式非法");
         if (!Set.of("READY", "SAVE_ONLY", "RUNNING").contains(draft.getPreparationStatus())) throw invalid("候选准备状态非法");
         if (draft.isPrivateInput() && !"ONLY_SAVE".equals(draft.getMode())) throw invalid("私有输入只能以仅保存模式提交");
-        if (draft.getAxesVersion() != 0 || draft.getGrowthSuggestions() == null || !draft.getGrowthSuggestions().isEmpty())
-            throw invalid("当前版本不接受成长建议字段");
+        if (draft.getAxesVersion() < 0 || draft.getGrowthSuggestions() == null || draft.getGrowthSuggestions().size() > 5)
+            throw invalid("成长建议格式无效");
+        for (Object value : draft.getGrowthSuggestions()) {
+            JsonNode suggestion = json.valueToTree(value);
+            String dimension = suggestion.path("dimensionId").asText();
+            int points = suggestion.path("points").asInt(-1);
+            if (dimension.isBlank() || points < 0 || points > 100 || !suggestion.path("reason").isTextual())
+                throw invalid("成长建议维度、分数或原因无效");
+        }
         if (draft.getSegments() == null || draft.getSegments().isEmpty() || draft.getSegments().size() > 20)
             throw invalid("候选片段数量须为 1..20");
         int reviewedLength = 0;

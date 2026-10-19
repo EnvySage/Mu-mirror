@@ -56,4 +56,7 @@ public class RecordQueryDTO {
             type = "string"
     )
     private LocalDate endDate;
+
+    /** Free labels; matching is OR (a record matches any requested tag). */
+    private java.util.List<String> tags;
 }

@@ -143,6 +143,7 @@ public class AiGrpcClient {
                     .setContent(content)
                     .setProcessingAuthorized(true)
                     .setLlmConfig(llmConfig);
+            requestBuilder.setGrowthContext(growthContext(userId));
             if (referenceDate != null && !referenceDate.isBlank()) {
                 requestBuilder.setReferenceDate(referenceDate);
             }
@@ -236,6 +237,7 @@ public class AiGrpcClient {
                     .setProcessingAuthorized(true)
                     .setLlmConfig(llmConfig)
                     .setSingle(true)
+                    .setGrowthContext(growthContext(userId))
                     .addAllRecentContext(recentContextHints(userId, excludeRecordId));
             if (referenceDate != null && !referenceDate.isBlank()) {
                 requestBuilder.setReferenceDate(referenceDate);
@@ -253,6 +255,28 @@ public class AiGrpcClient {
             log.error("gRPC Classify(single) 调用失败: status={}, 用户: {}", e.getStatus(), userId, e);
             throw e;
         }
+    }
+
+    private CommonProto.GrowthContext growthContext(UUID userId) {
+        try {
+            var service = applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class);
+            var builder = CommonProto.GrowthContext.newBuilder();
+            for (var axis : service.axes(userId)) builder.addAxes(CommonProto.GrowthAxis.newBuilder()
+                    .setId(axis.getDimensionId()).setName(axis.getName()).setDescription(axis.getDescription())
+                    .setDefinitionVersion(axis.getDefinitionVersion() == null ? 1 : axis.getDefinitionVersion()));
+            return builder.build();
+        } catch (Exception e) {
+            log.warn("growth_context 组装失败，按空维度继续分类：{}", e.getMessage());
+            return CommonProto.GrowthContext.getDefaultInstance();
+        }
+    }
+
+    public long growthAxesVersion(UUID userId) {
+        return applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class).axesVersion(userId);
+    }
+    public java.util.Set<String> growthAxisIds(UUID userId) {
+        return applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class).axes(userId).stream()
+                .map(org.xianshen.mumirrorb.pojo.DO.GrowthAxis::getDimensionId).collect(java.util.stream.Collectors.toSet());
     }
 
     /**

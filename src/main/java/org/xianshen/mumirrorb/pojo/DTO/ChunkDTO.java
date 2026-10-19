@@ -52,6 +52,9 @@ public class ChunkDTO {
     @Schema(description = "关键词", example = "[\"Spring\", \"Java\"]")
     private List<String> keywords;
 
+    /** User-owned free labels, stored separately from keywords. */
+    private List<String> userTags;
+
     /**
      * 任务状态（仅待办/计划类有效）
      *

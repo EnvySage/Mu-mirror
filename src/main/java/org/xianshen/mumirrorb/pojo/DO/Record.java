@@ -133,6 +133,9 @@ public class Record {
     @Schema(description = "失败原因（仅 failed 状态）", example = "AI 判定内容无意义: 无实质信息")
     private String failReason;
 
+    private String growthSuggestions;
+    private Long growthAxesVersion;
+
     /**
      * Chunk 元数据列表（非数据库字段，不持久化）
      *

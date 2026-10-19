@@ -37,6 +37,8 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -46,6 +48,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class RecordServiceImpl implements RecordService {
+    @org.springframework.beans.factory.annotation.Autowired private org.xianshen.mumirrorb.mapper.GrowthEntryMapper growthEntries;
+    @org.springframework.beans.factory.annotation.Autowired private org.xianshen.mumirrorb.service.GrowthService growthService;
 
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
@@ -167,6 +171,18 @@ public class RecordServiceImpl implements RecordService {
                 .orderByDesc(Record::getCreatedAt);
 
         List<Record> records = recordMapper.selectList(wrapper);
+        if (queryDTO.getTags() != null && !queryDTO.getTags().isEmpty()) {
+            Set<String> requested = queryDTO.getTags().stream().filter(Objects::nonNull).map(String::trim)
+                    .filter(s -> !s.isBlank()).collect(java.util.stream.Collectors.toSet());
+            if (!requested.isEmpty()) {
+                Set<Long> matching = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                                .eq(Chunk::getUserId, userId).in(Chunk::getRecordId, records.stream().map(Record::getId).toList()))
+                        .stream().filter(c -> c.getMetadata() != null && c.getMetadata().get("tags") instanceof List<?> tags
+                                && tags.stream().map(String::valueOf).anyMatch(requested::contains))
+                        .map(Chunk::getRecordId).collect(java.util.stream.Collectors.toSet());
+                records = records.stream().filter(r -> matching.contains(r.getId())).toList();
+            }
+        }
         log.info("查询到 {} 条记录，用户: {}, 日期范围: {} ~ {}", records.size(), userId, startDate, endDate);
 
         return records.stream()
@@ -210,6 +226,9 @@ public class RecordServiceImpl implements RecordService {
         record.setDeletedAt(OffsetDateTime.now());
         record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
         recordMapper.updateById(record);
+        if (growthEntries != null) growthEntries.delete(new LambdaQueryWrapper<org.xianshen.mumirrorb.pojo.DO.GrowthEntry>()
+                .eq(org.xianshen.mumirrorb.pojo.DO.GrowthEntry::getUserId, userId)
+                .eq(org.xianshen.mumirrorb.pojo.DO.GrowthEntry::getSourceRecordId, recordId));
         snapshotLineageService.invalidateSource(userId, "record", recordId, "record_deleted");
         log.info("记录已软删除，ID: {}, 用户: {}", recordId, userId);
     }
@@ -238,6 +257,15 @@ public class RecordServiceImpl implements RecordService {
     public RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
                                   List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions,
                                   UUID actionId, Integer actionExecutionVersion) {
+        return confirmReview(recordId,userId,aiMemoryChunkIds,todoChunkIds,resolutions,actionId,actionExecutionVersion,null,null);
+    }
+
+    @Override
+    @Transactional
+    public RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                                  List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions,
+                                  UUID actionId, Integer actionExecutionVersion,
+                                  List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments, Long axesVersion) {
         Record record = recordMapper.selectOwnedForUpdate(userId, recordId);
         if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         if (record.getMemoryState() == RecordMemoryState.PENDING || record.getMemoryState() == RecordMemoryState.READY
@@ -354,6 +382,16 @@ public class RecordServiceImpl implements RecordService {
         record.setUserReviewed(true);
         record.setUpdatedAt(OffsetDateTime.now());
         recordMapper.updateById(record);
+        if (approvedIds.isEmpty()) {
+            record.setGrowthSuggestions("[]"); record.setGrowthAxesVersion(0L);
+        } else if (growthAdjustments != null && !growthAdjustments.isEmpty()) {
+            long currentAxesVersion = growthService.axesVersion(userId);
+            if (axesVersion == null || axesVersion != currentAxesVersion)
+                throw new BusinessException(409, "成长维度已变化，请刷新审核建议");
+            try { record.setGrowthSuggestions(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(growthAdjustments)); }
+            catch (Exception e) { throw new BusinessException(400, "成长调整格式无效"); }
+            record.setGrowthAxesVersion(axesVersion);
+        }
         for (Long revokedChunkId : revokedMemoryChunkIds) {
             snapshotLineageService.invalidateSource(userId, "chunk", revokedChunkId, "memory_revoked");
         }

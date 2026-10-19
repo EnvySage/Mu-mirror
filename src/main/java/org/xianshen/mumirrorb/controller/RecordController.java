@@ -253,7 +253,8 @@ public class RecordController {
         List<TodoResolutionDTO> resolutions = body == null ? null : body.getTodoResolutions();
         RecordVO record = recordService.confirmReview(id, userId,
                 body == null ? null : body.getAiMemoryChunkIds(),
-                body == null ? null : body.getTodoChunkIds(), resolutions);
+                body == null ? null : body.getTodoChunkIds(), resolutions, null, null,
+                body == null ? null : body.getGrowthAdjustments(), body == null ? null : body.getAxesVersion());
         return R.ok("片段授权已更新", record);
     }
 

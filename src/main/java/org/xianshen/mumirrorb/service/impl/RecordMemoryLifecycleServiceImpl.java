@@ -28,6 +28,7 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
     private final ChunkEmbeddingJobMapper jobs;
     private final SnapshotLineageService lineage;
     private final ApplicationEventPublisher events;
+    @org.springframework.beans.factory.annotation.Autowired private org.xianshen.mumirrorb.service.GrowthService growthService;
 
     @Override
     @Transactional
@@ -39,6 +40,16 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
         record.setMemoryState(RecordMemoryState.READY);
         record.setUpdatedAt(OffsetDateTime.now());
         records.updateById(record);
+        if (growthService != null && record.getGrowthSuggestions() != null && !record.getGrowthSuggestions().isBlank()
+                && record.getGrowthAxesVersion() != null && growthService.axesVersion(userId) == record.getGrowthAxesVersion()) {
+            try {
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                var suggestions = mapper.readValue(record.getGrowthSuggestions(), new com.fasterxml.jackson.core.type.TypeReference<List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO>>() {});
+                growthService.applyConfirmedRecord(userId, recordId, record.getMemoryActionId(), suggestions,
+                        record.getGrowthAxesVersion() == null ? 0 : record.getGrowthAxesVersion());
+            } catch (RuntimeException e) { throw e; }
+            catch (Exception e) { throw new IllegalStateException("成长建议无法入账", e); }
+        }
         completeAction(record, "READY", null);
     }
 
