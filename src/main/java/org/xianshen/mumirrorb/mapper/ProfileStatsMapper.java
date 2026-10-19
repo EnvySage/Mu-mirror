@@ -382,23 +382,4 @@ public interface ProfileStatsMapper {
                           @Param("since") OffsetDateTime since,
                           @Param("until") OffsetDateTime until);
 
-    /**
-     * 最近会话的对话（画像生成用 recent_chats：优先近 7 天，不足则前补，设计文档 6.5）
-     *
-     * <p>"createdAt" 别名必须保留双引号（原因同 selectRecentLearningsRaw：防 PG 折叠小写导致
-     * Map key 与消费侧读取失配）。</p>
-     *
-     * @return Map keys: role / content / createdAt(ISO 字符串)
-     */
-    @Select("""
-            SELECT h.role,
-                   h.content,
-                   TO_CHAR(h.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS "createdAt"
-            FROM conversation_history h
-            WHERE h.user_id = #{userId}::uuid
-            ORDER BY h.created_at DESC
-            LIMIT #{limit}
-            """)
-    List<java.util.Map<String, Object>> selectRecentChats(@Param("userId") java.util.UUID userId,
-                                                          @Param("limit") int limit);
 }

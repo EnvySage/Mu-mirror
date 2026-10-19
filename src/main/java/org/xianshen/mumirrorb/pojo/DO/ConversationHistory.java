@@ -87,6 +87,9 @@ public class ConversationHistory {
     @Schema(description = "是否系统兜底文案（true 不进历史上下文）", example = "false")
     private Boolean isFallback;
 
+    @TableField(value = "context_source_message_ids", typeHandler = org.xianshen.mumirrorb.common.handler.JsonNodeTypeHandler.class)
+    private com.fasterxml.jackson.databind.JsonNode contextSourceMessageIds;
+
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;
 }

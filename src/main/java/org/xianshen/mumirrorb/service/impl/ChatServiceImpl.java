@@ -37,6 +37,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -114,9 +115,12 @@ public class ChatServiceImpl implements ChatService {
     private final org.xianshen.mumirrorb.config.VaultProperties vaultProperties;
     /** 兜底分档要判"该用户一条记录都没有"——复用 get_stats 的现成计数，不新写 SQL */
     private final org.xianshen.mumirrorb.mapper.ProfileStatsMapper statsMapper;
+    private final org.xianshen.mumirrorb.service.ChatMemoryService chatMemoryService;
+    private final DailyChatSessionResolver dailySessionResolver;
     @org.springframework.beans.factory.annotation.Autowired
     private org.xianshen.mumirrorb.service.ActionProposalService actionProposalService;
-
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.service.AssistantContextService assistantContextService;
     @Override
     @Async
     public void chat(UUID userId, ChatRequestDTO dto, SseEmitter emitter) {
@@ -278,7 +282,7 @@ public class ChatServiceImpl implements ChatService {
         if (answer.isEmpty()) {
             // AI 失败兜底（6.6）：仍落库，保证会话连续
             finishWithFallback(emitter, userId, sessionId, route,
-                    emptyAnswerText == null ? FALLBACK_NO_ANSWER : emptyAnswerText);
+                    emptyAnswerText == null ? FALLBACK_NO_ANSWER : emptyAnswerText, request);
             return;
         }
 
@@ -290,8 +294,7 @@ public class ChatServiceImpl implements ChatService {
         // ① 工具侧 [F编号] 引用 ② 通用检索命中的 vault keyChunk（弱引用）
         java.util.List<Map<String, Object>> vaultRefs =
                 vaultRefsFromChunks(chunks, extractVaultRefs(answer.toString(), toolResults));
-        insertMessage(userId, sessionId, "assistant", answer.toString(), sources,
-                toolsUsedRecords, vaultRefs);
+        persistAssistantReply(userId, sessionId, answer.toString(), sources, toolsUsedRecords, vaultRefs, false, request);
         touchSession(sessionId);
         sendEvent(emitter, "sources", sources);
         if (!vaultRefs.isEmpty()) {
@@ -511,7 +514,7 @@ public class ChatServiceImpl implements ChatService {
                                                          List<CommonProto.ToolResult> toolResults) {
         MirrorChatProto.ChatRequest.Builder builder = MirrorChatProto.ChatRequest.newBuilder()
                 .setQuestion(question)
-                .setAssistantContext(assistantContext(userId, sessionId));
+                .setAssistantContext(assistantContext(userId, sessionId, question));
 
         // 工具结果注入（toolcalling-vault-design.md 第 6 节 ChatRequest.tool_results）
         if (toolResults != null && !toolResults.isEmpty()) {
@@ -546,13 +549,13 @@ public class ChatServiceImpl implements ChatService {
      * SSE 兜底收尾：推送兜底文案 + assistant 消息落库（无 sources）+ 触碰 session
      */
     private void finishWithFallback(SseEmitter emitter, UUID userId, UUID sessionId,
-                                    String route, String fallbackText) {
+                                    String route, String fallbackText, MirrorChatProto.ChatRequest request) {
         try {
             sendEvent(emitter, "delta", Map.of("content", fallbackText));
         } catch (Exception ignored) {
         }
         // is_fallback=true：这条不进后续轮次的历史上下文（§6.2，靠列而不是文案匹配）
-        insertMessage(userId, sessionId, "assistant", fallbackText, null, null, null, true);
+        persistAssistantReply(userId, sessionId, fallbackText, null, null, null, true, request);
         touchSession(sessionId);
         try {
             sendEvent(emitter, "done", Map.of(
@@ -561,6 +564,21 @@ public class ChatServiceImpl implements ChatService {
                     "fallback", true));
         } catch (Exception ignored) {
         }
+    }
+
+    private Long persistAssistantReply(UUID userId, UUID sessionId, String content,
+            List<Map<String, Object>> sources, List<Map<String, Object>> toolsUsed,
+            List<Map<String, Object>> vaultRefs, boolean fallback, MirrorChatProto.ChatRequest request) {
+        if (chatMemoryService == null) return insertMessage(userId, sessionId, "assistant", content, sources, toolsUsed, vaultRefs, fallback);
+        var ids = new java.util.LinkedHashSet<Long>();
+        if (request.hasAssistantContext()) request.getAssistantContext().getMemoriesList()
+                .forEach(memory -> ids.addAll(memory.getSourceMessageIdsList()));
+        var metadata = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+        ids.forEach(metadata::add);
+        ConversationHistory message = ConversationHistory.builder().sessionId(sessionId).userId(userId).role("assistant")
+                .content(content).sources(sources).toolsUsed(toolsUsed).vaultRefs(vaultRefs).isFallback(fallback)
+                .contextSourceMessageIds(metadata).createdAt(OffsetDateTime.now(ZONE)).build();
+        return chatMemoryService.persistAssistantReply(message);
     }
 
     // ==================== 会话管理 ====================
@@ -574,6 +592,8 @@ public class ChatServiceImpl implements ChatService {
         return sessions.stream().map(s -> ChatSessionVO.builder()
                 .id(s.getId())
                 .title(s.getTitle())
+                .dayKey(s.getDayKey())
+                .timezone(s.getTimezone())
                 .createdAt(s.getCreatedAt())
                 .updatedAt(s.getUpdatedAt())
                 .build()).toList();
@@ -597,26 +617,45 @@ public class ChatServiceImpl implements ChatService {
                 .title(session.getTitle())
                 .messages(messages)
                 .actions(actionProposalService == null ? List.of() : actionProposalService.listForSession(userId, sessionId))
+                .dayKey(session.getDayKey())
+                .timezone(session.getTimezone())
+                .daySummary(daySummary(chatMemoryService.summaryForSession(userId, sessionId)))
                 .createdAt(session.getCreatedAt())
                 .updatedAt(session.getUpdatedAt())
                 .build();
     }
 
-    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId) {
-        StringBuilder summary = new StringBuilder();
-        for (var action : actionProposalService == null ? List.<org.xianshen.mumirrorb.pojo.VO.ActionProposalVO>of()
-                : actionProposalService.listForSession(userId, sessionId)) {
-            summary.append("id=").append(action.getId()).append(" kind=").append(action.getKind())
-                    .append(" state=").append(action.getState()).append(" version=").append(action.getVersion());
-            if (action.getPayload() != null) summary.append(" payload=").append(action.getPayload());
-            if (action.getResult() != null) summary.append(" result=").append(action.getResult());
-            summary.append('\n');
-        }
+    @Override
+    public org.xianshen.mumirrorb.pojo.VO.TodayChatVO today(UUID userId, boolean create) {
+        LocalDate today = LocalDate.now(ZONE);
+        ChatSession session = create ? dailySessionResolver.getOrCreate(userId, today, "今日对话") : sessionMapper.findDaily(userId, today);
+        // Register PROCESSING rows synchronously; only model work runs in the background.
+        chatMemoryService.prepareEndedDays(userId, today);
+        ChatSessionVO sessionVo = session == null ? null : getSession(session.getId(), userId);
+        return org.xianshen.mumirrorb.pojo.VO.TodayChatVO.builder()
+                .session(sessionVo).endedDaySummaries(chatMemoryService.endedSummaries(userId, today)).build();
+    }
+
+    @Override
+    public void retryDaySummary(UUID userId, UUID sessionId, LocalDate today) {
+        chatMemoryService.retry(userId, sessionId, today);
+    }
+
+    private ChatSessionVO.ChatDaySummaryVO daySummary(org.xianshen.mumirrorb.pojo.DO.ChatDaySummary summary) {
+        if (summary == null) return null;
+        return ChatSessionVO.ChatDaySummaryVO.builder().sourceDate(summary.getSourceDate())
+                .summary(summary.getSummary()).sourceHash(summary.getSourceHash()).state(summary.getState()).build();
+    }
+
+    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId, String question) {
+        if (assistantContextService != null) return assistantContextService.build(userId, sessionId, question);
+        String summary = org.xianshen.mumirrorb.service.ActionStatusSummary.format(
+                actionProposalService == null ? List.of() : actionProposalService.listForSession(userId, sessionId));
         return CommonProto.AssistantContext.newBuilder()
                 .setRoleTone("温和、直接、基于用户提供的信息；操作只可描述为卡片的当前服务端状态")
                 .setCurrentDate(LocalDate.now(ZONE).toString())
                 .setTimezone("Asia/Shanghai")
-                .setActionStatusSummary(summary.toString()).build();
+                .setActionStatusSummary(summary).build();
     }
 
     private void publishActionEvents(SseEmitter emitter, List<CommonProto.ToolResult> results) {
@@ -638,6 +677,16 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public void deleteSession(UUID sessionId, UUID userId) {
         requireOwnedSession(sessionId, userId);
+        // Cancel durable pending cards before FK SET NULL; confirmed independent business objects remain intact.
+        if (actionProposalService != null) {
+            for (var action : actionProposalService.listForSession(userId, sessionId)) {
+                if ("PENDING".equals(action.getState())) {
+                    var cancelled = actionProposalService.cancel(userId, action.getId(), action.getVersion());
+                    if (cancelled == null || !"CANCELLED".equals(cancelled.getState()))
+                        throw new BusinessException(409, "待确认操作尚未取消，无法删除聊天");
+                }
+            }
+        }
         sessionMapper.deleteById(sessionId); // conversation_history 级联删除（FK ON DELETE CASCADE）
         log.info("会话已删除，ID: {}, 用户: {}", sessionId, userId);
     }
@@ -647,18 +696,16 @@ public class ChatServiceImpl implements ChatService {
     private ChatSession resolveSession(UUID userId, UUID sessionId, String question) {
         if (sessionId != null) {
             ChatSession existing = requireOwnedSession(sessionId, userId);
+            // A stream already holds its resolved session id. Only the next request switches days.
+            ChatSession resolved = dailySessionResolver.resolveSend(userId, sessionId, question, LocalDate.now(ZONE));
+            if (resolved.getId().equals(existing.getId())) {
             touchSession(existing.getId());
-            return existing;
+            }
+            return resolved;
         }
-        ChatSession session = ChatSession.builder()
-                .id(UUID.randomUUID()) // 表主键无默认值（未用 gen_random_uuid()），应用侧生成
-                .userId(userId)
-                .title(question.length() > TITLE_MAX_LEN ? question.substring(0, TITLE_MAX_LEN) : question)
-                .createdAt(OffsetDateTime.now(ZONE))
-                .updatedAt(OffsetDateTime.now(ZONE))
-                .build();
-        sessionMapper.insert(session);
-        log.info("新会话已创建，ID: {}, 用户: {}", session.getId(), userId);
+        String title = question.length() > TITLE_MAX_LEN ? question.substring(0, TITLE_MAX_LEN) : question;
+        ChatSession session = dailySessionResolver.getOrCreate(userId, LocalDate.now(ZONE), title);
+        log.info("每日会话已解析，ID: {}, 用户: {}, 日期: {}", session.getId(), userId, session.getDayKey());
         return session;
     }
 
@@ -715,7 +762,7 @@ public class ChatServiceImpl implements ChatService {
      */
     private List<MirrorChatProto.ChatMessage> recentHistory(UUID sessionId, UUID userId, int rounds) {
         List<ConversationHistory> recent =
-                new ArrayList<>(historyMapper.selectRecent(sessionId, userId, rounds * 2));
+                new ArrayList<>(historyMapper.selectRecentForModel(sessionId, userId, rounds * 2));
         Collections.reverse(recent); // SQL 倒序取 N 条 → 反转成时间正序
         List<MirrorChatProto.ChatMessage> messages = new ArrayList<>(recent.size());
         for (ConversationHistory h : recent) {

@@ -61,6 +61,16 @@ public class ActionProposalServiceImpl implements ActionProposalService {
         // Check the durable key before revalidating changed targets: cancellation is permanent.
         ActionProposal existing = mapper.findByPrepareKey(userId, body.getPrepareKey());
         if (existing != null) return ActionProposalVO.from(existing);
+        if ("memory.accept".equals(body.getKind())) {
+            UUID lockedSession = mapper.lockMemoryCandidateSession(userId, body.getSourceSessionId());
+            if (lockedSession == null) throw invalid("记忆候选会话不存在");
+            // The session row serializes summary and tool-originated candidates for this day.
+            // Recheck after waiting for that lock so duplicate keys remain idempotent at the cap.
+            existing = mapper.findByPrepareKey(userId, body.getPrepareKey());
+            if (existing != null) return ActionProposalVO.from(existing);
+            if (mapper.countMemoryCandidates(userId, body.getSourceSessionId()) >= 3)
+                throw invalid("每日最多准备三条记忆候选");
+        }
         ActionHandler handler = handler(body.getKind());
         payload(body.getPayload());
         source(userId, body.getSourceSessionId(), body.getSourceMessageId());

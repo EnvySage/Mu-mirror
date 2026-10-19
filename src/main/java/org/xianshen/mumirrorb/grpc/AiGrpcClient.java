@@ -82,6 +82,15 @@ public class AiGrpcClient {
     private MirrorProfileGrpc.MirrorProfileBlockingStub profileStub;
     private MirrorChatGrpc.MirrorChatBlockingStub chatStub;
 
+    /** Summarizes only the supplied user's messages; validation of source ids happens again in Java. */
+    public MirrorChatProto.SummarizeDayResponse summarizeDay(UUID userId, java.time.LocalDate sourceDate,
+            String sourceHash, List<MirrorChatProto.ChatDayMessage> messages, String timezone) {
+        MirrorChatProto.SummarizeDayRequest request = MirrorChatProto.SummarizeDayRequest.newBuilder()
+                .addAllMessages(messages).setSourceHash(sourceHash).setSourceDate(sourceDate.toString())
+                .setTimezone(timezone).setLlmConfig(buildLlmConfig(userId)).build();
+        return chatStub.withDeadlineAfter(90, TimeUnit.SECONDS).summarizeDay(request);
+    }
+
     @PostConstruct
     public void init() {
         recordStub = RecordProcessorGrpc.newBlockingStub(channel);

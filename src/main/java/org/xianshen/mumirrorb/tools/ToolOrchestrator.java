@@ -42,6 +42,8 @@ public class ToolOrchestrator {
     private final GlossaryService glossaryService;
     private final VaultProperties props;
     private final ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.service.AssistantContextService assistantContextService;
 
     /** 循环末尾兜底补读的审计标记（tool_calls 里区分"模型自己续的"和"执行器补的"） */
     public static final String AUTO_BACKSTOP_PREFIX = "[auto-backstop] ";
@@ -74,7 +76,7 @@ public class ToolOrchestrator {
                     .addAllGlossary(org.xianshen.mumirrorb.grpc.GlossaryProtoMapper
                             .toProtoList(glossaryService.confirmedForInjection(userId)))
                     .addAllTools(registry.toProtoSpecs())
-                    .setAssistantContext(assistantContext(userId, sessionId, actions))
+                    .setAssistantContext(assistantContext(userId, sessionId, question, actions))
                     .build();
             MirrorChatProto.PlanToolsReply reply = aiGrpcClient.planTools(userId, request,
                     props.getPlanToolsTimeoutMs());
@@ -508,7 +510,7 @@ public class ToolOrchestrator {
                 .addAllPreviousResults(previousResults)
                 .setStep(step)
                 .setMaxSteps(maxSteps)
-                .setAssistantContext(assistantContext(userId, sessionId, actions))
+                .setAssistantContext(assistantContext(userId, sessionId, question, actions))
                 .build();
         Iterator<MirrorChatProto.PlanStepChunk> stream =
                 aiGrpcClient.planNextStep(userId, request, props.getPlanToolsTimeoutMs());
@@ -525,21 +527,15 @@ public class ToolOrchestrator {
         throw new IllegalStateException("PlanNextStep 流结束但没有终帧（final=true）");
     }
 
-    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId,
+    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId, String question,
             org.xianshen.mumirrorb.service.ActionProposalService actions) {
-        StringBuilder summary = new StringBuilder();
-        if (actions != null && sessionId != null && userId != null) {
-            for (var action : actions.listForSession(userId, sessionId)) {
-                summary.append("id=").append(action.getId()).append(" kind=").append(action.getKind())
-                        .append(" state=").append(action.getState()).append(" version=").append(action.getVersion());
-                if (action.getPayload() != null) summary.append(" payload=").append(action.getPayload());
-                if (action.getResult() != null) summary.append(" result=").append(action.getResult());
-                summary.append('\n');
-            }
-        }
+        if (assistantContextService != null) return assistantContextService.build(userId, sessionId, question);
+        String summary = org.xianshen.mumirrorb.service.ActionStatusSummary.format(
+                actions == null || sessionId == null || userId == null ? List.of()
+                        : actions.listForSession(userId, sessionId));
         return CommonProto.AssistantContext.newBuilder().setRoleTone("温和、直接、基于用户提供的信息，不夸大执行结果")
                 .setCurrentDate(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString())
-                .setTimezone("Asia/Shanghai").setActionStatusSummary(summary.toString()).build();
+                .setTimezone("Asia/Shanghai").setActionStatusSummary(summary).build();
     }
 
     /** 参数指纹：tool + 规范化 args（key 排序后序列化，{"a":1,"b":2} 与 {"b":2,"a":1} 同指纹） */

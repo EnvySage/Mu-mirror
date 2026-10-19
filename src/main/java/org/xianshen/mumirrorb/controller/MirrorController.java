@@ -26,6 +26,7 @@ import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
+import org.xianshen.mumirrorb.pojo.VO.TodayChatVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
@@ -266,6 +267,28 @@ public class MirrorController {
     public R<List<ChatSessionVO>> sessions() {
         UUID userId = getCurrentUserId();
         return R.ok("查询成功", chatService.listSessions(userId));
+    }
+
+    /** Read today's daily session without creating one; also schedules ended-day summaries in background. */
+    @Operation(summary = "查询今日聊天", description = "只读取今日会话；不存在时 session 为空，并返回已持久化的结束日期总结。")
+    @GetMapping("/sessions/today")
+    public R<TodayChatVO> todaySession() {
+        return R.ok("查询成功", chatService.today(getCurrentUserId(), false));
+    }
+
+    /** Idempotently resolve or create today's session. */
+    @Operation(summary = "解析今日聊天", description = "幂等创建/返回今日会话，日期由 Asia/Shanghai 服务端确定。")
+    @PostMapping("/sessions/today")
+    public R<TodayChatVO> resolveTodaySession() {
+        return R.ok("今日会话已就绪", chatService.today(getCurrentUserId(), true));
+    }
+
+    /** Retry one failed persisted daily summary asynchronously. */
+    @Operation(summary = "重试每日总结", description = "重试指定已结束日期的聊天总结，不阻塞今日聊天。")
+    @PostMapping("/sessions/{id}/summary/retry")
+    public R<Void> retryDaySummary(@PathVariable UUID id) {
+        chatService.retryDaySummary(getCurrentUserId(), id, java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")));
+        return R.ok("总结重试已排队", null);
     }
 
     /**

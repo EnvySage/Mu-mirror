@@ -17,6 +17,13 @@ public interface ActionProposalMapper {
     })
     ActionProposal findByPrepareKey(@Param("userId") UUID userId, @Param("prepareKey") String prepareKey);
 
+    @Select("SELECT id FROM chat_sessions WHERE id=#{sessionId}::uuid AND user_id=#{userId}::uuid FOR UPDATE")
+    UUID lockMemoryCandidateSession(@Param("userId") UUID userId, @Param("sessionId") UUID sessionId);
+
+    @Select("SELECT count(*) FROM assistant_actions WHERE user_id=#{userId}::uuid " +
+            "AND source_session_id=#{sessionId}::uuid AND kind='memory.accept'")
+    int countMemoryCandidates(@Param("userId") UUID userId, @Param("sessionId") UUID sessionId);
+
     @Select("SELECT * FROM assistant_actions WHERE user_id = #{userId}::uuid AND id = #{actionId}::uuid")
     @ResultMap("actionProposal")
     ActionProposal findOwned(@Param("userId") UUID userId, @Param("actionId") UUID actionId);

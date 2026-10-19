@@ -14,6 +14,15 @@ import java.util.List;
 @Mapper
 public interface ConversationHistoryMapper extends BaseMapper<ConversationHistory> {
 
+    @org.apache.ibatis.annotations.Select("""
+      SELECT * FROM conversation_history
+      WHERE session_id=#{sessionId}::uuid AND user_id=#{userId}::uuid AND role='user'
+        AND NOT EXISTS (SELECT 1 FROM chat_source_exclusions x WHERE x.user_id=conversation_history.user_id
+          AND x.source_kind='chat_message' AND x.source_id=conversation_history.id)
+      ORDER BY created_at,id""")
+    List<ConversationHistory> selectUserMessages(@org.apache.ibatis.annotations.Param("sessionId") java.util.UUID sessionId,
+                                                 @org.apache.ibatis.annotations.Param("userId") java.util.UUID userId);
+
     /**
      * 指定会话的历史消息（时间正序，前端渲染顺序）
      *
@@ -40,4 +49,30 @@ public interface ConversationHistoryMapper extends BaseMapper<ConversationHistor
                 .orderByDesc(ConversationHistory::getCreatedAt)
                 .last("LIMIT " + limit));
     }
+
+    /** Future-model context only: retained UI history is deliberately handled by selectBySession. */
+    @org.apache.ibatis.annotations.Select("""
+      SELECT h.id,h.session_id AS "sessionId",h.user_id AS "userId",h.role,h.content,
+             h.is_fallback AS "isFallback",h.created_at AS "createdAt"
+      FROM conversation_history h
+      WHERE h.session_id=#{sessionId}::uuid AND h.user_id=#{userId}::uuid
+        AND NOT EXISTS (SELECT 1 FROM chat_source_exclusions x
+          WHERE x.user_id=h.user_id AND x.source_kind='chat_message' AND x.source_id=h.id)
+        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(h.context_source_message_ids) src(value)
+          JOIN chat_source_exclusions x ON x.user_id=h.user_id AND x.source_kind='chat_message'
+            AND x.source_id=src.value::bigint)
+      ORDER BY h.created_at DESC,h.id DESC LIMIT #{limit}
+      """)
+    List<ConversationHistory> selectRecentForModel(@org.apache.ibatis.annotations.Param("sessionId") java.util.UUID sessionId,
+                                                   @org.apache.ibatis.annotations.Param("userId") java.util.UUID userId,
+                                                   @org.apache.ibatis.annotations.Param("limit") int limit);
+
+    @org.apache.ibatis.annotations.Select("""
+      SELECT DISTINCT h.id FROM conversation_history h
+      JOIN LATERAL jsonb_array_elements_text(h.context_source_message_ids) src(value) ON TRUE
+      WHERE h.user_id=#{userId}::uuid AND h.role='assistant'
+        AND src.value::bigint = ANY(#{sourceIds}::bigint[])
+      """)
+    List<Long> selectAssistantRepliesDependingOn(@org.apache.ibatis.annotations.Param("userId") java.util.UUID userId,
+                                                   @org.apache.ibatis.annotations.Param("sourceIds") Long[] sourceIds);
 }

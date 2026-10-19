@@ -3,6 +3,8 @@ package org.xianshen.mumirrorb.service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
+import org.xianshen.mumirrorb.pojo.VO.TodayChatVO;
+import java.time.LocalDate;
 
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +36,10 @@ public interface ChatService {
      * 会话历史（含全部消息，时间正序；非本人会话报 404 语义）
      */
     ChatSessionVO getSession(UUID sessionId, UUID userId);
+
+    TodayChatVO today(UUID userId, boolean create);
+
+    void retryDaySummary(UUID userId, UUID sessionId, LocalDate today);
 
     /**
      * 删除会话（消息级联删除，FK ON DELETE CASCADE）

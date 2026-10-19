@@ -74,6 +74,9 @@ class MirrorStatsTest {
     @Mock
     private SnapshotLineageService snapshotLineageService;
 
+    @Mock
+    private AssistantContextService assistantContextService;
+
     private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties =
             new org.xianshen.mumirrorb.config.MirrorProperties();
 
@@ -84,10 +87,70 @@ class MirrorStatsTest {
     void injectProps() {
         org.springframework.test.util.ReflectionTestUtils.setField(
                 mirrorService, "mirrorProperties", mirrorProperties);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                mirrorService, "assistantContextService", assistantContextService);
+        lenient().when(assistantContextService.buildForProfile(eq(USER_ID), any()))
+                .thenReturn(new AssistantContextService.BuiltContext(
+                        org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext.getDefaultInstance(), List.of()));
     }
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+
+    @Test
+    @DisplayName("遗忘聊天来源按用户和消息 ID 触发快照谱系失效")
+    void forgottenChatSourcesInvalidateSnapshotLineageForUser() {
+        List<Long> messageIds = List.of(101L, 202L);
+        org.xianshen.mumirrorb.service.impl.SnapshotLineageService lineage =
+                new org.xianshen.mumirrorb.service.impl.SnapshotLineageService(snapshotMapper, snapshotInputMapper);
+        when(snapshotMapper.lockUserLineage(USER_ID)).thenReturn(USER_ID);
+
+        lineage.invalidateForForgottenChatSources(USER_ID, messageIds);
+
+        org.mockito.Mockito.verify(snapshotMapper).lockUserLineage(USER_ID);
+        org.mockito.Mockito.verify(snapshotMapper).invalidateTrackedFromChatSources(
+                USER_ID, messageIds, "forgotten_chat_source");
+        org.mockito.Mockito.verify(snapshotMapper).invalidateUnknownChatLineageForUser(USER_ID);
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never())
+                .invalidateTrackedFromSource(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("快照可登记已授权记忆的全部聊天消息直接来源")
+    void recordsAllAuthorizedChatMessageInputs() {
+        ProfileSnapshot snapshot = ProfileSnapshot.builder().id(11L).userId(USER_ID).chatLineageKnown(true).build();
+        when(snapshotMapper.selectById(11L)).thenReturn(snapshot);
+        when(snapshotMapper.lockUserLineage(USER_ID)).thenReturn(USER_ID);
+        org.xianshen.mumirrorb.service.impl.SnapshotLineageService lineage =
+                new org.xianshen.mumirrorb.service.impl.SnapshotLineageService(snapshotMapper, snapshotInputMapper);
+
+        lineage.recordChatMessageInputs(11L, List.of(101L, 202L, 202L));
+
+        org.mockito.ArgumentCaptor<List<org.xianshen.mumirrorb.pojo.DO.SnapshotInput>> inputs =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        org.mockito.Mockito.verify(snapshotInputMapper).insertAll(eq(11L), inputs.capture());
+        assertEquals(List.of(101L, 202L), inputs.getValue().stream()
+                .map(org.xianshen.mumirrorb.pojo.DO.SnapshotInput::getInputId).toList());
+        assertTrue(inputs.getValue().stream().allMatch(input -> "chat_message".equals(input.getInputKind())));
+        org.mockito.Mockito.verify(snapshotMapper).markChatLineageKnown(11L);
+    }
+
+    @Test
+    @DisplayName("用户谱系锁后发现来源已遗忘时拒绝保存画像来源")
+    void refusesLateSnapshotSourcesThatWereForgotten() {
+        ProfileSnapshot snapshot = ProfileSnapshot.builder().id(12L).userId(USER_ID).chatLineageKnown(true).build();
+        when(snapshotMapper.selectById(12L)).thenReturn(snapshot);
+        when(snapshotMapper.lockUserLineage(USER_ID)).thenReturn(USER_ID);
+        when(snapshotMapper.hasForgottenChatSources(USER_ID, List.of(101L))).thenReturn(true);
+        org.xianshen.mumirrorb.service.impl.SnapshotLineageService lineage =
+                new org.xianshen.mumirrorb.service.impl.SnapshotLineageService(snapshotMapper, snapshotInputMapper);
+
+        assertThrows(IllegalStateException.class, () -> lineage.recordChatMessageInputs(12L, List.of(101L)));
+
+        org.mockito.Mockito.verify(snapshotMapper).hasForgottenChatSources(USER_ID, List.of(101L));
+        org.mockito.Mockito.verify(snapshotInputMapper, org.mockito.Mockito.never()).insertAll(any(), any());
+        org.mockito.Mockito.verify(snapshotMapper, org.mockito.Mockito.never()).markChatLineageKnown(any());
+    }
 
     private Map<String, Object> row(Object... kv) {
         Map<String, Object> m = new HashMap<>();
@@ -307,13 +370,11 @@ class MirrorStatsTest {
     // ==================== 按月统计窗口（generateMonthlyFor，T-DB-9 任务 2） ====================
 
     /**
-     * 打桩：8 月窗口用例（selectOpenTodos/selectRecentLearningsRaw/selectRecentChats 无时间参数）
+     * 打桩：8 月窗口用例（selectOpenTodos/selectRecentLearningsRaw 无时间参数）
      */
     private void stubMonthlyWindow() {
         stubEmpty();
         lenient().when(statsMapper.selectRecentLearningsRaw(USER_ID)).thenReturn(List.of());
-        lenient().when(statsMapper.selectRecentChats(eq(USER_ID), org.mockito.ArgumentMatchers.anyInt()))
-                .thenReturn(List.of());
         lenient().when(settingsMapper.selectOne(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new org.xianshen.mumirrorb.pojo.DO.UserSettings());
     }
@@ -596,6 +657,37 @@ class MirrorStatsTest {
         lenient().when(snapshotMapper.selectLatest(eq(USER_ID), eq("manual"))).thenReturn(null);
         lenient().when(aiGrpcClient.generateProfile(eq(USER_ID), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(MirrorProfileVOHelper.emptyResponse());
+    }
+
+    @Test
+    @DisplayName("画像仅注入授权记忆，并记录聊天来源谱系，不读取原始 recent_chats")
+    void profileUsesAuthorizedMemoryContextAndRecordsChatLineage() {
+        stubRollingBase(1);
+        var memory = org.xianshen.mumirrorb.grpc.gen.CommonProto.ChatMemoryContext.newBuilder()
+                .setMemoryId(UUID.randomUUID().toString()).setContent("喜欢晨间阅读").setKind("preference")
+                .setSourceDate("2026-10-18").addSourceMessageIds(601L).build();
+        var context = org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext.newBuilder()
+                .addMemories(memory).build();
+        when(assistantContextService.buildForProfile(eq(USER_ID), any())).thenReturn(
+                new AssistantContextService.BuiltContext(context, List.of(601L)));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((ProfileSnapshot) invocation.getArgument(0)).setId(889L);
+            return 1;
+        }).when(snapshotMapper).insert(any(ProfileSnapshot.class));
+
+        mirrorService.generateMonthlyFor(USER_ID, "2026-08");
+
+        org.mockito.ArgumentCaptor<MirrorProfileProto.GenerateProfileRequest> request =
+                org.mockito.ArgumentCaptor.forClass(MirrorProfileProto.GenerateProfileRequest.class);
+        org.mockito.Mockito.verify(aiGrpcClient).generateProfile(eq(USER_ID), request.capture());
+        assertEquals(1, request.getValue().getAssistantContext().getMemoriesCount());
+        assertEquals("喜欢晨间阅读", request.getValue().getAssistantContext().getMemories(0).getContent());
+        assertEquals(0, request.getValue().getRecentChatsCount());
+        org.mockito.Mockito.verify(snapshotLineageService).recordChatMessageInputs(889L, List.of(601L));
+        org.mockito.Mockito.verify(snapshotInputMapper).insertAll(eq(889L), org.mockito.ArgumentMatchers.argThat(inputs ->
+                inputs.stream().anyMatch(input -> "chat_message".equals(input.getInputKind())
+                        && Long.valueOf(601L).equals(input.getInputId())
+                        && "memory_source".equals(input.getInputRole()))));
     }
 
     private YearMonth invokeGenerateMonthlyFor(String month) {

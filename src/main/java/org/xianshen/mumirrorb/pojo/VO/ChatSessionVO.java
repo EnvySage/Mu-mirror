@@ -28,6 +28,12 @@ public class ChatSessionVO {
     @Schema(description = "会话标题", example = "我最近在忙什么")
     private String title;
 
+    private java.time.LocalDate dayKey;
+
+    private String timezone;
+
+    private ChatDaySummaryVO daySummary;
+
     @Schema(description = "历史消息（仅 GET /mirror/sessions/{id} 返回；列表接口为 null）")
     private List<MessageVO> messages;
 
@@ -41,6 +47,14 @@ public class ChatSessionVO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "更新时间（会话列表排序键）")
     private OffsetDateTime updatedAt;
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class ChatDaySummaryVO {
+        private java.time.LocalDate sourceDate;
+        private String summary;
+        private String sourceHash;
+        private String state;
+    }
 
     /**
      * 单条消息（含来源追溯）

@@ -27,6 +27,7 @@ message GenerateProfileRequest {
   string correction_index = 12;          // ③ 校正索引（上月镜子涉及记录的 title+日期清单），仅回看深度=0 时传入
   optional int32 mirror_lookback = 13;   // ② 回看深度档位 0-3（默认 1）；optional 区分"未传=缺省1档"与"显式0=纯继承档"
   string stats_facts = 14;               // ④ 待办/统计实况直查文本（B 提案字段，AI 渲染 {stats_facts} 直接引用；忽略则零影响）
+  AssistantContext assistant_context = 15; // 服务端授权的记忆与来源；不再发送 raw recent_chats
 }
 
 message TodoItem {
