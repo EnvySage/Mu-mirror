@@ -25,6 +25,11 @@ import org.xianshen.mumirrorb.tools.AuditService;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,8 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -98,6 +105,91 @@ class AgentRunServiceTest {
                 "user".equals(message.getRole()) && result.run().getRunId().equals(message.getRunId())));
         verify(lifecycle).startLease(org.mockito.ArgumentMatchers.eq(result.run().getRunId()),
                 org.mockito.ArgumentMatchers.any(Runnable.class));
+    }
+
+    @Test
+    void shadowModeKeepsLegacyAsTheUserEngineAndFreezesTheSampleDecision() {
+        engineProperties.setEngine("shadow");
+        engineProperties.setShadowSampleRate(1.0);
+
+        StartRunResult result = service.startOrFindRun(USER_ID,
+                ChatRequestDTO.builder().question("普通只读问题").requestId(UUID.randomUUID()).build());
+
+        assertEquals("legacy", result.run().getEngine());
+        assertEquals("live", result.run().getMode());
+        assertTrue(result.run().getMetricsJson().contains("\"shadow_sampled\":true"));
+    }
+
+    @Test
+    void sampledShadowNeverDispatchesAnExplicitOnlineWriteRequest() {
+        AgentRun parent = AgentRun.builder().runId(UUID.randomUUID()).userId(USER_ID).sessionId(SESSION_ID)
+                .engine("legacy").mode("live").status("completed").metricsJson("{\"shadow_sampled\":true}")
+                .build();
+        ChatInvocation invocation = new ChatInvocation(USER_ID, SESSION_ID, parent.getRunId(), UUID.randomUUID(),
+                71L, "帮我记一篇日记：这条原文必须只写一次", "legacy");
+
+        service.scheduleShadow(parent, invocation);
+
+        verify(repository, never()).findById(parent.getRunId());
+        verify(repository, never()).insert(any(AgentRun.class));
+        verify(agentGrpcClient, never()).buildRequest(any(ChatInvocation.class), any(AgentRun.class));
+    }
+
+    @Test
+    void shadowUsesOneNonQueuedSlotAndIsCancelledWhenForegroundGraphNeedsCapacity() throws Exception {
+        AgentRun parent = AgentRun.builder().runId(UUID.randomUUID()).userId(USER_ID).sessionId(SESSION_ID)
+                .engine("legacy").mode("live").status("completed").requestHash("parent-hash")
+                .questionHash("question-hash").metricsJson("{\"shadow_sampled\":true}").build();
+        AgentRun secondParent = AgentRun.builder().runId(UUID.randomUUID()).userId(USER_ID).sessionId(SESSION_ID)
+                .engine("legacy").mode("live").status("completed").requestHash("parent-hash-2")
+                .questionHash("question-hash-2").metricsJson("{\"shadow_sampled\":true}").build();
+        when(repository.findById(parent.getRunId())).thenReturn(parent);
+        when(repository.findById(secondParent.getRunId())).thenReturn(secondParent);
+        when(repository.hasActiveForegroundGraph()).thenReturn(false);
+        when(repository.requestShadowCancel(any(), any())).thenReturn(true);
+
+        List<AgentRun> inserted = new ArrayList<>();
+        CountDownLatch callStarted = new CountDownLatch(1);
+        CountDownLatch callCancelled = new CountDownLatch(1);
+        CountDownLatch shadowFinished = new CountDownLatch(1);
+        AtomicReference<StreamObserver<AgentProto.AgentEvent>> observer = new AtomicReference<>();
+        doAnswer(call -> { inserted.add(call.getArgument(0)); return null; })
+                .when(repository).insert(any(AgentRun.class));
+        when(agentGrpcClient.buildRequest(any(ChatInvocation.class), any(AgentRun.class)))
+                .thenReturn(AgentProto.AgentRunRequest.getDefaultInstance());
+        when(agentGrpcClient.run(any(), any())).thenAnswer(call -> {
+            observer.set(call.getArgument(1));
+            callStarted.countDown();
+            return (AgentGrpcClient.CancellableCall) callCancelled::countDown;
+        });
+        doAnswer(call -> { shadowFinished.countDown(); return true; })
+                .when(repository).completeShadow(any(), any(), any(), any(), any(), anyInt(), anyInt(), anyLong(), any());
+
+        try {
+            service.scheduleShadow(parent, new ChatInvocation(USER_ID, SESSION_ID, parent.getRunId(),
+                    UUID.randomUUID(), 71L, "只读评测问题", "legacy"));
+            assertTrue(callStarted.await(2, TimeUnit.SECONDS));
+
+            service.scheduleShadow(secondParent, new ChatInvocation(USER_ID, SESSION_ID, secondParent.getRunId(),
+                    UUID.randomUUID(), 72L, "另一个只读问题", "legacy"));
+            assertEquals(1, inserted.stream().filter(run -> "shadow".equals(run.getMode())).count());
+
+            service.cancelShadowForForeground();
+            assertTrue(callCancelled.await(2, TimeUnit.SECONDS));
+            assertEquals("shadow", inserted.get(0).getMode());
+            assertEquals(parent.getRunId(), inserted.get(0).getParentRunId());
+            verify(repository).requestShadowCancel(inserted.get(0).getRunId(), "foreground_priority");
+
+            observer.get().onError(new RuntimeException("cancelled by foreground"));
+            assertTrue(shadowFinished.await(2, TimeUnit.SECONDS));
+            verify(historyMapper, never()).insert(org.mockito.ArgumentMatchers.argThat(message ->
+                    "assistant".equals(message.getRole()) && inserted.get(0).getRunId().equals(message.getRunId())));
+            verify(glossaryService, never()).recordQueryHits(any(), any(), any());
+            verify(auditService, never()).record(any(), any(), any(), any(), any(), any(), anyMap(), any(),
+                    anyBoolean(), anyLong(), any());
+        } finally {
+            service.closeShadowExecutor();
+        }
     }
 
     @Test

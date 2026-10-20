@@ -102,6 +102,27 @@ class AgentEventAdapterTest {
         verifyNoMoreInteractions(auditService);
     }
 
+    @Test
+    void shadowToolEventsAreNeverWrittenToTheFormalAuditService() {
+        AgentRun run = AgentRun.builder().runId(runId).userId(UUID.randomUUID())
+                .sessionId(UUID.randomUUID()).engine("graph_v2").mode("shadow").status("running").build();
+        ChatInvocation invocation = new ChatInvocation(run.getUserId(), run.getSessionId(), runId,
+                UUID.randomUUID(), 15L, "question", "graph_v2");
+        AgentEventAdapter shadow = new AgentEventAdapter(run, invocation, null, auditService,
+                new ObjectMapper(), true);
+        AgentProto.AgentToolTrace trace = AgentProto.AgentToolTrace.newBuilder()
+                .setCallId("shadow-call").setTool("search_records").setArgsJson("{\"query\":\"x\"}")
+                .setSummary("one result").setSuccess(true).build();
+
+        shadow.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString())
+                .setSeq(1).setToolFinished(trace).build());
+        shadow.accept(delta(runId, 2, "answer"));
+        shadow.accept(completed(runId, 3, "answer"));
+
+        assertEquals("completed", shadow.result().status());
+        verifyNoMoreInteractions(auditService);
+    }
+
     private static AgentProto.AgentEvent delta(UUID runId, long sequence, String text) {
         return AgentProto.AgentEvent.newBuilder().setRunId(runId.toString()).setSeq(sequence)
                 .setDelta(AgentProto.AgentText.newBuilder().setContent(text)).build();

@@ -1,6 +1,7 @@
 package org.xianshen.mumirrorb.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -35,6 +36,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -60,6 +65,13 @@ public class AgentRunService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
     private final ConcurrentHashMap<UUID, ActiveExecution> activeExecutions = new ConcurrentHashMap<>();
+    private final ThreadPoolExecutor shadowExecutor = new ThreadPoolExecutor(1, 1, 0L,
+            TimeUnit.MILLISECONDS, new SynchronousQueue<>(), runnable -> {
+                Thread thread = new Thread(runnable, "agent-shadow-run");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private final AtomicReference<ShadowExecution> activeShadow = new AtomicReference<>();
 
     public AgentRunService(AgentRunRepository repository,
                           AgentCommandService commandService,
@@ -138,11 +150,13 @@ public class AgentRunService {
 
         UUID runId = UUID.randomUUID();
         String engine = engineProperties.graphEnabled(userId) ? "graph_v2" : "legacy";
+        boolean shadowSampled = "legacy".equals(engine) && engineProperties.sampleShadowRun();
         AgentRun run = AgentRun.builder().runId(runId).userId(userId).sessionId(session.getId())
                 .clientRequestId(requestId).requestHash(requestHash).questionHash(sha256(question))
                 .engine(engine).mode("live").status("running").startedAt(now)
                 .leaseExpiresAt(now.plusSeconds(agentProperties.getLeaseSeconds()))
-                .planRounds(0).toolCallCount(0).lastEventSeq(0L).glossaryHitsApplied(false).build();
+                .planRounds(0).toolCallCount(0).lastEventSeq(0L).glossaryHitsApplied(false)
+                .metricsJson(shadowSampled ? "{\"shadow_sampled\":true}" : "{}").build();
         repository.insert(run);
 
         ConversationHistory userMessage = ConversationHistory.builder().runId(runId)
@@ -189,17 +203,20 @@ public class AgentRunService {
             runGraph(run, invocation, emitter);
             return;
         }
+        ChatFinalResult legacyResult;
         try {
-            finish(run, invocation, chatService.runLegacy(invocation, emitter), emitter);
+            legacyResult = chatService.runLegacy(invocation, emitter);
         } catch (Exception error) {
             log.error("Legacy chat failed for run {}", run.getRunId(), error);
-            ChatFinalResult result = ChatFinalResult.fallback("暂时无法回答", "legacy_error", "");
-            sendEvent(emitter, "delta", Map.of("content", result.answerText()));
-            finish(run, invocation, result, emitter);
+            legacyResult = ChatFinalResult.fallback("暂时无法回答", "legacy_error", "");
+            sendEvent(emitter, "delta", Map.of("content", legacyResult.answerText()));
         }
+        finish(run, invocation, legacyResult, emitter);
+        scheduleShadow(run, invocation);
     }
 
     private void runGraph(AgentRun run, ChatInvocation invocation, SseEmitter emitter) {
+        cancelShadowForForeground();
         AgentEventAdapter adapter = new AgentEventAdapter(run, invocation, emitter, auditService, objectMapper, false);
         AtomicReference<AgentGrpcClient.CancellableCall> callRef = new AtomicReference<>();
         AtomicBoolean cancelPending = new AtomicBoolean(false);
@@ -373,6 +390,196 @@ public class AgentRunService {
         log.warn("Agent run lease lost and execution cancelled: runId={}", runId);
     }
 
+    void scheduleShadow(AgentRun parent, ChatInvocation parentInvocation) {
+        if (!"legacy".equals(parent.getEngine()) || !"live".equals(parent.getMode())
+                || !shadowSampled(parent.getMetricsJson())
+                || AgentWriteGrantService.authorizedContent(parentInvocation.question()) != null) {
+            return;
+        }
+        AgentRun latest;
+        try {
+            latest = repository.findById(parent.getRunId());
+        } catch (Exception error) {
+            log.info("Skipping sampled shadow run because the parent state could not be checked: parentRunId={}",
+                    parent.getRunId());
+            return;
+        }
+        if (latest == null || !("completed".equals(latest.getStatus()) || "failed".equals(latest.getStatus()))) {
+            return;
+        }
+        try {
+            shadowExecutor.execute(() -> runShadow(parent, parentInvocation));
+        } catch (RejectedExecutionException saturated) {
+            log.info("Skipping sampled shadow run because its single execution slot is busy: parentRunId={}",
+                    parent.getRunId());
+        }
+    }
+
+    private void runShadow(AgentRun parent, ChatInvocation parentInvocation) {
+        boolean foregroundGraphActive;
+        try {
+            foregroundGraphActive = !activeExecutions.isEmpty() || repository.hasActiveForegroundGraph();
+        } catch (Exception error) {
+            log.info("Skipping sampled shadow run because foreground capacity could not be checked: parentRunId={}",
+                    parent.getRunId());
+            return;
+        }
+        if (foregroundGraphActive) {
+            log.info("Skipping sampled shadow run while a foreground graph run is active: parentRunId={}",
+                    parent.getRunId());
+            return;
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(ZONE);
+        UUID shadowRunId = UUID.randomUUID();
+        UUID shadowRequestId = UUID.randomUUID();
+        AgentRun shadow = AgentRun.builder().runId(shadowRunId).userId(parent.getUserId())
+                .sessionId(parent.getSessionId()).clientRequestId(shadowRequestId)
+                .requestHash(sha256(parent.getRequestHash() + ":shadow:" + shadowRunId))
+                .questionHash(parent.getQuestionHash()).engine("graph_v2").mode("shadow")
+                .parentRunId(parent.getRunId()).status("running").startedAt(now)
+                .leaseExpiresAt(now.plusNanos((agentProperties.getTotalBudgetMs() + 10_000L) * 1_000_000L))
+                .userMessageId(parentInvocation.userMessageId()).planRounds(0).toolCallCount(0)
+                .lastEventSeq(0L).glossaryHitsApplied(false).metricsJson("{}").build();
+        ChatInvocation invocation = new ChatInvocation(parentInvocation.userId(), parentInvocation.sessionId(),
+                shadowRunId, shadowRequestId, parentInvocation.userMessageId(), parentInvocation.question(), "graph_v2");
+
+        AtomicReference<AgentGrpcClient.CancellableCall> callRef = new AtomicReference<>();
+        AtomicBoolean cancelPending = new AtomicBoolean(false);
+        ActiveExecution execution = new ActiveExecution(() -> {
+            cancelPending.set(true);
+            AgentGrpcClient.CancellableCall call = callRef.get();
+            if (call != null) call.cancel();
+        });
+        ShadowExecution state = new ShadowExecution(shadow, execution);
+        if (!activeShadow.compareAndSet(null, state)) return;
+
+        try {
+            repository.insert(shadow);
+        } catch (Exception error) {
+            activeShadow.compareAndSet(state, null);
+            log.warn("Could not create sampled shadow run for parent {}: {}", parent.getRunId(), error.getMessage());
+            return;
+        }
+        boolean foregroundArrived;
+        try {
+            foregroundArrived = !activeExecutions.isEmpty() || repository.hasActiveForegroundGraph();
+        } catch (Exception error) {
+            foregroundArrived = true;
+        }
+        if (cancelPending.get() || foregroundArrived) {
+            try {
+                repository.requestShadowCancel(shadowRunId, "foreground_priority");
+            } catch (Exception error) {
+                log.debug("Could not mark shadow skip before gRPC dispatch: runId={}", shadowRunId);
+            }
+            finishShadow(state, cancelledShadowResult());
+            return;
+        }
+
+        AgentEventAdapter adapter = new AgentEventAdapter(shadow, invocation, null, auditService, objectMapper, true);
+        AtomicBoolean finalized = new AtomicBoolean(false);
+        try {
+            AgentProto.AgentRunRequest request = agentGrpcClient.buildRequest(invocation, shadow);
+            if (cancelPending.get()) {
+                finishShadow(state, cancelledShadowResult());
+                return;
+            }
+            AgentGrpcClient.CancellableCall call = agentGrpcClient.run(request, new StreamObserver<>() {
+                @Override
+                public void onNext(AgentProto.AgentEvent event) {
+                    try {
+                        adapter.accept(event);
+                    } catch (Exception error) {
+                        adapter.protocolFailure("AGENT_PROTOCOL_ERROR");
+                        execution.cancel();
+                        if (finalized.compareAndSet(false, true)) finishShadow(state, adapter.result());
+                    }
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                    if (finalized.compareAndSet(false, true)) finishShadow(state, adapter.failTransport(error));
+                }
+
+                @Override
+                public void onCompleted() {
+                    if (finalized.compareAndSet(false, true)) finishShadow(state, adapter.finishTransport());
+                }
+            });
+            callRef.set(call);
+            if (cancelPending.get()) call.cancel();
+        } catch (Exception error) {
+            log.info("Sampled shadow run could not start: runId={}, cause={}", shadowRunId, error.getMessage());
+            if (finalized.compareAndSet(false, true)) {
+                finishShadow(state, ChatFinalResult.failed("", "AGENT_UNAVAILABLE", "agent_unavailable", ""));
+            }
+        }
+    }
+
+    private void finishShadow(ShadowExecution execution, ChatFinalResult result) {
+        ChatFinalResult finalResult = result == null
+                ? ChatFinalResult.failed("", "EMPTY_RESULT", "empty_result", "") : result;
+        if (!finalResult.createdRecords().isEmpty()
+                || (finalResult.outcome() != null && finalResult.outcome().startsWith("action_"))) {
+            finalResult = ChatFinalResult.failed("", "SHADOW_WRITE_BLOCKED", "shadow_write_blocked", "");
+        }
+        try {
+            boolean persisted = repository.completeShadow(execution.run(), finalResult.status(), finalResult.outcome(),
+                    finalResult.stopReason(), finalResult.errorCode(), finalResult.planRounds(),
+                    finalResult.toolCallCount(), finalResult.lastEventSeq(),
+                    metricsWithRoute(finalResult.metricsJson(), finalResult.route()));
+            if (!persisted) {
+                log.info("Sampled shadow run finished after its state was no longer active: runId={}",
+                        execution.run().getRunId());
+            }
+        } catch (Exception error) {
+            log.warn("Could not persist sampled shadow metrics: runId={}, cause={}",
+                    execution.run().getRunId(), error.getMessage());
+        } finally {
+            activeShadow.compareAndSet(execution, null);
+            log.info("Sampled shadow run finished: runId={}, outcome={}, stopReason={}",
+                    execution.run().getRunId(), finalResult.outcome(), finalResult.stopReason());
+        }
+    }
+
+    void cancelShadowForForeground() {
+        ShadowExecution shadow = activeShadow.get();
+        if (shadow != null) {
+            try {
+                repository.requestShadowCancel(shadow.run().getRunId(), "foreground_priority");
+            } catch (Exception error) {
+                log.info("Could not mark shadow cancellation before foreground dispatch: runId={}",
+                        shadow.run().getRunId());
+            }
+            shadow.execution().cancel();
+        }
+    }
+
+    private boolean shadowSampled(String metricsJson) {
+        try {
+            Map<String, Object> metrics = objectMapper.readValue(metricsJson == null ? "{}" : metricsJson,
+                    new com.fasterxml.jackson.core.type.TypeReference<>() { });
+            return Boolean.TRUE.equals(metrics.get("shadow_sampled"));
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    @PreDestroy
+    public void closeShadowExecutor() {
+        ShadowExecution shadow = activeShadow.get();
+        if (shadow != null) {
+            try {
+                repository.requestShadowCancel(shadow.run().getRunId(), "service_shutdown");
+            } catch (Exception error) {
+                log.debug("Could not mark shadow cancellation during shutdown: runId={}", shadow.run().getRunId());
+            }
+            shadow.execution().cancel();
+        }
+        shadowExecutor.shutdownNow();
+    }
+
     private void finish(AgentRun originalRun, ChatInvocation invocation,
                         ChatFinalResult result, SseEmitter emitter) {
         if (result == null) result = ChatFinalResult.failed("暂时无法回答", "EMPTY_RESULT", "empty_result", "");
@@ -457,9 +664,11 @@ public class AgentRunService {
                 && "completed".equals(status) && !result.glossaryHitIds().isEmpty()) {
             glossaryService.recordQueryHits(run.getUserId(), runId, result.glossaryHitIds());
         }
+        String runMetrics = metricsWithRoute(result.metricsJson(), result.route());
+        if (shadowSampled(run.getMetricsJson())) runMetrics = withShadowSampled(runMetrics);
         boolean updated = repository.complete(run, status, result.outcome(), stopReason, errorCode,
                 result.planRounds(), result.toolCallCount(), result.lastEventSeq(), assistant.getId(),
-                metricsWithRoute(result.metricsJson(), result.route()));
+                runMetrics);
         if (!updated) throw new IllegalStateException("Agent run left its active lease before completion");
         run.setStatus(status);
         run.setOutcome(result.outcome());
@@ -529,6 +738,23 @@ public class AgentRunService {
         }
     }
 
+    private String withShadowSampled(String metricsJson) {
+        try {
+            Map<String, Object> metrics = objectMapper.readValue(metricsJson == null ? "{}" : metricsJson,
+                    new com.fasterxml.jackson.core.type.TypeReference<>() { });
+            metrics.put("shadow_sampled", true);
+            return objectMapper.writeValueAsString(metrics);
+        } catch (Exception ignored) {
+            return "{\"shadow_sampled\":true}";
+        }
+    }
+
+    private ChatFinalResult cancelledShadowResult() {
+        return new ChatFinalResult("", List.of(), List.of(), List.of(), List.of(), false, false,
+                "cancelled", "answer", "", "foreground_priority", "CANCELLED",
+                0, 0, 0L, "{}", List.of());
+    }
+
     private String routeFrom(String metricsJson) {
         try {
             Map<String, Object> metrics = objectMapper.readValue(metricsJson == null ? "{}" : metricsJson,
@@ -581,6 +807,8 @@ public class AgentRunService {
 
     private record CompletionCommit(boolean persisted, AgentRun run, ConversationHistory assistant,
                                     String status, String errorCode, boolean receiptConfirmed) { }
+
+    private record ShadowExecution(AgentRun run, ActiveExecution execution) { }
 
     private static final class ActiveExecution {
         private final Runnable cancelAction;

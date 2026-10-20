@@ -69,12 +69,46 @@ public class AgentRunRepository {
                     run_id, user_id, session_id, client_request_id, request_hash,
                     engine, mode, parent_run_id, question_hash, status, outcome,
                     user_message_id, started_at, lease_expires_at, metrics
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """,
                 run.getRunId(), run.getUserId(), run.getSessionId(), run.getClientRequestId(),
                 run.getRequestHash(), run.getEngine(), run.getMode(), run.getParentRunId(),
                 run.getQuestionHash(), run.getStatus(), run.getOutcome(), run.getUserMessageId(),
-                run.getStartedAt(), run.getLeaseExpiresAt());
+                run.getStartedAt(), run.getLeaseExpiresAt(),
+                run.getMetricsJson() == null ? "{}" : run.getMetricsJson());
+    }
+
+    public boolean hasActiveForegroundGraph() {
+        Boolean active = jdbc.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1 FROM agent_runs
+                    WHERE engine = 'graph_v2' AND mode = 'live'
+                      AND status IN ('running', 'cancel_requested')
+                )
+                """, Boolean.class);
+        return Boolean.TRUE.equals(active);
+    }
+
+    public boolean requestShadowCancel(UUID runId, String reason) {
+        return jdbc.update("""
+                UPDATE agent_runs SET status = 'cancel_requested', stop_reason = ?
+                WHERE run_id = ? AND mode = 'shadow' AND status = 'running'
+                """, reason, runId) == 1;
+    }
+
+    public boolean completeShadow(AgentRun run, String terminalStatus, String outcome, String stopReason,
+                                  String errorCode, int planRounds, int toolCallCount,
+                                  long lastEventSeq, String metricsJson) {
+        return jdbc.update("""
+                UPDATE agent_runs
+                SET status = CASE WHEN status = 'cancel_requested' THEN 'cancelled' ELSE ? END,
+                    outcome = ?, stop_reason = COALESCE(stop_reason, ?), error_code = ?,
+                    plan_rounds = ?, tool_call_count = ?, last_event_seq = GREATEST(last_event_seq, ?),
+                    finished_at = NOW(), lease_expires_at = NOW(), metrics = ?::jsonb
+                WHERE run_id = ? AND mode = 'shadow' AND status IN ('running', 'cancel_requested')
+                """, terminalStatus, outcome, stopReason, errorCode, Math.max(0, planRounds),
+                Math.max(0, toolCallCount), Math.max(0, lastEventSeq),
+                metricsJson == null ? "{}" : metricsJson, run.getRunId()) == 1;
     }
 
     public boolean complete(AgentRun run, String terminalStatus, String outcome, String stopReason, String errorCode,

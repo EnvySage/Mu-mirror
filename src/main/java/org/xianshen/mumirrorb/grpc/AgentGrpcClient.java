@@ -66,10 +66,14 @@ public class AgentGrpcClient {
                 .setTotalBudgetMs(properties.getTotalBudgetMs())
                 .setLoopBudgetMs(properties.getLoopBudgetMs())
                 .setHalfLifeDays(30.0);
-        writeGrantService.authorizeCreate(invocation.question(), run).ifPresent(grant -> request
-                .setCommandGrant(grant.token())
-                .setAuthorizedRecordContent(grant.authorizedContent())
-                .addAllowedWriteTools("create_record"));
+        if ("shadow".equals(run.getMode())) {
+            request.setShadow(true);
+        } else {
+            writeGrantService.authorizeCreate(invocation.question(), run).ifPresent(grant -> request
+                    .setCommandGrant(grant.token())
+                    .setAuthorizedRecordContent(grant.authorizedContent())
+                    .addAllowedWriteTools("create_record"));
+        }
         return request.build();
     }
 
