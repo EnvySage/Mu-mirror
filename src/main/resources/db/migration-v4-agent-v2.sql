@@ -225,3 +225,17 @@ ALTER TABLE tool_calls
 CREATE UNIQUE INDEX IF NOT EXISTS uq_tool_calls_run_call
     ON tool_calls(run_id, call_id)
     WHERE run_id IS NOT NULL AND call_id IS NOT NULL;
+
+-- Successful create_record receipts survive record deletion and are retained with the run.
+CREATE TABLE IF NOT EXISTS agent_command_receipts (
+    user_id UUID NOT NULL REFERENCES users(id),
+    call_id UUID NOT NULL,
+    run_id UUID NOT NULL REFERENCES agent_runs(run_id),
+    command_name VARCHAR(32) NOT NULL CHECK (command_name = 'create_record'),
+    request_hash CHAR(64) NOT NULL,
+    result_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, call_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_command_receipts_run
+    ON agent_command_receipts(run_id, created_at);

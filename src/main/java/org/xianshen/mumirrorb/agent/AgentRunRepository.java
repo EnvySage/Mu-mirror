@@ -3,6 +3,7 @@ package org.xianshen.mumirrorb.agent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
 
@@ -26,7 +27,36 @@ public class AgentRunRepository {
     }
 
     public AgentRun lockRun(UUID runId) {
-        return mapper.lockByRunId(runId);
+        return jdbc.query("""
+                SELECT run_id, user_id, session_id, client_request_id, request_hash, engine, mode,
+                       parent_run_id, question_hash, status, outcome, user_message_id, assistant_message_id,
+                       started_at, finished_at, lease_expires_at, stop_reason, error_code,
+                       plan_rounds, tool_call_count, last_event_seq, glossary_hits_applied, metrics::text AS metrics_json
+                FROM agent_runs WHERE run_id = ? FOR UPDATE
+                """, result -> {
+            if (!result.next()) return null;
+            return AgentRun.builder()
+                    .runId(result.getObject("run_id", UUID.class))
+                    .userId(result.getObject("user_id", UUID.class))
+                    .sessionId(result.getObject("session_id", UUID.class))
+                    .clientRequestId(result.getObject("client_request_id", UUID.class))
+                    .requestHash(result.getString("request_hash"))
+                    .engine(result.getString("engine")).mode(result.getString("mode"))
+                    .parentRunId(result.getObject("parent_run_id", UUID.class))
+                    .questionHash(result.getString("question_hash")).status(result.getString("status"))
+                    .outcome(result.getString("outcome"))
+                    .userMessageId((Long) result.getObject("user_message_id"))
+                    .assistantMessageId((Long) result.getObject("assistant_message_id"))
+                    .startedAt(result.getObject("started_at", OffsetDateTime.class))
+                    .finishedAt(result.getObject("finished_at", OffsetDateTime.class))
+                    .leaseExpiresAt(result.getObject("lease_expires_at", OffsetDateTime.class))
+                    .stopReason(result.getString("stop_reason")).errorCode(result.getString("error_code"))
+                    .planRounds((Integer) result.getObject("plan_rounds"))
+                    .toolCallCount((Integer) result.getObject("tool_call_count"))
+                    .lastEventSeq((Long) result.getObject("last_event_seq"))
+                    .glossaryHitsApplied(result.getBoolean("glossary_hits_applied"))
+                    .metricsJson(result.getString("metrics_json")).build();
+        }, runId);
     }
 
     public AgentRun findActiveBySession(UUID sessionId) {
@@ -125,7 +155,13 @@ public class AgentRunRepository {
                 """);
     }
 
+    @Transactional
     public int deleteExpired(OffsetDateTime cutoff) {
+        jdbc.update("""
+                DELETE FROM agent_command_receipts receipt
+                USING agent_runs run
+                WHERE receipt.run_id = run.run_id AND run.finished_at < ?
+                """, cutoff);
         return jdbc.update("DELETE FROM agent_runs WHERE finished_at < ?", cutoff);
     }
 

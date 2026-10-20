@@ -12,6 +12,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -36,6 +37,26 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     // ==================== 业务异常 ====================
+
+    @ExceptionHandler(org.xianshen.mumirrorb.agent.AgentCommandException.class)
+    public org.springframework.http.ResponseEntity<java.util.Map<String, String>> handleAgentCommandException(
+            org.xianshen.mumirrorb.agent.AgentCommandException e) {
+        return org.springframework.http.ResponseEntity.status(e.getStatus())
+                .body(java.util.Map.of("code", e.getCode()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public org.springframework.http.ResponseEntity<?> handleUnreadableRequestBody(
+            HttpMessageNotReadableException e, HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        if (path.startsWith("/api/internal/agent/commands/")) {
+            return org.springframework.http.ResponseEntity.unprocessableEntity()
+                    .body(java.util.Map.of("code", "INVALID_COMMAND_REQUEST"));
+        }
+        log.error("系统异常 - URL: {}", request.getRequestURI(), e);
+        return org.springframework.http.ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(R.fail(ResultCode.INTERNAL_ERROR));
+    }
 
     @ExceptionHandler(org.xianshen.mumirrorb.agent.AgentRunConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)

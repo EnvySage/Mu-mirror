@@ -43,6 +43,7 @@ import static org.mockito.Mockito.when;
 class AgentRunServiceTest {
 
     private final AgentRunRepository repository = mock(AgentRunRepository.class);
+    private final AgentCommandService commandService = mock(AgentCommandService.class);
     private final ChatSessionMapper sessionMapper = mock(ChatSessionMapper.class);
     private final ConversationHistoryMapper historyMapper = mock(ConversationHistoryMapper.class);
     private final ChatService chatService = mock(ChatService.class);
@@ -69,7 +70,8 @@ class AgentRunServiceTest {
         }).when(historyMapper).insert(any(ConversationHistory.class));
         when(sessionMapper.selectById(SESSION_ID)).thenReturn(ChatSession.builder()
                 .id(SESSION_ID).userId(USER_ID).title("test").build());
-        service = new AgentRunService(repository, sessionMapper, historyMapper, chatService,
+        when(commandService.findReceiptForRun(any(), any())).thenReturn(java.util.Optional.empty());
+        service = new AgentRunService(repository, commandService, sessionMapper, historyMapper, chatService,
                 agentGrpcClient, lifecycle, glossaryService, engineProperties, agentProperties,
                 auditService, new ObjectMapper(), transactionManager);
     }
@@ -199,7 +201,7 @@ class AgentRunServiceTest {
         AgentRun run = accepted.run();
         AtomicBoolean cancelled = new AtomicBoolean();
         when(repository.findById(run.getRunId())).thenReturn(run);
-        when(agentGrpcClient.buildRequest(any(ChatInvocation.class)))
+        when(agentGrpcClient.buildRequest(any(ChatInvocation.class), any(AgentRun.class)))
                 .thenReturn(AgentProto.AgentRunRequest.newBuilder().build());
         when(agentGrpcClient.run(any(AgentProto.AgentRunRequest.class), any()))
                 .thenReturn(() -> cancelled.set(true));

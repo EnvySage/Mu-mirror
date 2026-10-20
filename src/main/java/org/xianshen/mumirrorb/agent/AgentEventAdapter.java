@@ -182,9 +182,10 @@ public class AgentEventAdapter {
 
     private void onFailed(AgentProto.AgentFailure failure) {
         terminal = true;
+        String outcome = "write_failed".equals(failure.getStopReason()) ? "action_failed" : "answer";
         result = new ChatFinalResult(
                 answer.toString(), List.of(), toolsUsed, List.of(), List.of(),
-                false, failure.getHasPartialAnswer(), "failed", "answer", route,
+                false, failure.getHasPartialAnswer(), "failed", outcome, route,
                 failure.getStopReason(), failure.getCode(), 0, toolsUsed.size(), lastSequence,
                 metricsJson(failure.getMetrics()), List.of());
     }

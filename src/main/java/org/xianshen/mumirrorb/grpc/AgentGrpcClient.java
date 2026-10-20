@@ -14,10 +14,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.xianshen.mumirrorb.agent.ChatInvocation;
+import org.xianshen.mumirrorb.agent.AgentWriteGrantService;
 import org.xianshen.mumirrorb.config.AgentProperties;
 import org.xianshen.mumirrorb.grpc.gen.AgentProto;
 import org.xianshen.mumirrorb.grpc.gen.AgentRunnerGrpc;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
+import org.xianshen.mumirrorb.pojo.DO.AgentRun;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -35,6 +37,7 @@ public class AgentGrpcClient {
 
     private final AgentProperties properties;
     private final AiGrpcClient aiGrpcClient;
+    private final AgentWriteGrantService writeGrantService;
     private ManagedChannel channel;
 
     @PostConstruct
@@ -46,10 +49,10 @@ public class AgentGrpcClient {
         log.info("Agent gRPC channel configured: {}", properties.getGrpcAddress());
     }
 
-    public AgentProto.AgentRunRequest buildRequest(ChatInvocation invocation) {
+    public AgentProto.AgentRunRequest buildRequest(ChatInvocation invocation, AgentRun run) {
         CommonProto.LlmConfig llm = aiGrpcClient.buildLlmConfigFor(invocation.userId());
         CommonProto.EmbeddingConfig embedding = aiGrpcClient.buildEmbeddingConfigFor(invocation.userId());
-        return AgentProto.AgentRunRequest.newBuilder()
+        AgentProto.AgentRunRequest.Builder request = AgentProto.AgentRunRequest.newBuilder()
                 .setRunId(invocation.runId().toString())
                 .setUserId(invocation.userId().toString())
                 .setSessionId(invocation.sessionId().toString())
@@ -62,10 +65,12 @@ public class AgentGrpcClient {
                 .setMaxPlanRounds(properties.getMaxPlanRounds())
                 .setTotalBudgetMs(properties.getTotalBudgetMs())
                 .setLoopBudgetMs(properties.getLoopBudgetMs())
-                .setHalfLifeDays(30.0)
-                .setCommandGrant("")
-                .addAllAllowedWriteTools(java.util.List.of())
-                .build();
+                .setHalfLifeDays(30.0);
+        writeGrantService.authorizeCreate(invocation.question(), run).ifPresent(grant -> request
+                .setCommandGrant(grant.token())
+                .setAuthorizedRecordContent(grant.authorizedContent())
+                .addAllowedWriteTools("create_record"));
+        return request.build();
     }
 
     public CancellableCall run(AgentProto.AgentRunRequest request,

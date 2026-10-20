@@ -47,6 +47,7 @@ public class AgentRunService {
     private static final int TITLE_MAX_LEN = 50;
 
     private final AgentRunRepository repository;
+    private final AgentCommandService commandService;
     private final ChatSessionMapper sessionMapper;
     private final ConversationHistoryMapper historyMapper;
     private final ChatService chatService;
@@ -61,6 +62,7 @@ public class AgentRunService {
     private final ConcurrentHashMap<UUID, ActiveExecution> activeExecutions = new ConcurrentHashMap<>();
 
     public AgentRunService(AgentRunRepository repository,
+                          AgentCommandService commandService,
                           ChatSessionMapper sessionMapper,
                           ConversationHistoryMapper historyMapper,
                           ChatService chatService,
@@ -73,6 +75,7 @@ public class AgentRunService {
                           ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager) {
         this.repository = repository;
+        this.commandService = commandService;
         this.sessionMapper = sessionMapper;
         this.historyMapper = historyMapper;
         this.chatService = chatService;
@@ -213,7 +216,7 @@ public class AgentRunService {
         }
         AtomicBoolean finalized = new AtomicBoolean(false);
         try {
-            AgentProto.AgentRunRequest request = agentGrpcClient.buildRequest(invocation);
+            AgentProto.AgentRunRequest request = agentGrpcClient.buildRequest(invocation, run);
             AgentGrpcClient.CancellableCall call = agentGrpcClient.run(request, new StreamObserver<>() {
                 @Override
                 public void onNext(AgentProto.AgentEvent event) {
@@ -263,6 +266,11 @@ public class AgentRunService {
                 run.getClientRequestId(), run.getUserMessageId() == null ? 0 : run.getUserMessageId(),
                 "", run.getEngine());
         sendMeta(emitter, invocation);
+        java.util.Optional<AgentCommandResponse> receipt = commandService.findReceiptForRun(run.getUserId(), run.getRunId());
+        if (receipt != null && receipt.isPresent()) {
+            sendReceiptSuccess(run, emitter, receipt.get());
+            return;
+        }
         if ("running".equals(run.getStatus()) || "cancel_requested".equals(run.getStatus())) {
             sendEvent(emitter, "error", Map.of("code", "RUN_IN_PROGRESS", "runId", run.getRunId().toString()));
             sendDone(emitter, run, null, "", run.getStatus());
@@ -309,6 +317,19 @@ public class AgentRunService {
         }
         ConversationHistory assistant = run.getAssistantMessageId() == null
                 ? null : historyMapper.selectById(run.getAssistantMessageId());
+        java.util.Optional<AgentCommandResponse> receipt = commandService.findReceiptForRun(userId, runId);
+        if (receipt != null && receipt.isPresent()) {
+            AgentCommandResponse value = receipt.get();
+            ChatSessionVO.MessageVO receiptMessage = ChatSessionVO.MessageVO.builder()
+                    .id(assistant == null ? null : assistant.getId()).role("assistant")
+                    .content("已保存这条日记；目前是仅记录状态")
+                    .createdRecords(List.of(createdRecordMap(value)))
+                    .createdAt(assistant == null ? value.record().createdAt() : assistant.getCreatedAt())
+                    .build();
+            return RunStatusVO.builder().runId(run.getRunId()).sessionId(run.getSessionId())
+                    .status("completed").outcome("action_success").stopReason("write_completed")
+                    .assistant(receiptMessage).build();
+        }
         ChatSessionVO.MessageVO message = assistant == null ? null : ChatSessionVO.MessageVO.builder()
                 .id(assistant.getId()).role(assistant.getRole()).content(assistant.getContent())
                 .sources(assistant.getSources()).toolsUsed(assistant.getToolsUsed())
@@ -335,6 +356,12 @@ public class AgentRunService {
             lifecycle.stopLease(originalRun.getRunId());
             activeExecutions.remove(originalRun.getRunId());
             if (commit == null || !commit.persisted()) return;
+            if (commit.assistant() != null
+                    && !java.util.Objects.equals(commit.assistant().getContent(), finalResult.answerText())) {
+                sendEvent(emitter, "delta", Map.of("content", commit.assistant().getContent()));
+            } else if ("action_unknown".equals(finalResult.outcome()) && commit.assistant() != null) {
+                sendEvent(emitter, "delta", Map.of("content", commit.assistant().getContent()));
+            }
             if (commit.assistant() != null) {
                 if (commit.assistant().getSources() != null && !commit.assistant().getSources().isEmpty()) {
                     sendEvent(emitter, "sources", commit.assistant().getSources());
@@ -362,16 +389,29 @@ public class AgentRunService {
 
     private CompletionCommit completeRun(UUID runId, ChatFinalResult result) {
         AgentRun run = repository.lockRun(runId);
-        if (run == null || isTerminal(run.getStatus())) return new CompletionCommit(false, run, null, null, "");
+        if (run == null || isTerminal(run.getStatus())) return new CompletionCommit(false, run, null, null, "", false);
         if (run.getLeaseExpiresAt() == null || !run.getLeaseExpiresAt().isAfter(OffsetDateTime.now())) {
             repository.markAbandoned(runId);
-            return new CompletionCommit(false, run, null, null, "");
+            return new CompletionCommit(false, run, null, null, "", false);
         }
         if (sessionMapper.selectById(run.getSessionId()) == null) {
             repository.markAbandoned(runId);
-            return new CompletionCommit(false, run, null, null, "");
+            return new CompletionCommit(false, run, null, null, "", false);
         }
-        String status = "cancel_requested".equals(run.getStatus()) ? "cancelled" : result.status();
+        java.util.Optional<AgentCommandResponse> receipt = commandService.findReceiptForRun(run.getUserId(), runId);
+        boolean receiptConfirmed = receipt != null && receipt.isPresent();
+        if (receiptConfirmed) {
+            result = actionSuccessFromReceipt(result, receipt.get());
+        } else if ("action_success".equals(result.outcome()) || !result.createdRecords().isEmpty()) {
+            result = new ChatFinalResult(
+                    "这次保存结果暂时无法核对，我不能确认是否已创建。请稍后查看本轮状态。",
+                    List.of(), result.toolsUsed(), List.of(), List.of(), false, false,
+                    "completed", "action_unknown", "structured", "write_unknown", null,
+                    result.planRounds(), result.toolCallCount(), result.lastEventSeq(),
+                    result.metricsJson(), result.glossaryHitIds());
+        }
+        String status = receiptConfirmed ? "completed"
+                : ("cancel_requested".equals(run.getStatus()) ? "cancelled" : result.status());
         String stopReason = "cancelled".equals(status) ? "cancelled" : result.stopReason();
         String errorCode = result.errorCode();
         if ("cancelled".equals(status) && (errorCode == null || errorCode.isBlank())) errorCode = "CANCELLED";
@@ -400,7 +440,32 @@ public class AgentRunService {
         run.setStopReason(stopReason);
         run.setErrorCode(errorCode);
         run.setAssistantMessageId(assistant.getId());
-        return new CompletionCommit(true, run, assistant, status, errorCode);
+        return new CompletionCommit(true, run, assistant, status, errorCode, receiptConfirmed);
+    }
+
+    private ChatFinalResult actionSuccessFromReceipt(ChatFinalResult original, AgentCommandResponse receipt) {
+        return new ChatFinalResult("已保存这条日记；目前是仅记录状态", List.of(),
+                original.toolsUsed(), List.of(), List.of(createdRecordMap(receipt)), false, false,
+                "completed", "action_success", "structured", "write_completed", null,
+                original.planRounds(), original.toolCallCount(), original.lastEventSeq(),
+                original.metricsJson(), original.glossaryHitIds());
+    }
+
+    private Map<String, Object> createdRecordMap(AgentCommandResponse receipt) {
+        return Map.of("record_id", receipt.record().id(), "status", receipt.record().status(),
+                "created_at", receipt.record().createdAt().toString());
+    }
+
+    private void sendReceiptSuccess(AgentRun run, SseEmitter emitter, AgentCommandResponse receipt) {
+        sendEvent(emitter, "delta", Map.of("content", "已保存这条日记；目前是仅记录状态"));
+        sendEvent(emitter, "done", Map.of(
+                "sessionId", run.getSessionId().toString(),
+                "runId", run.getRunId().toString(),
+                "requestId", run.getClientRequestId().toString(),
+                "engine", run.getEngine(), "status", "completed", "outcome", "action_success",
+                "route", "STRUCTURED", "fallback", false,
+                "created_records", List.of(createdRecordMap(receipt)), "stop_reason", "write_completed"));
+        completeEmitter(emitter);
     }
 
     private void sendMeta(SseEmitter emitter, ChatInvocation invocation) {
@@ -489,7 +554,7 @@ public class AgentRunService {
     }
 
     private record CompletionCommit(boolean persisted, AgentRun run, ConversationHistory assistant,
-                                    String status, String errorCode) { }
+                                    String status, String errorCode, boolean receiptConfirmed) { }
 
     private static final class ActiveExecution {
         private final Runnable cancelAction;

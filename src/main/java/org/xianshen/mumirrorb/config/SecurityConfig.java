@@ -1,6 +1,7 @@
 package org.xianshen.mumirrorb.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -12,6 +13,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.xianshen.mumirrorb.common.security.AgentCommandAuthFilter;
 import org.xianshen.mumirrorb.common.security.JwtAuthenticationFilter;
 
 /**
@@ -23,6 +25,15 @@ import org.xianshen.mumirrorb.common.security.JwtAuthenticationFilter;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final AgentCommandAuthFilter agentCommandAuthFilter;
+
+    /** This filter belongs only to Spring Security; prevent servlet-container double registration. */
+    @Bean
+    public FilterRegistrationBean<AgentCommandAuthFilter> agentCommandAuthFilterRegistration() {
+        FilterRegistrationBean<AgentCommandAuthFilter> registration = new FilterRegistrationBean<>(agentCommandAuthFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
 
     /**
      * 密码编码器
@@ -84,7 +95,8 @@ public class SecurityConfig {
             )
 
             // 添加 JWT 过滤器
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(agentCommandAuthFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }
