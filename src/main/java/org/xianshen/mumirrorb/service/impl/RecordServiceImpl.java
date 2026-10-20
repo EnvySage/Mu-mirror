@@ -177,7 +177,7 @@ public class RecordServiceImpl implements RecordService {
             if (!requested.isEmpty()) {
                 Set<Long> matching = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
                                 .eq(Chunk::getUserId, userId).in(Chunk::getRecordId, records.stream().map(Record::getId).toList()))
-                        .stream().filter(c -> c.getMetadata() != null && c.getMetadata().get("tags") instanceof List<?> tags
+                        .stream().filter(c -> c.getMetadata() != null && tagsOf(c.getMetadata()) instanceof List<?> tags
                                 && tags.stream().map(String::valueOf).anyMatch(requested::contains))
                         .map(Chunk::getRecordId).collect(java.util.stream.Collectors.toSet());
                 records = records.stream().filter(r -> matching.contains(r.getId())).toList();
@@ -435,6 +435,28 @@ public class RecordServiceImpl implements RecordService {
     /**
      * DO → VO 转换（包含关联的 Chunk 列表）
      */
+    /** 自由标签统一键：新数据 userTags，兼容旧 user_tags / tags。 */
+    private Object tagsOf(Map<String, Object> metadata) {
+        Object tags = metadata.get("userTags");
+        if (tags instanceof List) return tags;
+        tags = metadata.get("user_tags");
+        if (tags instanceof List) return tags;
+        return metadata.get("tags");
+    }
+
+    /** 解析记录上的五维成长建议；历史坏数据按空处理，不影响记录详情。 */
+    private List<Object> growthSuggestionsOf(Record record) {
+        String raw = record.getGrowthSuggestions();
+        if (raw == null || raw.isBlank()) return List.of();
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(raw, new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {});
+        } catch (Exception e) {
+            log.warn("记录成长建议解析失败，按空处理，recordId={}: {}", record.getId(), e.getMessage());
+            return List.of();
+        }
+    }
+
     private RecordVO toVO(Record record) {
         // 查询关联的 Chunks
         List<Chunk> chunks = chunkMapper.selectList(
@@ -457,6 +479,8 @@ public class RecordServiceImpl implements RecordService {
                 .correctionOfRecordId(record.getCorrectionOfRecordId())
                 .memoryFailureReason(record.getMemoryFailureReason())
                 .queuedEmbeddingJobIds(record.getQueuedEmbeddingJobIds())
+                .growthSuggestions(growthSuggestionsOf(record))
+                .growthAxesVersion(record.getGrowthAxesVersion())
                 .userReviewed(record.getUserReviewed())
                 .failReason(record.getFailReason())
                 .chunks(chunkVOs)

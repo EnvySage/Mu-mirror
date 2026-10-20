@@ -95,9 +95,9 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
     public void disable(UUID userId, Long recordId, int expectedProcessingVersion) {
         Record record = records.selectOwnedForUpdate(userId, recordId);
         if (record == null || !java.util.Objects.equals(record.getProcessingVersion(), expectedProcessingVersion))
-            throw new org.xianshen.mumirrorb.common.exception.BusinessException(409, "记录已变化，请重新准备停止记忆操作");
+            throw new org.xianshen.mumirrorb.common.exception.BusinessException(409, "记录已变化，请重新准备永久移除记忆操作");
         if (record.getMemoryState() != RecordMemoryState.READY)
-            throw new org.xianshen.mumirrorb.common.exception.BusinessException(400, "只有已就绪记忆可以停止未来使用");
+            throw new org.xianshen.mumirrorb.common.exception.BusinessException(400, "只有已就绪记忆可以永久移除");
         record.setMemoryState(RecordMemoryState.DISABLED);
         record.setMemoryFailureReason(null);
         record.setAiProcessingAuthorized(false);
@@ -136,7 +136,12 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
     }
 
     private void completeAction(Record record, String memoryState, String errorCode) {
-        if (record.getMemoryActionId() == null || record.getMemoryActionExecutionVersion() == null) return;
+        if (record.getMemoryActionId() == null || record.getMemoryActionExecutionVersion() == null) {
+            log.info("记忆索引完成但无待完成的操作卡，recordId={}, memoryState={}", record.getId(), memoryState);
+            return;
+        }
+        log.info("发布操作卡完成事件，actionId={}, executionVersion={}, recordId={}, memoryState={}",
+                record.getMemoryActionId(), record.getMemoryActionExecutionVersion(), record.getId(), memoryState);
         var event = new RecordMemoryActionCompletedEvent(record.getMemoryActionId(),
                 record.getMemoryActionExecutionVersion(), record.getId(), memoryState, errorCode,
                 record.getMemoryFailureReason());

@@ -102,7 +102,8 @@ public class RecordDraftServiceImpl implements RecordDraftService {
         segment.setKeywords(item.getKeywordsList());
         segment.setTags(new ArrayList<>(item.getUserTagsList()));
         segment.setTaskStatus(ClassifyItemConverter.convertTaskStatus(item.getStatus()));
-        segment.setMemoryEnabled(false);
+        // 用户选择 AI 整理即视为同意这段内容进入 Mirror 记忆；后续可在记忆管理中停止。
+        segment.setMemoryEnabled(true);
         return segment;
     }
 }

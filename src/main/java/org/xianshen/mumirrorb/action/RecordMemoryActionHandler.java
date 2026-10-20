@@ -39,14 +39,16 @@ public class RecordMemoryActionHandler implements ActionHandler {
                 .eq(Record::getUserId, userId).eq(Record::getSource, "user").isNull(Record::getDeletedAt));
         if (record == null) throw new BusinessException(4041, "记录不存在或已删除");
         if (record.getMemoryState() != RecordMemoryState.READY)
-            throw invalid("只有已就绪记忆可以停止未来使用");
+            throw invalid("只有已就绪记忆可以永久移除");
         ObjectNode preview = json.createObjectNode();
         ObjectNode targetVersions = preview.putObject("targetVersions");
         targetVersions.put(String.valueOf(id), String.valueOf(record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()));
         preview.put("recordId", id).put("currentMemoryState", "READY").put("afterMemoryState", "DISABLED")
                 .put("sourceReadonly", true).put("keepsGrowthLedger", true)
-                .put("derivedContextInvalidated", true).put("businessWrites", false);
-        preview.putArray("effects").add("stop_future_memory_use").add("invalidate_derived_context");
+                .put("derivedContextInvalidated", true).put("businessWrites", false)
+                .put("permanent", true)
+                .put("description", "永久移除后，这条记录不再用于检索、对话和画像，且不能重新启用。原文保持只读，已确认的成长账本保留。");
+        preview.putArray("effects").add("remove_memory_permanently").add("invalidate_derived_context");
         return preview;
     }
 
@@ -59,7 +61,7 @@ public class RecordMemoryActionHandler implements ActionHandler {
         if (record == null) throw new BusinessException(4041, "记录不存在或已删除");
         String expected = action.getTargetVersions().path(String.valueOf(id)).asText();
         int version = record.getProcessingVersion() == null ? 0 : record.getProcessingVersion();
-        if (!expected.equals(String.valueOf(version))) throw new BusinessException(409, "记录已变化，请重新准备停止记忆操作");
+        if (!expected.equals(String.valueOf(version))) throw new BusinessException(409, "记录已变化，请重新准备永久移除记忆操作");
         lifecycle.disable(action.getUserId(), id, version);
         ObjectNode result = json.createObjectNode().put("recordId", id).put("outcome", "APPLIED")
                 .put("memoryState", "DISABLED").put("sourceReadonly", true)

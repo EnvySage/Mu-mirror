@@ -44,7 +44,7 @@ public class RecordActionHandler implements ActionHandler {
 
     @Override
     public boolean asynchronousPreparation(UUID userId, String kind, JsonNode payload) {
-        if (!KINDS.contains(kind)) return false;
+        if (!KINDS.contains(kind) || "record.delete".equals(kind)) return false;
         if (payload.path("privateInput").asBoolean(false) || "ONLY_SAVE".equals(payload.path("mode").asText())) return false;
         if ("AI_ASSISTED".equals(payload.path("mode").asText())) return true;
         return "AI_ASSISTED".equals(settingsService.getSettings(userId).getDefaultRecordMode());
@@ -126,8 +126,15 @@ public class RecordActionHandler implements ActionHandler {
 
     @Override
     public JsonNode persistedPayload(String kind, JsonNode payload, JsonNode preview) {
+        if ("record.delete".equals(kind)) return payload.deepCopy();
         ObjectNode saved = payload.deepCopy();
         saved.set("recordDraft", preview.path("recordDraft").deepCopy());
+        if ("AI_ASSISTED".equals(saved.path("recordDraft").path("mode").asText())
+                && saved.path("recordDraft").path("segments").isArray()) {
+            for (JsonNode segment : saved.path("recordDraft").path("segments")) {
+                if (segment.isObject()) ((ObjectNode) segment).put("memoryEnabled", true);
+            }
+        }
         return saved;
     }
 
@@ -144,6 +151,7 @@ public class RecordActionHandler implements ActionHandler {
 
     @Override
     public void validatePreparation(String kind, JsonNode payload, JsonNode preview) {
+        if ("record.delete".equals(kind)) return;
         RecordDraftDTO draft = json.convertValue(payload.path("recordDraft"), RecordDraftDTO.class);
         validateDraft(draft);
         for (RecordDraftDTO.Segment segment : draft.getSegments()) {
@@ -225,17 +233,26 @@ public class RecordActionHandler implements ActionHandler {
             if (segment.getContentType() != null) metadata.put("contentType", segment.getContentType());
             metadata.put("mood", segment.getMoods() == null ? List.of() : segment.getMoods());
             metadata.put("keywords", segment.getKeywords() == null ? List.of() : segment.getKeywords());
-            metadata.put("tags", segment.getTags() == null ? List.of() : segment.getTags());
+            metadata.put("userTags", segment.getTags() == null ? List.of() : segment.getTags());
             if (segment.getTaskStatus() != null) metadata.put("taskStatus", segment.getTaskStatus());
             Chunk chunk = Chunk.builder().userId(action.getUserId()).recordId(record.getId())
                     .content(draft.getRawContent()).segment(segment.getText()).classifiedSegment(segment.getText())
                     .metadata(metadata).userEdited(true).aiMemoryApproved(false).todoApproved(false)
                     .contentVersion(1L).embeddingStatus("not_requested").createdAt(OffsetDateTime.now()).build();
             chunkMapper.insert(chunk);
-            if (segment.isMemoryEnabled()) approvedMemory.add(chunk.getId());
+            if ("AI_ASSISTED".equals(draft.getMode()) || segment.isMemoryEnabled()) approvedMemory.add(chunk.getId());
+        }
+        List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments;
+        try {
+            growthAdjustments = draft.getGrowthSuggestions().isEmpty() ? List.of()
+                    : json.convertValue(draft.getGrowthSuggestions(),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO>>() {});
+        } catch (Exception e) {
+            throw new BusinessException(400, "成长建议格式无效");
         }
         var confirmed = records.confirmReview(record.getId(), action.getUserId(), approvedMemory, List.of(),
-                resolutions(payload), action.getActionId(), action.getExecutionVersion());
+                resolutions(payload), action.getActionId(), action.getExecutionVersion(),
+                growthAdjustments, (long) draft.getAxesVersion());
         ObjectNode result = json.createObjectNode().put("recordId", record.getId()).put("reviewed", true)
                 .put("memorySelections", approvedMemory.size()).put("memoryState", confirmed.getMemoryState().name());
         int confirmedResolutions = (int) resolutions(payload).stream().filter(r -> "confirmed".equalsIgnoreCase(r.getAction())).count();

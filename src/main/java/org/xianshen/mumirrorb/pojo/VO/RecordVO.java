@@ -64,6 +64,9 @@ public class RecordVO {
     private Long correctionOfRecordId;
     private String memoryFailureReason;
     private List<Long> queuedEmbeddingJobIds;
+    /** 本条记录审核确认的五维成长建议（dimensionId/points/reason） */
+    private List<Object> growthSuggestions;
+    private Long growthAxesVersion;
 
     /**
      * 用户是否已审核

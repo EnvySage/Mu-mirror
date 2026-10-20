@@ -210,6 +210,23 @@ class RecordActionHandlerTest {
         verify(recordService, never()).create(any(), eq(userId));
     }
 
+    @Test
+    void deletePreparationDoesNotRequireRecordDraft() {
+        RecordMapper mapper = mock(RecordMapper.class);
+        Record target = Record.builder().id(31L).userId(userId).content("待删除记录").source("user")
+                .status(RecordStatus.RECORD_ONLY).updatedAt(java.time.OffsetDateTime.now()).build();
+        when(mapper.selectOne(any())).thenReturn(target);
+        var handler = new RecordActionHandler(mock(RecordDraftService.class), mock(RecordService.class), mapper,
+                mock(ChunkMapper.class), json, mock(SettingsService.class));
+        var payload = json.valueToTree(java.util.Map.of("recordId", 31L));
+
+        var preview = handler.validateAndPreview(userId, "record.delete", payload);
+        handler.validatePreparation("record.delete", payload, preview);
+
+        assertEquals(31L, preview.path("recordId").asLong());
+        assertTrue(preview.path("targetVersions").has("31"));
+    }
+
     private final java.util.concurrent.atomic.AtomicReference<ActionProposal> stored = new java.util.concurrent.atomic.AtomicReference<>();
 
     private Record correctionSource() {
