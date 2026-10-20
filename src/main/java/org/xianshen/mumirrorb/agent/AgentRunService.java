@@ -176,6 +176,7 @@ public class AgentRunService {
             return;
         }
         AgentRun run = repository.findById(start.run().getRunId());
+        if (run != null && finishCancelledBeforeDispatch(run, start.invocation(), emitter, true)) return;
         if (run == null || !"running".equals(run.getStatus())
                 || run.getLeaseExpiresAt() == null || !run.getLeaseExpiresAt().isAfter(OffsetDateTime.now())) {
             if (run != null && "running".equals(run.getStatus())) repository.markAbandoned(run.getRunId());
@@ -209,6 +210,10 @@ public class AgentRunService {
         });
         activeExecutions.put(run.getRunId(), execution);
         AgentRun current = repository.findById(run.getRunId());
+        if (current != null && finishCancelledBeforeDispatch(current, invocation, emitter, false)) {
+            activeExecutions.remove(run.getRunId(), execution);
+            return;
+        }
         if (current == null || !"running".equals(current.getStatus())) {
             activeExecutions.remove(run.getRunId(), execution);
             completeEmitter(emitter);
@@ -259,6 +264,27 @@ public class AgentRunService {
                         "暂时无法回答", "AGENT_UNAVAILABLE", "agent_unavailable", ""), emitter);
             }
         }
+    }
+
+    /** Close the race where client cancellation arrives before the graph call is registered. */
+    private boolean finishCancelledBeforeDispatch(AgentRun run, ChatInvocation invocation,
+                                                  SseEmitter emitter, boolean includeMeta) {
+        if (!"cancel_requested".equals(run.getStatus())) return false;
+        boolean marked = repository.markCancelled(run.getRunId(), "cancelled_before_dispatch");
+        if (marked) {
+            run.setStatus("cancelled");
+            run.setStopReason("cancelled_before_dispatch");
+            if (includeMeta && invocation != null) sendMeta(emitter, invocation);
+            sendDone(emitter, run, null, "", "cancelled");
+            completeEmitter(emitter);
+            return true;
+        }
+
+        // Another terminal path won the race; replay its stored truth rather than dispatching again.
+        AgentRun latest = repository.findById(run.getRunId());
+        if (latest != null) replayExisting(latest, emitter);
+        else completeEmitter(emitter);
+        return true;
     }
 
     private void replayExisting(AgentRun run, SseEmitter emitter) {

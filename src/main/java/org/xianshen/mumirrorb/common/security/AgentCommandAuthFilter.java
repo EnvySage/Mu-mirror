@@ -27,7 +27,7 @@ import java.util.Map;
 public class AgentCommandAuthFilter extends OncePerRequestFilter {
 
     public static final String GRANT_HEADER = "X-Mirror-Command-Grant";
-    private static final String PATH_PREFIX = "/api/internal/agent/commands/";
+    private static final String PATH_PREFIX = "/internal/agent/commands/";
 
     private final AgentWriteGrantService grantService;
     private final ObjectMapper objectMapper;

@@ -161,6 +161,7 @@ class AgentCommandAuthTest {
 
     private static MockHttpServletRequest request() {
         MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setContextPath("/api");
         request.setRequestURI("/api/internal/agent/commands/create-record");
         return request;
     }

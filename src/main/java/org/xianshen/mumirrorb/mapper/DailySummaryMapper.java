@@ -30,7 +30,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
+              AND r.created_at &lt; #{dayEnd}
             """)
     long countRecords(@Param("userId") UUID userId,
                       @Param("dayStart") OffsetDateTime dayStart,
@@ -50,7 +50,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
               AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
+              AND r.created_at &lt; #{dayEnd}
               AND jsonb_exists(c.metadata, 'contentType')
             GROUP BY c.metadata->>'contentType'
             ORDER BY count DESC
@@ -74,7 +74,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
               AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
+              AND r.created_at &lt; #{dayEnd}
               AND jsonb_exists(c.metadata, 'mood')
             GROUP BY m.value
             ORDER BY count DESC
@@ -96,7 +96,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
               AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
+              AND r.created_at &lt; #{dayEnd}
             GROUP BY 1
             ORDER BY 1
             """)
@@ -128,7 +128,7 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND c.todo_approved = TRUE
               AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
+              AND r.created_at &lt; #{dayEnd}
             ORDER BY r.created_at DESC
             LIMIT 20
             """)
@@ -154,9 +154,9 @@ public interface DailySummaryMapper {
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
               AND c.segment IS NOT NULL
-              AND c.segment <> ''
+              AND c.segment &lt;> ''
               AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
+              AND r.created_at &lt; #{dayEnd}
             ORDER BY r.created_at ASC, c.id ASC
             LIMIT 30
             """)

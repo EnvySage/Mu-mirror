@@ -132,14 +132,14 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
      * @return distance（0=完全相同，2=完全相反）；任一方 embedding 为 NULL 时返回 NULL
      */
     @Select("""
-            SELECT cur.embedding <=> prev.embedding AS cosine_distance
+            SELECT cur.embedding &lt;=> prev.embedding AS cosine_distance
             FROM profile_snapshots cur
             JOIN LATERAL (
                 SELECT embedding FROM profile_snapshots
                 WHERE user_id = cur.user_id::uuid
                   AND snapshot_type = 'monthly'
                   AND invalidated = FALSE
-                  AND created_at < cur.created_at
+                  AND created_at &lt; cur.created_at
                   AND embedding IS NOT NULL
                 ORDER BY created_at DESC
                 LIMIT 1

@@ -49,7 +49,7 @@ public class GlobalExceptionHandler {
     public org.springframework.http.ResponseEntity<?> handleUnreadableRequestBody(
             HttpMessageNotReadableException e, HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
-        if (path.startsWith("/api/internal/agent/commands/")) {
+        if (path.startsWith("/internal/agent/commands/")) {
             return org.springframework.http.ResponseEntity.unprocessableEntity()
                     .body(java.util.Map.of("code", "INVALID_COMMAND_REQUEST"));
         }

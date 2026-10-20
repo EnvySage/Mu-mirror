@@ -7,6 +7,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder;
+import io.grpc.stub.StreamObserver;
 import org.xianshen.mumirrorb.config.AgentProperties;
 import org.xianshen.mumirrorb.config.ChatEngineProperties;
 import org.xianshen.mumirrorb.grpc.AgentGrpcClient;
@@ -212,5 +214,72 @@ class AgentRunServiceTest {
 
         assertTrue(cancelled.get());
         verify(lifecycle).stopLease(run.getRunId());
+    }
+
+    @Test
+    void committedCreateReceiptWinsWhenPythonStreamFailsAfterTheWrite() throws Exception {
+        engineProperties.setEngine("graph_v2");
+        engineProperties.setGraphEnabledUserIds(java.util.List.of(USER_ID.toString()));
+        engineProperties.setCreateRecordEnabled(true);
+        UUID requestId = UUID.randomUUID();
+        StartRunResult accepted = service.startOrFindRun(USER_ID,
+                ChatRequestDTO.builder().question("帮我记一篇日记：隔离库回执测试")
+                        .requestId(requestId).build());
+        AgentRun run = accepted.run();
+        when(repository.findById(run.getRunId())).thenReturn(run);
+        when(repository.lockRun(run.getRunId())).thenReturn(run);
+        when(repository.complete(any(AgentRun.class), any(), any(), any(), any(), anyInt(), anyInt(),
+                anyLong(), anyLong(), any())).thenReturn(true);
+        when(sessionMapper.selectById(run.getSessionId())).thenReturn(ChatSession.builder()
+                .id(run.getSessionId()).userId(USER_ID).title("隔离库回执测试").build());
+        AgentCommandResponse receipt = new AgentCommandResponse(UUID.randomUUID(), "success", false,
+                new AgentCommandResponse.AgentCreatedRecord(731, "record_only",
+                        java.time.OffsetDateTime.parse("2026-10-20T12:00:00+08:00")));
+        when(commandService.findReceiptForRun(USER_ID, run.getRunId()))
+                .thenReturn(java.util.Optional.of(receipt));
+        when(agentGrpcClient.buildRequest(any(ChatInvocation.class), any(AgentRun.class)))
+                .thenReturn(AgentProto.AgentRunRequest.newBuilder().build());
+        when(agentGrpcClient.run(any(AgentProto.AgentRunRequest.class), any()))
+                .thenAnswer(invocation -> {
+                    StreamObserver<AgentProto.AgentEvent> observer = invocation.getArgument(1);
+                    observer.onError(new RuntimeException("Python stream disconnected after command commit"));
+                    return (AgentGrpcClient.CancellableCall) () -> { };
+                });
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        service.dispatch(accepted, emitter);
+
+        assertEquals("completed", run.getStatus());
+        assertEquals("action_success", run.getOutcome());
+        assertEquals("write_completed", run.getStopReason());
+        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(message ->
+                "assistant".equals(message.getRole())
+                        && "已保存这条日记；目前是仅记录状态".equals(message.getContent())
+                        && message.getCreatedRecords() != null && message.getCreatedRecords().size() == 1));
+        // One meta, one receipt-backed delta, and one done; no contradictory error or duplicate delta.
+        verify(emitter, times(3)).send(any(SseEventBuilder.class));
+    }
+
+    @Test
+    void cancellationBeforeAgentDispatchBecomesTerminalWithoutStartingPython() throws Exception {
+        engineProperties.setEngine("graph_v2");
+        engineProperties.setGraphEnabledUserIds(java.util.List.of(USER_ID.toString()));
+        UUID requestId = UUID.randomUUID();
+        StartRunResult accepted = service.startOrFindRun(USER_ID,
+                ChatRequestDTO.builder().question("取消前尚未进入Python").requestId(requestId).build());
+        AgentRun run = accepted.run();
+        run.setStatus("cancel_requested");
+        when(repository.findById(run.getRunId())).thenReturn(run);
+        when(repository.markCancelled(run.getRunId(), "cancelled_before_dispatch")).thenReturn(true);
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        service.dispatch(accepted, emitter);
+
+        assertEquals("cancelled", run.getStatus());
+        assertEquals("cancelled_before_dispatch", run.getStopReason());
+        verify(repository).markCancelled(run.getRunId(), "cancelled_before_dispatch");
+        verify(agentGrpcClient, never()).buildRequest(any(ChatInvocation.class), any(AgentRun.class));
+        verify(agentGrpcClient, never()).run(any(AgentProto.AgentRunRequest.class), any());
+        verify(emitter, times(2)).send(any(SseEventBuilder.class));
     }
 }

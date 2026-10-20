@@ -21,7 +21,7 @@ import java.util.UUID;
 
 /** Named internal commands; deliberately returns plain JSON rather than the public R envelope. */
 @RestController
-@RequestMapping("/api/internal/agent/commands")
+@RequestMapping("/internal/agent/commands")
 @RequiredArgsConstructor
 public class AgentCommandController {
 

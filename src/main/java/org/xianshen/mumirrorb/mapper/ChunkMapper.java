@@ -37,17 +37,17 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      */
     @Select("""
             SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, c.created_at,
-                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+                   1 - (c.embedding &lt;=> #{queryVector}::vector) AS similarity
             FROM chunks c
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;> ''
               AND c.vault_item_id IS NULL
               AND c.embedding IS NOT NULL
-            ORDER BY c.embedding <=> #{queryVector}::vector
+            ORDER BY c.embedding &lt;=> #{queryVector}::vector
             LIMIT #{limit}
             """)
     List<Chunk> searchBySimilarity(@Param("userId") UUID userId,
@@ -61,12 +61,12 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      */
     @Select("""
             SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.vault_item_id, c.created_at,
-                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+                   1 - (c.embedding &lt;=> #{queryVector}::vector) AS similarity
             FROM chunks c
             WHERE c.user_id = #{userId}::uuid
               AND c.embedding IS NOT NULL
               AND c.vault_item_id IS NOT NULL
-            ORDER BY c.embedding <=> #{queryVector}::vector
+            ORDER BY c.embedding &lt;=> #{queryVector}::vector
             LIMIT #{limit}
             """)
     List<Chunk> searchVaultBySimilarity(@Param("userId") UUID userId,
@@ -87,13 +87,13 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      */
     @Select("""
             SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.vault_item_id, c.created_at,
-                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+                   1 - (c.embedding &lt;=> #{queryVector}::vector) AS similarity
             FROM chunks c
             WHERE c.user_id = #{userId}::uuid
               AND c.vault_item_id = #{itemId}
               AND c.embedding IS NOT NULL
-              AND (c.metadata->>'keyChunk' IS NULL OR c.metadata->>'keyChunk' <> 'true')
-            ORDER BY c.embedding <=> #{queryVector}::vector
+              AND (c.metadata->>'keyChunk' IS NULL OR c.metadata->>'keyChunk' &lt;> 'true')
+            ORDER BY c.embedding &lt;=> #{queryVector}::vector
             LIMIT #{limit}
             """)
     List<Chunk> searchByItemAndSimilarity(@Param("userId") UUID userId,
@@ -112,18 +112,18 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      */
     @Select("""
             SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, c.created_at,
-                   1 - (c.embedding <=> #{queryVector}::vector) AS similarity
+                   1 - (c.embedding &lt;=> #{queryVector}::vector) AS similarity
             FROM chunks c
             JOIN records r ON r.id = c.record_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;> ''
               AND c.vault_item_id IS NULL
               AND c.embedding IS NOT NULL
               AND (#{contentType} IS NULL OR c.metadata->>'contentType' = #{contentType})
-            ORDER BY c.embedding <=> #{queryVector}::vector
+            ORDER BY c.embedding &lt;=> #{queryVector}::vector
             LIMIT #{limit}
             """)
     List<Chunk> searchBySimilarityWithFilter(@Param("userId") UUID userId,
@@ -149,7 +149,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;> ''
               AND c.vault_item_id IS NULL
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -179,7 +179,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;> ''
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''
@@ -219,7 +219,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND c.segment IS NOT NULL AND c.segment &lt;> ''
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''
