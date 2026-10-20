@@ -28,4 +28,7 @@ public class ChatRequestDTO {
     @Schema(description = "会话ID（可空：为空创建新会话）",
             example = "550e8400-e29b-41d4-a716-446655440000")
     private UUID sessionId;
+
+    @Schema(description = "客户端请求幂等ID；重连/重试沿用，用户主动再次提问需生成新值")
+    private UUID requestId;
 }

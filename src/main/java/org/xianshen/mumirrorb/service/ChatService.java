@@ -1,7 +1,8 @@
 package org.xianshen.mumirrorb.service;
 
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
+import org.xianshen.mumirrorb.agent.ChatFinalResult;
+import org.xianshen.mumirrorb.agent.ChatInvocation;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
 
 import java.util.List;
@@ -12,18 +13,8 @@ import java.util.UUID;
  */
 public interface ChatService {
 
-    /**
-     * 对话主流程（SSE 流式推送给前端）
-     *
-     * <p>流程：ExtractIntent → 四路检索 → 上下文截断 → 流式 Chat 透传 →
-     * user/assistant 消息落库（assistant 带 sources）→ 触碰 session.updated_at。
-     * 检索为空 / AI 失败按 6.6 兜底文案推送并落库。</p>
-     *
-     * @param userId   用户 ID
-     * @param dto      提问 + 可空 sessionId（空则建新会话）
-     * @param emitter  SSE 发射器（Controller 创建）
-     */
-    void chat(UUID userId, ChatRequestDTO dto, SseEmitter emitter);
+    /** Runs the established legacy question and retrieval path after shared request acceptance. */
+    ChatFinalResult runLegacy(ChatInvocation invocation, SseEmitter emitter);
 
     /**
      * 会话列表（updated_at 倒序，裁决 #9）

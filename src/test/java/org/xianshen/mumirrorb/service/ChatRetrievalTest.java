@@ -21,6 +21,8 @@ import org.xianshen.mumirrorb.pojo.DO.ChatSession;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
+import org.xianshen.mumirrorb.agent.ChatFinalResult;
+import org.xianshen.mumirrorb.agent.ChatInvocation;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
 import org.xianshen.mumirrorb.service.impl.ChatServiceImpl;
 
@@ -65,6 +67,7 @@ class ChatRetrievalTest {
     private org.xianshen.mumirrorb.tools.ToolOrchestrator toolOrchestrator;
     private org.xianshen.mumirrorb.config.VaultProperties vaultProperties;
     private org.xianshen.mumirrorb.mapper.ProfileStatsMapper statsMapper;
+    private ChatFinalResult lastResult;
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID SESSION_ID = UUID.randomUUID();
@@ -121,6 +124,15 @@ class ChatRetrievalTest {
                 .build();
     }
 
+    private ChatFinalResult runChat(UUID userId, ChatRequestDTO dto, SseEmitter emitter) {
+        UUID sessionId = dto.getSessionId() == null ? UUID.randomUUID() : dto.getSessionId();
+        ChatInvocation invocation = new ChatInvocation(userId, sessionId, UUID.randomUUID(),
+                dto.getRequestId() == null ? UUID.randomUUID() : dto.getRequestId(),
+                1L, dto.getQuestion(), "legacy");
+        lastResult = chatService.runLegacy(invocation, emitter);
+        return lastResult;
+    }
+
     @Test
     @DisplayName("SEMANTIC 路由：无 time_range → 开衰减（halfLife=30）")
     void semantic_appliesDecay() {
@@ -130,7 +142,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt());
         verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt());
@@ -145,7 +157,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("上个月在忙什么").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("上个月在忙什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 eq(false), eq(30.0), any(), anyInt());
@@ -163,7 +175,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("我的待办").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("我的待办").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchStructured(eq(USER_ID), any(), any(), any(), any(), any(), anyInt());
         verify(aiGrpcClient, never()).embed(any(), anyString());
@@ -182,7 +194,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("我是什么样的人").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("我是什么样的人").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(snapshotMapper).selectRecent(USER_ID, "manual", 2);
         verify(snapshotMapper).selectRecent(USER_ID, "monthly", 2);
@@ -203,7 +215,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("我是什么样的人").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("我是什么样的人").sessionId(SESSION_ID).build(), new SseEmitter());
 
         // 未回退到 HYBRID / SEMANTIC
         verify(searchMapper, never()).searchHybrid(any(), anyString(), any(), any(), any(), any(), any(),
@@ -219,20 +231,18 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("检索为空 → 兜底文案落库 assistant 消息（6.6）")
+    @DisplayName("检索为空 → 旧引擎返回原兜底文案，由共享运行服务负责落库")
     void emptyRetrieval_fallbackPersisted() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("说了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
                 .thenReturn(List.of());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(aiGrpcClient, never()).chatStream(any(), any());
-        // 文案改为三档中的"有记录但没匹配上"（§6.1），且打 is_fallback=true 不进后续上下文（§6.2）
-        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())
-                        && Boolean.TRUE.equals(h.getIsFallback())));
+        org.junit.jupiter.api.Assertions.assertEquals(ChatServiceImpl.FALLBACK_NO_MATCH, lastResult.answerText());
+        org.junit.jupiter.api.Assertions.assertTrue(lastResult.fallback());
+        verify(historyMapper, never()).insert(any());
     }
 
     @Test
@@ -255,12 +265,11 @@ class ChatRetrievalTest {
                 MirrorChatProto.ChatChunk.newBuilder().setContent("就在 [F1] 那份里").setDone(true).build())
                 .iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("我传过的开题报告在哪").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(aiGrpcClient).chatStream(eq(USER_ID), any());
-        verify(historyMapper, never()).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole()) && Boolean.TRUE.equals(h.getIsFallback())));
+        org.junit.jupiter.api.Assertions.assertFalse(lastResult.fallback());
     }
 
     @Test
@@ -275,14 +284,12 @@ class ChatRetrievalTest {
                         .setTool("find_item").setSummary("find_item:0个文件").setSuccess(true)
                         .setPayloadJson("{\"count\":0,\"items\":[]}").build()));
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("说了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(aiGrpcClient, never()).chatStream(any(), any());
         // hasUsableToolData 口径不变：count=0 / items 空 不算材料 → 循环跑完仍无料 → 兜底
-        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())));
+        org.junit.jupiter.api.Assertions.assertEquals(ChatServiceImpl.FALLBACK_NO_MATCH, lastResult.answerText());
     }
 
     @Test
@@ -292,15 +299,13 @@ class ChatRetrievalTest {
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), eq(0.35), anyInt()))
                 .thenReturn(List.of());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), eq(0.35), anyInt());
         // 不相关就别答：直接兜底，不喂噪声给 LLM（阈值 0.35 是红线，不动）
         verify(aiGrpcClient, never()).chatStream(any(), any());
-        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_NO_MATCH.equals(h.getContent())));
+        org.junit.jupiter.api.Assertions.assertEquals(ChatServiceImpl.FALLBACK_NO_MATCH, lastResult.answerText());
     }
 
     @Test
@@ -313,7 +318,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("我记得我上传过设计文档").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
@@ -331,7 +336,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("我有哪些待办").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchStructured(eq(USER_ID), eq("todo"), any(), any(), any(), any(), anyInt());
@@ -367,17 +372,17 @@ class ChatRetrievalTest {
     }
 
     @Test
-    @DisplayName("AI 流失败 → 兜底'暂时无法回答'落库（6.6）")
+    @DisplayName("AI 流失败 → 旧引擎返回'暂时无法回答'，由共享运行服务负责落库")
     void chatStreamFails_fallbackPersisted() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("最近学了什么"), any())).thenReturn(intent("semantic", ""));
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt()))
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenThrow(new RuntimeException("gRPC down"));
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole()) && "暂时无法回答".equals(h.getContent())));
+        org.junit.jupiter.api.Assertions.assertEquals("暂时无法回答", lastResult.answerText());
+        org.junit.jupiter.api.Assertions.assertTrue(lastResult.fallback());
     }
 
     @Test
@@ -390,7 +395,7 @@ class ChatRetrievalTest {
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder().question("昨天上班我忙了什么").sessionId(SESSION_ID).build(), new SseEmitter());
+        runChat(USER_ID, ChatRequestDTO.builder().question("昨天上班我忙了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         // 关键断言：embed 收到的是原文（非 null/空），HYBRID 检索用原文作向量检索 query
         verify(aiGrpcClient).embed(eq(USER_ID), eq("昨天上班我忙了什么"));
@@ -409,12 +414,10 @@ class ChatRetrievalTest {
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
                 .thenReturn(List.of());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("我最近特别焦虑怎么办").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_NEW_USER.equals(h.getContent())));
+        org.junit.jupiter.api.Assertions.assertEquals(ChatServiceImpl.FALLBACK_NEW_USER, lastResult.answerText());
     }
 
     @Test
@@ -425,12 +428,10 @@ class ChatRetrievalTest {
         when(searchMapper.searchSemantic(eq(USER_ID), anyString(), anyBoolean(), anyDouble(), any(), anyInt()))
                 .thenReturn(List.of());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("我最近特别焦虑怎么办").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(historyMapper).insert(org.mockito.ArgumentMatchers.argThat(h ->
-                "assistant".equals(h.getRole())
-                        && ChatServiceImpl.FALLBACK_EMOTIONAL.equals(h.getContent())));
+        org.junit.jupiter.api.Assertions.assertEquals(ChatServiceImpl.FALLBACK_EMOTIONAL, lastResult.answerText());
     }
 
     // ==================== 兜底消息不污染历史（§6.2）====================
@@ -454,7 +455,7 @@ class ChatRetrievalTest {
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         org.mockito.ArgumentCaptor<MirrorChatProto.ChatRequest> captor =
@@ -485,7 +486,7 @@ class ChatRetrievalTest {
                         .setPayloadJson("{\"count\":3}").build()));
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(toolOrchestrator).planAndExecute(eq(USER_ID), eq(SESSION_ID), eq("最近学了什么"));
@@ -500,7 +501,7 @@ class ChatRetrievalTest {
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any())).thenReturn(List.of(answerChunk()).iterator());
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(toolOrchestrator).loopAndExecute(eq(USER_ID), eq(SESSION_ID), eq("最近学了什么"),
@@ -528,7 +529,7 @@ class ChatRetrievalTest {
                 });
         CapturingEmitter emitter = new CapturingEmitter();
 
-        chatService.chat(USER_ID, ChatRequestDTO.builder()
+        runChat(USER_ID, ChatRequestDTO.builder()
                 .question("最近学了什么").sessionId(SESSION_ID).build(), emitter);
 
         // thinking 逐块：两个独立事件，payload 结构与 streamAnswer 的 thinking 同构

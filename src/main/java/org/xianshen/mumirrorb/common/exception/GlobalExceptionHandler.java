@@ -37,6 +37,24 @@ public class GlobalExceptionHandler {
 
     // ==================== 业务异常 ====================
 
+    @ExceptionHandler(org.xianshen.mumirrorb.agent.AgentRunConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public R<Void> handleAgentRunConflict(org.xianshen.mumirrorb.agent.AgentRunConflictException e) {
+        return R.fail(HttpStatus.CONFLICT.value(), e.getMessage());
+    }
+
+    @ExceptionHandler(org.xianshen.mumirrorb.agent.RunGoneException.class)
+    @ResponseStatus(HttpStatus.GONE)
+    public R<Void> handleAgentRunGone(org.xianshen.mumirrorb.agent.RunGoneException e) {
+        return R.fail(HttpStatus.GONE.value(), e.getMessage());
+    }
+
+    @ExceptionHandler(org.xianshen.mumirrorb.agent.RunNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public R<Void> handleAgentRunNotFound(org.xianshen.mumirrorb.agent.RunNotFoundException e) {
+        return R.fail(HttpStatus.NOT_FOUND.value(), e.getMessage());
+    }
+
     /**
      * 处理业务异常（通用）
      */

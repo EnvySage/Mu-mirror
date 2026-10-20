@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
+import org.xianshen.mumirrorb.agent.AgentRunRepository;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
@@ -81,6 +82,7 @@ public class GlossaryServiceImpl implements GlossaryService {
     private final ChunkMapper chunkMapper;
     private final RecordMapper recordMapper;
     private final AiGrpcClient aiGrpcClient;
+    private final AgentRunRepository agentRunRepository;
 
     /**
      * confirmed 注入列表缓存：userId → (加载时间, 词条列表)
@@ -268,6 +270,26 @@ public class GlossaryServiceImpl implements GlossaryService {
             log.debug("ExtractIntent query 侧命中 {} 个词条，用户: {}", matched.size(), userId);
         }
         return matched;
+    }
+
+    @Override
+    @Transactional
+    public void recordQueryHits(UUID userId, UUID runId, List<Long> termIds) {
+        if (userId == null || runId == null || termIds == null || termIds.isEmpty()) {
+            return;
+        }
+        List<Long> distinctIds = termIds.stream().filter(id -> id != null && id > 0).distinct().toList();
+        if (distinctIds.isEmpty() || agentRunRepository.applyGlossaryHitsOnce(userId, runId) != 1) {
+            return;
+        }
+        int updated = termMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserTerm>()
+                .eq(UserTerm::getUserId, userId)
+                .eq(UserTerm::getStatus, "confirmed")
+                .in(UserTerm::getId, distinctIds)
+                .setSql("query_hit_count = COALESCE(query_hit_count, 0) + 1"));
+        if (updated > 0) {
+            invalidateCache(userId);
+        }
     }
 
     /**

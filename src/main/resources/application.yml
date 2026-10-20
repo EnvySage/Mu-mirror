@@ -59,6 +59,24 @@ spring:
   #   basic:
   #     enabled: false  # Spring Boot 3.x 已移除此配置
 
+# New chat engine rollout. graph_v2 is opt-in per user and defaults to legacy.
+chat:
+  engine: ${MIRROR_CHAT_ENGINE:legacy}
+  graph-enabled-user-ids: ${MIRROR_GRAPH_ENABLED_USER_IDS:}
+  shadow-sample-rate: ${MIRROR_SHADOW_SAMPLE_RATE:0.0}
+  create-record-enabled: false
+
+# Python Agent uses an independent gRPC endpoint and internal service token.
+# The token is injected only through the environment; never put a real value here.
+agent:
+  grpc-address: ${MIRROR_AI_AGENT_ADDRESS:localhost:10004}
+  internal-token: ${MIRROR_AGENT_INTERNAL_TOKEN:}
+  total-budget-ms: 480000
+  loop-budget-ms: 180000
+  max-plan-rounds: 4
+  lease-seconds: 30
+  heartbeat-seconds: 10
+
 # MyBatis-Plus 配置
 mybatis-plus:
   # 驼峰映射等公共配置

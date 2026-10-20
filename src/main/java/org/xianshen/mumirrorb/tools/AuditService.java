@@ -31,15 +31,26 @@ public class AuditService {
      */
     public void record(UUID userId, UUID sessionId, String tool, Map<String, Object> args,
                        String summary, boolean success, long latencyMs) {
+        record(userId, sessionId, null, null, null, tool, args, summary, success, latencyMs, null);
+    }
+
+    /** Run-aware idempotent audit used by Agent tool_finished events. */
+    public void record(UUID userId, UUID sessionId, UUID runId, String callId, String engine,
+                       String tool, Map<String, Object> args, String summary,
+                       boolean success, long latencyMs, String code) {
         try {
             toolCallMapper.insert(ToolCall.builder()
                     .userId(userId)
                     .sessionId(sessionId)
+                    .runId(runId)
+                    .callId(callId)
+                    .engine(engine)
                     .tool(tool)
                     .args(args == null ? Map.of() : args)
                     .resultSummary(truncate(summary))
                     .success(success)
                     .latencyMs((int) Math.min(latencyMs, Integer.MAX_VALUE))
+                    .code(code)
                     .createdAt(OffsetDateTime.now(ZONE))
                     .build());
         } catch (Exception e) {

@@ -43,6 +43,9 @@ public class ConversationHistory {
     @Schema(description = "关联用户ID")
     private UUID userId;
 
+    @TableField(typeHandler = UuidTypeHandler.class)
+    private UUID runId;
+
     /**
      * 角色：user / assistant
      */
@@ -74,6 +77,9 @@ public class ConversationHistory {
     @TableField(typeHandler = JsonbTypeHandlerListMap.class)
     @Schema(description = "对话文件卡（assistant 消息）")
     private List<Map<String, Object>> vaultRefs;
+
+    @TableField(typeHandler = JsonbTypeHandlerListMap.class)
+    private List<Map<String, Object>> createdRecords;
 
     /**
      * 兜底消息标记（chat-loop-design.md §6.2）：true = 这条 assistant 消息是系统兜底文案，

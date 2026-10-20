@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.xianshen.mumirrorb.agent.AgentRunService;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
@@ -43,6 +44,7 @@ public class MirrorController {
 
     private final MirrorService mirrorService;
     private final ChatService chatService;
+    private final AgentRunService agentRunService;
     private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties;
 
     private UUID getCurrentUserId() {
@@ -226,11 +228,18 @@ public class MirrorController {
         // 长超时（chat-loop-design.md §4.3）：循环预算 + Chat 流式 + 余量，配置化以便与
         // vault.plan-tools-timeout-ms / loop-budget-ms 一起对齐（硬编码 120s 曾小于单步超时 135s）
         SseEmitter emitter = new SseEmitter(mirrorProperties.getSseTimeoutMs());
-        // 客户端断开/超时时优雅终结，避免 Tomcat 转发 /error 触发安全链异常噪音
-        emitter.onCompletion(() -> { });
-        emitter.onTimeout(emitter::complete);
-        emitter.onError(e -> { });
-        chatService.chat(userId, dto, emitter);
+        org.xianshen.mumirrorb.agent.StartRunResult run = agentRunService.startOrFindRun(userId, dto);
+        emitter.onCompletion(() -> {
+            if (run.created()) agentRunService.cancelRun(run.run().getRunId(), userId, "sse_closed");
+        });
+        emitter.onTimeout(() -> {
+            if (run.created()) agentRunService.cancelRun(run.run().getRunId(), userId, "sse_timeout");
+            emitter.complete();
+        });
+        emitter.onError(e -> {
+            if (run.created()) agentRunService.cancelRun(run.run().getRunId(), userId, "client_disconnect");
+        });
+        agentRunService.dispatch(run, emitter);
         return emitter;
     }
 
@@ -273,6 +282,7 @@ public class MirrorController {
             @Parameter(description = "会话ID", required = true)
             @PathVariable UUID id) {
         UUID userId = getCurrentUserId();
+        agentRunService.cancelActiveForSession(id, userId);
         chatService.deleteSession(id, userId);
         return R.ok("会话已删除", null);
     }
