@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     user_edited BOOLEAN DEFAULT FALSE,  -- 用户是否编辑过（文本或元数据），统计用
     ai_memory_approved BOOLEAN NOT NULL DEFAULT FALSE, -- 用户逐片段确认后才进入后续 AI 记忆
     todo_approved BOOLEAN NOT NULL DEFAULT FALSE,       -- 待办需另行确认
-    vault_item_id BIGINT REFERENCES vault_items(id) ON DELETE CASCADE,  -- vault 全消化产物挂链（vault 删除时级联清，向量库无孤儿）
+    vault_item_id BIGINT,               -- FK 在 vault_items 建表后添加，打破两表的循环 DDL 依赖
     embedding vector(1024),             -- BGE-m3，硬约束 1024 维（裁决 #18）
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -198,6 +198,34 @@ CREATE TABLE IF NOT EXISTS vault_items (
     created_at TIMESTAMPTZ DEFAULT now(),
     deleted_at TIMESTAMPTZ
 );
+DO $$
+DECLARE
+    chunks_vault_item_attnum SMALLINT;
+    vault_items_id_attnum SMALLINT;
+BEGIN
+    SELECT attnum INTO chunks_vault_item_attnum
+    FROM pg_attribute
+    WHERE attrelid = 'chunks'::regclass AND attname = 'vault_item_id' AND NOT attisdropped;
+
+    SELECT attnum INTO vault_items_id_attnum
+    FROM pg_attribute
+    WHERE attrelid = 'vault_items'::regclass AND attname = 'id' AND NOT attisdropped;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE contype = 'f'
+          AND conrelid = 'chunks'::regclass
+          AND confrelid = 'vault_items'::regclass
+          AND conkey = ARRAY[chunks_vault_item_attnum]::SMALLINT[]
+          AND confkey = ARRAY[vault_items_id_attnum]::SMALLINT[]
+          AND confdeltype = 'c'
+    ) THEN
+        ALTER TABLE chunks
+            ADD CONSTRAINT fk_chunks_vault_item_id
+            FOREIGN KEY (vault_item_id) REFERENCES vault_items(id) ON DELETE CASCADE;
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_vault_items_user ON vault_items(user_id, deleted_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_vault_sha ON vault_items(user_id, sha256) WHERE sha256 IS NOT NULL AND deleted_at IS NULL;
 
