@@ -52,4 +52,17 @@ public class AsyncConfig {
         log.info("vault 消化线程池已初始化：core=2, max=4, queue=64, CallerRunsPolicy（B8）");
         return executor;
     }
+
+    @Bean("agentRunExecutor")
+    public ThreadPoolTaskExecutor agentRunExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(64);
+        executor.setThreadNamePrefix("agent-run-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.initialize();
+        return executor;
+    }
 }

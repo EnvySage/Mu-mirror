@@ -75,6 +75,9 @@ public interface GlossaryService {
      */
     List<UserTermVO> matchQueryTerms(UUID userId, String query);
 
+    /** Apply one graph_v2 run's confirmed glossary hits once; shadow runs are ignored. */
+    void recordQueryHits(UUID userId, UUID runId, List<Long> termIds);
+
     /**
      * 手动触发候选抽取（5c：POST /api/glossary/extract，懒人立即出候选）
      *

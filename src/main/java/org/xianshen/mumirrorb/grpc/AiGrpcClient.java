@@ -733,6 +733,11 @@ public class AiGrpcClient {
         return buildLlmConfig(userId);
     }
 
+    /** Build the per-user EmbeddingConfig for the independent Agent RPC. */
+    public CommonProto.EmbeddingConfig buildEmbeddingConfigFor(UUID userId) {
+        return buildEmbeddingConfig(userId);
+    }
+
     /**
      * 从 user_settings 构建 LlmConfig
      */

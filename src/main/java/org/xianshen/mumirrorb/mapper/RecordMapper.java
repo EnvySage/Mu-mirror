@@ -41,7 +41,7 @@ public interface RecordMapper extends BaseMapper<Record> {
               AND source = 'user'
               AND status != 'failed'
               AND created_at >= #{monthStart}
-              AND created_at < #{monthEnd}
+              AND created_at &lt; #{monthEnd}
             GROUP BY TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')
             """)
     List<CalendarDayVO> countByDay(@Param("userId") UUID userId,

@@ -13,11 +13,13 @@
 | mirror_chat.proto | MirrorChat | ExtractIntent（query_type + glossary=3）、Chat（流式 + glossary=5 + tool_results=6）、PlanTools（ToolSpec/ToolResult/PlannedCall，2026-09-06） | B 侧 proto 已落地并编译；AI 侧对账字段号 |
 | mirror_profile.proto | MirrorProfile | GenerateProfile | proto 已定义，实现待核实 |
 | common.proto | — | GlossaryTerm / ChunkDTO 消息（词典轮，2026-09-05） | AI 已落地，B 对齐字段号 |
+| agent.proto | AgentRunner | RunAgent（仅流式 custom 事件，字段号见架构 v2 §11） | Task 5 双仓逐字节一致；独立端口 10004，须携带 `x-internal-token`；仅只读调用 |
 
 ## 变更登记
 | 2026-10-16 | agent-B / AI | ClassifyRequest 增加 `bool processing_authorized = 8`，两仓 proto 同步。Java 仅在用户主动请求本次整理或确认片段的分类调用中设为 true；Python 对缺省/false 请求在创建 LLM 前返回 PERMISSION_DENIED。字段缺省为 false，旧客户端 fail-closed。 | 双端重跑/编译 proto；AI 侧补未授权拒绝测试。 |
 | 日期 | 改动方 | 内容 | 对方动作 |
 |------|--------|------|----------|
+| 2026-10-20 | AI / B | 新增 `agent.proto`：Java → Python 单向 AgentRunner.RunAgent；request 携带可信 user/session/message 作用域和逐请求模型配置；event seq 从 1 开始，custom oneof 为 meta/thinking/delta/tool_finished/completed/failed。Python 独立监听 10004、并发上限 2、校验 `x-internal-token` 后才加载只读数据和模型依赖；只读首版拒绝 write grant 字段。proto 与架构 v2 §11 一致，SHA256=`4E790BD5C34A821488BA0405F8298FE88851E96E707831C6F345EF8711D15401`。 | B 侧 Maven 重生成并编译 stub；Task 6 再接 Java run 生命周期，不在本任务接入 HTTP/SSE。 |
 | 2026-09-03 | 总指挥 | 初始登记。ClassifyRequest.single 为首个待同步项：Java 侧加字段（field 3），Python 侧实现 single 模式 + classify-single prompt | 双方对照实现 |
 | 2026-09-03 | agent-B | **已落地** `record_processor.proto` ClassifyRequest 增加 `bool single = 3`（单段模式：禁止拆分、恰好返回 1 条 ClassifyItem，设计文档 4.4）。Java 端已编译生成 stub（target/generated-sources 已含 getSingle） | **AI Agent：重跑 `generate_proto.py`，实现 single 模式 + classify-single prompt** |
 | 2026-09-03 | AI Agent | Python 侧 proto 变更（T-AI-2/4/5 前置）：① record_processor.proto ClassifyRequest 加 `bool single = 3`；② mirror_chat.proto ExtractIntentResponse 加 `string query_type = 1`（PROFILE/STRUCTURED/SEMANTIC/HYBRID，英文小写，HYBRID=默认）；③ mirror_profile.proto 新增 `ChatRecord{role,content,created_at}` + GenerateProfileRequest 加 `repeated ChatRecord recent_chats = 9`。Python 已重跑 generate_proto.py 并验证字段序 | B Agent 对照改 Java 侧 proto（字段号必须一致）后跑 Java 代码生成 |

@@ -41,6 +41,15 @@ public class ToolCall {
     @Schema(description = "会话ID（可空）")
     private UUID sessionId;
 
+    @TableField(typeHandler = UuidTypeHandler.class)
+    private UUID runId;
+
+    private String callId;
+
+    private String engine;
+
+    private String code;
+
     @Schema(description = "工具名", example = "search_records")
     private String tool;
 

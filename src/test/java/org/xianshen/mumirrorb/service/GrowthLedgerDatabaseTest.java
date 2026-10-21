@@ -79,7 +79,7 @@ class GrowthLedgerDatabaseTest {
     }
 
     @Test
-    void manualRetryCorrectionAndAxisRenamePreserveTheLedgerSnapshot() {
+    void manualRetryCorrectionIsIdempotentAndLocksAxisDefinitions() {
         var initial = growth.overview(userId);
         assertEquals(5, initial.getAxes().size());
         assertEquals(5, initial.getAxesVersion());
@@ -92,8 +92,10 @@ class GrowthLedgerDatabaseTest {
         List<GrowthProperties.Axis> renamed = growth.axes(userId).stream()
                 .map(axis -> new GrowthProperties.Axis(axis.getId(), axis.getName(), axis.getDescription())).toList();
         renamed.get(0).setName("我定义的学识");
-        growth.updateAxes(userId, initial.getAxesVersion(), renamed);
-        assertEquals(6, growth.axesVersion(userId));
+        BusinessException locked = assertThrows(BusinessException.class,
+                () -> growth.updateAxes(userId, initial.getAxesVersion(), renamed));
+        assertEquals(409, locked.getCode());
+        assertEquals("已有成长记录，五维定义已锁定", locked.getMessage());
 
         // Retrying with the same request key cannot create a second entry.
         growth.adjustManual(userId, manual);

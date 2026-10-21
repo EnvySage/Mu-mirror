@@ -414,13 +414,15 @@ class ChatLoopTest {
         assertEquals(0, first.getPreviousResultsCount());
         assertEquals(1, first.getHistoryCount());
         assertTrue(first.getAssistantContext().getActionStatusSummary().contains("state=CANCELLED"));
-        assertTrue(first.getAssistantContext().getActionStatusSummary().contains("周五交报告"));
+        assertFalse(first.getAssistantContext().getActionStatusSummary().contains("周五交报告"));
+        assertFalse(first.getAssistantContext().getActionStatusSummary().contains("payload="));
         // 第 2 步必须看得见第 1 步的结果（循环的核心输入）
         MirrorChatProto.PlanNextStepRequest second = captor.getAllValues().get(1);
         assertEquals(2, second.getStep());
         assertEquals(1, second.getPreviousResultsCount());
         assertEquals("get_stats", second.getPreviousResults(0).getTool());
         assertTrue(second.getAssistantContext().getActionStatusSummary().contains("state=CANCELLED"));
+        assertFalse(second.getAssistantContext().getActionStatusSummary().contains("周五交报告"));
     }
 
     @Test

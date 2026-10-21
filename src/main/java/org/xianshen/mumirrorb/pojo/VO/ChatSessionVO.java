@@ -89,6 +89,9 @@ public class ChatSessionVO {
         @Schema(description = "对话文件卡（assistant 消息，历史回放文件卡与 [Fn] 行内芯片）")
         private List<Map<String, Object>> vaultRefs;
 
+        @Schema(description = "本轮创建记录回执卡（不会伪装成AI来源）")
+        private List<Map<String, Object>> createdRecords;
+
         @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
         @Schema(description = "创建时间")
         private OffsetDateTime createdAt;

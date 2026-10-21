@@ -34,6 +34,14 @@ jwt:
   secret: your-very-secure-jwt-secret-key-at-least-256-bits
   expiration: 86400000  # 24小时
 
+# AI engine rollout remains legacy until the staged quality and latency gates pass.
+# These environment-backed values are also declared in application.yml.
+chat:
+  engine: ${MIRROR_CHAT_ENGINE:legacy}
+  graph-enabled-user-ids: ${MIRROR_GRAPH_ENABLED_USER_IDS:}
+  shadow-sample-rate: ${MIRROR_SHADOW_SAMPLE_RATE:0.0}
+  create-record-enabled: ${MIRROR_AGENT_CREATE_RECORD_ENABLED:false}
+
 # 日志配置
 logging:
   level:

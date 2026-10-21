@@ -14,14 +14,18 @@ import java.util.List;
 @Mapper
 public interface ConversationHistoryMapper extends BaseMapper<ConversationHistory> {
 
-    @org.apache.ibatis.annotations.Select("""
-      SELECT * FROM conversation_history
-      WHERE session_id=#{sessionId}::uuid AND user_id=#{userId}::uuid AND role='user'
-        AND NOT EXISTS (SELECT 1 FROM chat_source_exclusions x WHERE x.user_id=conversation_history.user_id
-          AND x.source_kind='chat_message' AND x.source_id=conversation_history.id)
-      ORDER BY created_at,id""")
-    List<ConversationHistory> selectUserMessages(@org.apache.ibatis.annotations.Param("sessionId") java.util.UUID sessionId,
-                                                 @org.apache.ibatis.annotations.Param("userId") java.util.UUID userId);
+    default List<ConversationHistory> selectUserMessages(java.util.UUID sessionId, java.util.UUID userId) {
+        return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ConversationHistory>()
+                .eq(ConversationHistory::getSessionId, sessionId)
+                .eq(ConversationHistory::getUserId, userId)
+                .eq(ConversationHistory::getRole, "user")
+                .notExists("SELECT 1 FROM chat_source_exclusions x "
+                        + "WHERE x.user_id=conversation_history.user_id "
+                        + "AND x.source_kind='chat_message' "
+                        + "AND x.source_id=conversation_history.id")
+                .orderByAsc(ConversationHistory::getCreatedAt)
+                .orderByAsc(ConversationHistory::getId));
+    }
 
     /**
      * 指定会话的历史消息（时间正序，前端渲染顺序）

@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
@@ -21,7 +20,6 @@ import org.xianshen.mumirrorb.mapper.SettingsMapper;
 import org.xianshen.mumirrorb.pojo.DO.ChatSession;
 import org.xianshen.mumirrorb.pojo.DO.ConversationHistory;
 import org.xianshen.mumirrorb.pojo.DO.UserSettings;
-import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.DTO.RetrievedChunkDTO;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
 import org.xianshen.mumirrorb.pojo.VO.GlossaryGroupVO.UserTermVO;
@@ -45,6 +43,8 @@ import java.util.UUID;
  *
  * <p>Agent 路径由循环规划器选择工具，再由 Chat 流式回答；旧开关关闭时保留 ExtractIntent
  * 与结构化/语义/组合检索回滚路径。</p>
+ * <p>会话和 user 消息由 AgentRunService 接纳；本服务只检索并生成 ChatFinalResult，assistant
+ * 消息、来源记忆 lineage 与最终 SSE 由 AgentRunService 统一提交。</p>
  *
  * <p>时间衰减：final_score = (embedding &lt;=&gt; query) × 1/(1 + 天数差/half_life)，
  * half_life 读 user_settings.rag_half_life；ExtractIntent 返回 time_range 时关衰减。</p>
@@ -64,7 +64,6 @@ public class ChatServiceImpl implements ChatService {
     private static final int HISTORY_ROUNDS = 3;           // 对话历史最近 3 轮（设计 6.2：6 条消息）
     // ↑ 早期放到 20 轮（实际送 40 条）反而有害：模型会顺着上文的结论和措辞继续说，
     //   上一轮跑偏的因果会被"接着上文"放大；同时挤占 prompt token。追问所需的上文 3 轮足够。
-    private static final int TITLE_MAX_LEN = 50;
     private static final int QUOTE_MAX_LEN = 60;
     private static final double DEFAULT_HALF_LIFE = 30.0;
     private static final String FALLBACK_NO_ANSWER = "暂时无法回答";
@@ -119,19 +118,15 @@ public class ChatServiceImpl implements ChatService {
     private final DailyChatSessionResolver dailySessionResolver;
     @org.springframework.beans.factory.annotation.Autowired
     private org.xianshen.mumirrorb.service.ActionProposalService actionProposalService;
-    @org.springframework.beans.factory.annotation.Autowired
-    private org.xianshen.mumirrorb.service.AssistantContextService assistantContextService;
     @Override
-    @Async
-    public void chat(UUID userId, ChatRequestDTO dto, SseEmitter emitter) {
-        String question = dto.getQuestion().trim();
+    public org.xianshen.mumirrorb.agent.ChatFinalResult runLegacy(
+            org.xianshen.mumirrorb.agent.ChatInvocation invocation, SseEmitter emitter) {
+        UUID userId = invocation.userId();
+        UUID sessionId = invocation.sessionId();
+        String question = invocation.question().trim();
         try {
-            // 1. 会话：不存在则创建（标题取提问截断）
-            ChatSession session = resolveSession(userId, dto.getSessionId(), question);
-
-            // 2. user 消息落库（先落，失败重试时历史不丢）
-            Long sourceMessageId = insertMessage(userId, session.getId(), "user", question, null);
-
+            // AgentRunService owns request acceptance and has already inserted this user message.
+            long sourceMessageId = invocation.userMessageId();
             boolean loopEnabled = vaultProperties.isChatLoopEnabled();
             MirrorChatProto.ExtractIntentResponse intent = null;
             String route;
@@ -153,20 +148,20 @@ public class ChatServiceImpl implements ChatService {
             // 3.5 旧 PlanTools 单次规划（chat-loop-design.md 裁决 0.4 的回滚路径）：
             // 顺序、事件序都保持改造前原样——检索之前一次性规划，失败/空计划 → 空列表走纯 RAG
             if (!loopEnabled) {
-                toolResults = toolOrchestrator.planAndExecute(userId, session.getId(), sourceMessageId, question, actionProposalService);
+                toolResults = toolOrchestrator.planAndExecute(
+                        userId, sessionId, sourceMessageId, question, actionProposalService);
                 java.util.List<String> toolsUsed = toolResults.stream()
                         .filter(org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult::getSuccess)
                         .map(CommonProto.ToolResult::getSummary)
                         .toList();
                 if (!toolsUsed.isEmpty()) {
                     sendEvent(emitter, "meta", Map.of(
-                            "sessionId", session.getId().toString(),
-                            "route", route.toUpperCase(),
+                            "sessionId", sessionId.toString(), "route", route.toUpperCase(),
                             "tools_used", toolsUsed));
                 }
             }
             sendEvent(emitter, "meta", Map.of(
-                    "sessionId", session.getId().toString(),
+                    "sessionId", sessionId.toString(),
                     "route", route.toUpperCase(),
                     "sourceMessageId", sourceMessageId));
 
@@ -181,27 +176,23 @@ public class ChatServiceImpl implements ChatService {
             // 循环内任何失败都只是提前退出并带回已有结果，不会抛到这里（零回归裁决 0.4）
             if (loopEnabled) {
                 final String routeUpper = route.toUpperCase();
-                final UUID sid = session.getId();
+                final UUID sid = sessionId;
                 toolResults = toolOrchestrator.loopAndExecute(userId, sid, sourceMessageId, question,
                         planHistory(sid, userId),
                         actionProposalService,
                         new org.xianshen.mumirrorb.tools.ToolOrchestrator.StepListener() {
                             @Override
                             public void onThinking(String delta) {
-                                // 每块立刻推，绝不攒（事件名/payload 与 streamAnswer 的 thinking 完全同构）
                                 sendEvent(emitter, "thinking", Map.of("content", delta));
                             }
 
                             @Override
                             public void onStepDone(List<String> cumulativeToolSummaries) {
-                                if (cumulativeToolSummaries.isEmpty()) {
-                                    return; // 不产生空芯片事件
+                                if (!cumulativeToolSummaries.isEmpty()) {
+                                    sendEvent(emitter, "meta", Map.of(
+                                            "sessionId", sessionId.toString(), "route", routeUpper,
+                                            "tools_used", cumulativeToolSummaries));
                                 }
-                                // 前端 meta.tools_used 覆盖式赋值 → 每次发累积全量
-                                sendEvent(emitter, "meta", Map.of(
-                                        "sessionId", sid.toString(),
-                                        "route", routeUpper,
-                                        "tools_used", cumulativeToolSummaries));
                             }
                         });
             }
@@ -224,37 +215,26 @@ public class ChatServiceImpl implements ChatService {
             //   本来就没材料（寒暄/查无此事）→ 分档文案，说清"没翻到"并给抓手
             // 若不分，AI 抽风时会对着一堆命中记录说"我这边没对上"，比不说还糟。
             boolean hasMaterial = !chunks.isEmpty() || hasUsableToolData(toolResults);
-            streamAnswer(emitter, userId, session.getId(), route, question, chunks,
+            return streamAnswer(emitter, userId, sessionId, route, question, chunks,
+                    invocation.assistantContext(),
                     toolResults, toolsUsedRecords,
                     hasMaterial ? null : fallbackText(userId, question, intent));
         } catch (Exception e) {
-            log.error("对话处理失败，用户: {}", userId, e);
-            try {
-                sendEvent(emitter, "error", Map.of("message", FALLBACK_NO_ANSWER));
-            } catch (Exception ignored) {
-                // emitter 已失效（客户端断开）
-            }
-        } finally {
-            try {
-                emitter.complete();
-            } catch (Exception ignored) {
-            }
+            log.error("对话处理失败，run: {}, 用户: {}", invocation.runId(), userId, e);
+            return finishWithFallback(emitter, userId, sessionId, "", FALLBACK_NO_ANSWER);
         }
     }
 
-    /**
-     * 流式回答：gRPC Chat 服务端流逐块转发为 SSE delta，结束后落库 assistant 消息 + 触碰 session
-     *
-     * @param emptyAnswerText 流里一个字都没拿到时的兜底文案（分档给出）。正常有料时是不传的
-     *                        （取 {@link #FALLBACK_NO_ANSWER}）；无材料的寒暄路径会传分档文案，
-     *                        让"AI 真挂了"和"这轮没资料"两种失败各说各话。
-     */
-    private void streamAnswer(SseEmitter emitter, UUID userId, UUID sessionId, String route,
+    /** Stream legacy answer deltas and return a value for the shared run finalizer. */
+    private org.xianshen.mumirrorb.agent.ChatFinalResult streamAnswer(
+                              SseEmitter emitter, UUID userId, UUID sessionId, String route,
                               String question, List<RetrievedChunkDTO> chunks,
+                              org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext assistantContext,
                               List<CommonProto.ToolResult> toolResults,
                               List<Map<String, Object>> toolsUsedRecords,
                               String emptyAnswerText) {
-        MirrorChatProto.ChatRequest request = buildChatRequest(userId, question, chunks, sessionId, toolResults);
+        MirrorChatProto.ChatRequest request = buildChatRequest(
+                userId, question, chunks, sessionId, toolResults, assistantContext);
         StringBuilder answer = new StringBuilder();
         List<Map<String, Object>> sources = null;
         try {
@@ -281,12 +261,10 @@ public class ChatServiceImpl implements ChatService {
 
         if (answer.isEmpty()) {
             // AI 失败兜底（6.6）：仍落库，保证会话连续
-            finishWithFallback(emitter, userId, sessionId, route,
-                    emptyAnswerText == null ? FALLBACK_NO_ANSWER : emptyAnswerText, request);
-            return;
+            return finishWithFallback(emitter, userId, sessionId, route,
+                    emptyAnswerText == null ? FALLBACK_NO_ANSWER : emptyAnswerText);
         }
 
-        // assistant 消息落库（sources/tools_used/vault_refs：裁决 #8 + 历史回放契约）+ 触碰 session
         if (sources == null) {
             sources = List.of(); // AI 没回 done 块（流中断）→ 没有来源信息，不猜
         }
@@ -294,15 +272,8 @@ public class ChatServiceImpl implements ChatService {
         // ① 工具侧 [F编号] 引用 ② 通用检索命中的 vault keyChunk（弱引用）
         java.util.List<Map<String, Object>> vaultRefs =
                 vaultRefsFromChunks(chunks, extractVaultRefs(answer.toString(), toolResults));
-        persistAssistantReply(userId, sessionId, answer.toString(), sources, toolsUsedRecords, vaultRefs, false, request);
-        touchSession(sessionId);
-        sendEvent(emitter, "sources", sources);
-        if (!vaultRefs.isEmpty()) {
-            sendEvent(emitter, "vault_refs", vaultRefs);
-        }
-        sendEvent(emitter, "done", Map.of(
-                "sessionId", sessionId.toString(),
-                "route", route.toUpperCase()));
+        return org.xianshen.mumirrorb.agent.ChatFinalResult.legacyAnswer(
+                answer.toString(), sources, toolsUsedRecords, vaultRefs, route.toUpperCase());
     }
 
     /**
@@ -511,10 +482,12 @@ public class ChatServiceImpl implements ChatService {
     private MirrorChatProto.ChatRequest buildChatRequest(UUID userId, String question,
                                                          List<RetrievedChunkDTO> chunks,
                                                          UUID sessionId,
-                                                         List<CommonProto.ToolResult> toolResults) {
+                                                         List<CommonProto.ToolResult> toolResults,
+                                                         CommonProto.AssistantContext assistantContext) {
         MirrorChatProto.ChatRequest.Builder builder = MirrorChatProto.ChatRequest.newBuilder()
                 .setQuestion(question)
-                .setAssistantContext(assistantContext(userId, sessionId, question));
+                .setAssistantContext(assistantContext == null
+                        ? CommonProto.AssistantContext.getDefaultInstance() : assistantContext);
 
         // 工具结果注入（toolcalling-vault-design.md 第 6 节 ChatRequest.tool_results）
         if (toolResults != null && !toolResults.isEmpty()) {
@@ -545,40 +518,15 @@ public class ChatServiceImpl implements ChatService {
         return builder.build();
     }
 
-    /**
-     * SSE 兜底收尾：推送兜底文案 + assistant 消息落库（无 sources）+ 触碰 session
-     */
-    private void finishWithFallback(SseEmitter emitter, UUID userId, UUID sessionId,
-                                    String route, String fallbackText, MirrorChatProto.ChatRequest request) {
+    /** Push the established legacy fallback text; persistence and final SSE are shared. */
+    private org.xianshen.mumirrorb.agent.ChatFinalResult finishWithFallback(
+            SseEmitter emitter, UUID userId, UUID sessionId, String route, String fallbackText) {
         try {
             sendEvent(emitter, "delta", Map.of("content", fallbackText));
         } catch (Exception ignored) {
         }
-        // is_fallback=true：这条不进后续轮次的历史上下文（§6.2，靠列而不是文案匹配）
-        persistAssistantReply(userId, sessionId, fallbackText, null, null, null, true, request);
-        touchSession(sessionId);
-        try {
-            sendEvent(emitter, "done", Map.of(
-                    "sessionId", sessionId.toString(),
-                    "route", route.toUpperCase(),
-                    "fallback", true));
-        } catch (Exception ignored) {
-        }
-    }
-
-    private Long persistAssistantReply(UUID userId, UUID sessionId, String content,
-            List<Map<String, Object>> sources, List<Map<String, Object>> toolsUsed,
-            List<Map<String, Object>> vaultRefs, boolean fallback, MirrorChatProto.ChatRequest request) {
-        if (chatMemoryService == null) return insertMessage(userId, sessionId, "assistant", content, sources, toolsUsed, vaultRefs, fallback);
-        var ids = new java.util.LinkedHashSet<Long>();
-        if (request.hasAssistantContext()) request.getAssistantContext().getMemoriesList()
-                .forEach(memory -> ids.addAll(memory.getSourceMessageIdsList()));
-        var metadata = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
-        ids.forEach(metadata::add);
-        ConversationHistory message = ConversationHistory.builder().sessionId(sessionId).userId(userId).role("assistant")
-                .content(content).sources(sources).toolsUsed(toolsUsed).vaultRefs(vaultRefs).isFallback(fallback)
-                .contextSourceMessageIds(metadata).createdAt(OffsetDateTime.now(ZONE)).build();
-        return chatMemoryService.persistAssistantReply(message);
+        return org.xianshen.mumirrorb.agent.ChatFinalResult.fallback(
+                fallbackText, "no_material", route == null ? "" : route.toUpperCase());
     }
 
     // ==================== 会话管理 ====================
@@ -610,6 +558,7 @@ public class ChatServiceImpl implements ChatService {
                         .sources(h.getSources())
                         .toolsUsed(h.getToolsUsed())
                         .vaultRefs(h.getVaultRefs())
+                        .createdRecords(h.getCreatedRecords())
                         .createdAt(h.getCreatedAt())
                         .build()).toList();
         return ChatSessionVO.builder()
@@ -647,17 +596,6 @@ public class ChatServiceImpl implements ChatService {
                 .summary(summary.getSummary()).sourceHash(summary.getSourceHash()).state(summary.getState()).build();
     }
 
-    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId, String question) {
-        if (assistantContextService != null) return assistantContextService.build(userId, sessionId, question);
-        String summary = org.xianshen.mumirrorb.service.ActionStatusSummary.format(
-                actionProposalService == null ? List.of() : actionProposalService.listForSession(userId, sessionId));
-        return CommonProto.AssistantContext.newBuilder()
-                .setRoleTone("温和、直接、基于用户提供的信息；操作只可描述为卡片的当前服务端状态")
-                .setCurrentDate(LocalDate.now(ZONE).toString())
-                .setTimezone("Asia/Shanghai")
-                .setActionStatusSummary(summary).build();
-    }
-
     private void publishActionEvents(SseEmitter emitter, List<CommonProto.ToolResult> results) {
         for (CommonProto.ToolResult result : results) {
             if (!result.getSuccess() || result.getPayloadJson().isBlank()) continue;
@@ -693,64 +631,12 @@ public class ChatServiceImpl implements ChatService {
 
     // ==================== 内部方法 ====================
 
-    private ChatSession resolveSession(UUID userId, UUID sessionId, String question) {
-        if (sessionId != null) {
-            ChatSession existing = requireOwnedSession(sessionId, userId);
-            // A stream already holds its resolved session id. Only the next request switches days.
-            ChatSession resolved = dailySessionResolver.resolveSend(userId, sessionId, question, LocalDate.now(ZONE));
-            if (resolved.getId().equals(existing.getId())) {
-            touchSession(existing.getId());
-            }
-            return resolved;
-        }
-        String title = question.length() > TITLE_MAX_LEN ? question.substring(0, TITLE_MAX_LEN) : question;
-        ChatSession session = dailySessionResolver.getOrCreate(userId, LocalDate.now(ZONE), title);
-        log.info("每日会话已解析，ID: {}, 用户: {}, 日期: {}", session.getId(), userId, session.getDayKey());
-        return session;
-    }
-
     private ChatSession requireOwnedSession(UUID sessionId, UUID userId) {
         ChatSession session = sessionMapper.selectById(sessionId);
         if (session == null || !session.getUserId().equals(userId)) {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "会话不存在");
         }
         return session;
-    }
-
-    private Long insertMessage(UUID userId, UUID sessionId, String role, String content,
-                               List<Map<String, Object>> sources) {
-        return insertMessage(userId, sessionId, role, content, sources, null, null, false);
-    }
-
-    private Long insertMessage(UUID userId, UUID sessionId, String role, String content,
-                               List<Map<String, Object>> sources,
-                               List<Map<String, Object>> toolsUsed,
-                               List<Map<String, Object>> vaultRefs) {
-        return insertMessage(userId, sessionId, role, content, sources, toolsUsed, vaultRefs, false);
-    }
-
-    /**
-     * @param isFallback true = 系统兜底文案，落 {@code conversation_history.is_fallback}，
-     *                   后续轮次加载历史时跳过（§6.2）
-     */
-    private Long insertMessage(UUID userId, UUID sessionId, String role, String content,
-                               List<Map<String, Object>> sources,
-                               List<Map<String, Object>> toolsUsed,
-                               List<Map<String, Object>> vaultRefs,
-                               boolean isFallback) {
-        ConversationHistory message = ConversationHistory.builder()
-                .sessionId(sessionId)
-                .userId(userId)
-                .role(role)
-                .content(content)
-                .sources(sources)
-                .toolsUsed(toolsUsed)
-                .vaultRefs(vaultRefs)
-                .isFallback(isFallback)
-                .createdAt(OffsetDateTime.now(ZONE))
-                .build();
-        historyMapper.insert(message);
-        return message.getId();
     }
 
     /**
@@ -853,13 +739,6 @@ public class ChatServiceImpl implements ChatService {
             records.add(m);
         }
         return records;
-    }
-
-    private void touchSession(UUID sessionId) {
-        ChatSession patch = new ChatSession();
-        patch.setId(sessionId);
-        patch.setUpdatedAt(OffsetDateTime.now(ZONE));
-        sessionMapper.updateById(patch);
     }
 
     private MirrorChatProto.ExtractIntentResponse extractIntentSafely(UUID userId, String question,

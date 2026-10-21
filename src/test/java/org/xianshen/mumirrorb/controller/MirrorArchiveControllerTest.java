@@ -13,6 +13,7 @@ import org.xianshen.mumirrorb.config.MirrorProperties;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
 import org.xianshen.mumirrorb.service.ChatService;
 import org.xianshen.mumirrorb.service.MirrorService;
+import org.xianshen.mumirrorb.agent.AgentRunService;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -39,7 +40,8 @@ class MirrorArchiveControllerTest {
     void setUp() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(USER_ID.toString(), "test"));
-        controller = new MirrorController(mirrorService, chatService, new MirrorProperties());
+        controller = new MirrorController(mirrorService, chatService, org.mockito.Mockito.mock(AgentRunService.class),
+                new MirrorProperties());
     }
 
     @AfterEach
