@@ -2,7 +2,9 @@ package org.xianshen.mumirrorb.service;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.xianshen.mumirrorb.mapper.GrowthAxisHistoryMapper;
 import org.xianshen.mumirrorb.mapper.GrowthAxisMapper;
+import org.xianshen.mumirrorb.mapper.GrowthEntryHistoryMapper;
 import org.xianshen.mumirrorb.mapper.GrowthEntryMapper;
 import org.xianshen.mumirrorb.service.impl.GrowthServiceImpl;
 import org.xianshen.mumirrorb.config.GrowthProperties;
@@ -18,7 +20,9 @@ class GrowthServiceTest {
     @Test void initializesExactlyFiveStableDefaultAxes() {
         var axes = Mockito.mock(GrowthAxisMapper.class);
         var entries = Mockito.mock(GrowthEntryMapper.class);
-        var service = new GrowthServiceImpl(axes, entries, new GrowthProperties());
+        var service = new GrowthServiceImpl(axes, entries,
+                Mockito.mock(GrowthAxisHistoryMapper.class), Mockito.mock(GrowthEntryHistoryMapper.class),
+                new GrowthProperties());
         var result = service.axes(UUID.randomUUID());
         assertEquals(5, result.size());
         assertEquals(5, result.stream().map(a -> a.getId()).distinct().count());
@@ -40,7 +44,9 @@ class GrowthServiceTest {
             current.add(axis);
         }
         Mockito.when(axesMapper.selectList(ArgumentMatchers.any())).thenReturn(current);
-        var service = new GrowthServiceImpl(axesMapper, entries, new GrowthProperties());
+        var service = new GrowthServiceImpl(axesMapper, entries,
+                Mockito.mock(GrowthAxisHistoryMapper.class), Mockito.mock(GrowthEntryHistoryMapper.class),
+                new GrowthProperties());
 
         assertEquals(5, service.axesVersion(userId));
         var firstEdit = defaults.stream().map(axis -> new GrowthProperties.Axis(axis.getId(), axis.getName(), axis.getDescription())).toList();
@@ -76,7 +82,9 @@ class GrowthServiceTest {
         Collections.reverse(databaseRows);
         Mockito.when(axesMapper.selectList(ArgumentMatchers.any())).thenReturn(databaseRows);
 
-        var result = new GrowthServiceImpl(axesMapper, entries, properties).axes(userId);
+        var result = new GrowthServiceImpl(axesMapper, entries,
+                Mockito.mock(GrowthAxisHistoryMapper.class), Mockito.mock(GrowthEntryHistoryMapper.class),
+                properties).axes(userId);
 
         assertEquals(List.of("knowledge", "courage", "action", "care", "expression"),
                 result.stream().map(GrowthAxis::getDimensionId).toList());

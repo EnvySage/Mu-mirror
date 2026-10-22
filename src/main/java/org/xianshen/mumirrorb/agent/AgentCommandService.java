@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.mapper.AgentCommandReceiptMapper;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 import org.xianshen.mumirrorb.mapper.ToolCallMapper;
 import org.xianshen.mumirrorb.pojo.DO.AgentCommandReceipt;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
@@ -31,7 +32,7 @@ import java.util.UUID;
 public class AgentCommandService {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
-    private final AgentRunRepository runRepository;
+    private final AgentRunMapper runMapper;
     private final AgentCommandReceiptMapper receiptMapper;
     private final RecordService recordService;
     private final ToolCallMapper toolCallMapper;
@@ -49,7 +50,7 @@ public class AgentCommandService {
         validateGrantShape(grant, requestRunId, callId);
 
         try {
-            AgentRun run = runRepository.lockRun(grant.runId());
+            AgentRun run = runMapper.lockByRunId(grant.runId());
             validateLiveRun(grant, run);
             String requestHash = AgentWriteGrantService.sha256(content);
 

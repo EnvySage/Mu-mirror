@@ -3,8 +3,9 @@ package org.xianshen.mumirrorb.agent;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -127,8 +128,11 @@ class AgentRunConcurrencyIT {
             }
 
             DriverManagerDataSource dataSource = new DriverManagerDataSource(url, user, password);
-            AgentRunRepository repository = new AgentRunRepository(new JdbcTemplate(dataSource), null);
-            assertEquals(1, repository.deleteExpired(OffsetDateTime.now().minusDays(30)));
+            AgentRunRetentionService retention = new AgentRunRetentionService(
+                    AgentRunMapperTestSupport.mapper(dataSource));
+            int deleted = new TransactionTemplate(new DataSourceTransactionManager(dataSource))
+                    .execute(status -> retention.deleteExpired(OffsetDateTime.now().minusDays(30)));
+            assertEquals(1, deleted);
             try (Connection connection = connect(url, user, password);
                  var query = connection.prepareStatement("SELECT count(*) FROM agent_runs WHERE run_id = ?")) {
                 query.setObject(1, runId);

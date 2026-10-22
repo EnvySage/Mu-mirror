@@ -16,6 +16,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.ApplicationContext;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.mapper.AgentCommandReceiptMapper;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
@@ -173,7 +174,7 @@ class AgentCommandTransactionIT {
             return 1;
         }).when(audits).insert(any());
 
-        AgentRunRepository runs = new AgentRunRepository(jdbc, null);
+        AgentRunMapper runs = AgentRunMapperTestSupport.mapper(dataSource);
         AgentCommandService target = new AgentCommandService(runs, receipts, records, audits, mapper);
         DataSourceTransactionManager txManager = new DataSourceTransactionManager(dataSource);
         TransactionInterceptor tx = new TransactionInterceptor();

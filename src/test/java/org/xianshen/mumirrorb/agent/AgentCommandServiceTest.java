@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.mapper.AgentCommandReceiptMapper;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 import org.xianshen.mumirrorb.mapper.ToolCallMapper;
 import org.xianshen.mumirrorb.pojo.DO.AgentCommandReceipt;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
@@ -27,13 +28,13 @@ import static org.mockito.Mockito.when;
 
 class AgentCommandServiceTest {
 
-    private final AgentRunRepository runRepository = mock(AgentRunRepository.class);
+    private final AgentRunMapper runMapper = mock(AgentRunMapper.class);
     private final AgentCommandReceiptMapper receiptMapper = mock(AgentCommandReceiptMapper.class);
     private final RecordService recordService = mock(RecordService.class);
     private final ToolCallMapper toolCallMapper = mock(ToolCallMapper.class);
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final AgentCommandService service = new AgentCommandService(
-            runRepository, receiptMapper, recordService, toolCallMapper, objectMapper);
+            runMapper, receiptMapper, recordService, toolCallMapper, objectMapper);
 
     private UUID userId;
     private UUID sessionId;
@@ -50,7 +51,7 @@ class AgentCommandServiceTest {
         content = "原文内容：不做整理";
         grant = grant(userId, sessionId, runId, content);
         run = liveRun(userId, sessionId, runId);
-        when(runRepository.lockRun(runId)).thenReturn(run);
+        when(runMapper.lockByRunId(runId)).thenReturn(run);
         when(receiptMapper.findByUserAndCall(userId, AgentWriteGrantService.callId(runId))).thenReturn(null);
         when(receiptMapper.insert(any(AgentCommandReceipt.class))).thenReturn(1);
         when(toolCallMapper.insert(any())).thenReturn(1);
@@ -132,7 +133,7 @@ class AgentCommandServiceTest {
 
     @Test
     void anotherUsersRunCannotBeWritten() {
-        when(runRepository.lockRun(runId)).thenReturn(liveRun(UUID.randomUUID(), sessionId, runId));
+        when(runMapper.lockByRunId(runId)).thenReturn(liveRun(UUID.randomUUID(), sessionId, runId));
 
         AgentCommandException error = assertThrows(AgentCommandException.class,
                 () -> service.createRecord(grant, runId, AgentWriteGrantService.callId(runId), content));
@@ -149,7 +150,7 @@ class AgentCommandServiceTest {
                 copyRun("live", "cancelled", run.getLeaseExpiresAt()),
                 copyRun("live", "running", OffsetDateTime.now().minusSeconds(1))
         }) {
-            when(runRepository.lockRun(runId)).thenReturn(invalid);
+            when(runMapper.lockByRunId(runId)).thenReturn(invalid);
             AgentCommandException error = assertThrows(AgentCommandException.class,
                     () -> service.createRecord(grant, runId, AgentWriteGrantService.callId(runId), content));
             assertEquals("RUN_NOT_EXECUTABLE", error.getCode());

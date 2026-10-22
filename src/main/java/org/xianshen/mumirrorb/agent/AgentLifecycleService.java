@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.xianshen.mumirrorb.config.AgentProperties;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -21,7 +22,8 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class AgentLifecycleService {
 
-    private final AgentRunRepository repository;
+    private final AgentRunMapper runMapper;
+    private final AgentRunRetentionService retention;
     private final AgentProperties properties;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "agent-run-lease");
@@ -35,7 +37,7 @@ public class AgentLifecycleService {
         long every = Math.max(1, properties.getHeartbeatSeconds());
         ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> {
             try {
-                if (!repository.renewLease(runId, properties.getLeaseSeconds())) {
+                if (runMapper.renewLease(runId, properties.getLeaseSeconds()) != 1) {
                     stopLease(runId);
                     onLeaseLost.run();
                 }
@@ -61,8 +63,8 @@ public class AgentLifecycleService {
     @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
     public void sweepExpiredRuns() {
         try {
-            int abandoned = repository.abandonExpired();
-            int deleted = repository.deleteExpired(OffsetDateTime.now().minusDays(30));
+            int abandoned = runMapper.abandonExpired();
+            int deleted = retention.deleteExpired(OffsetDateTime.now().minusDays(30));
             if (abandoned > 0 || deleted > 0) {
                 log.info("Agent run lifecycle sweep: abandoned={}, deleted={}", abandoned, deleted);
             }

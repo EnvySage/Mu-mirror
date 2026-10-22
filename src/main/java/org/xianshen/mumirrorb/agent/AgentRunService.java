@@ -14,6 +14,7 @@ import org.xianshen.mumirrorb.config.AgentProperties;
 import org.xianshen.mumirrorb.config.ChatEngineProperties;
 import org.xianshen.mumirrorb.grpc.AgentGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.AgentProto;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 import org.xianshen.mumirrorb.mapper.ChatSessionMapper;
 import org.xianshen.mumirrorb.mapper.ConversationHistoryMapper;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
@@ -54,7 +55,7 @@ public class AgentRunService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final int TITLE_MAX_LEN = 50;
 
-    private final AgentRunRepository repository;
+    private final AgentRunMapper runMapper;
     private final AgentCommandService commandService;
     private final ChatSessionMapper sessionMapper;
     private final ConversationHistoryMapper historyMapper;
@@ -79,7 +80,7 @@ public class AgentRunService {
             });
     private final AtomicReference<ShadowExecution> activeShadow = new AtomicReference<>();
 
-    public AgentRunService(AgentRunRepository repository,
+    public AgentRunService(AgentRunMapper runMapper,
                           AgentCommandService commandService,
                           ChatSessionMapper sessionMapper,
                           ConversationHistoryMapper historyMapper,
@@ -95,7 +96,7 @@ public class AgentRunService {
                           ToolOrchestrator toolOrchestrator,
                           ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager) {
-        this.repository = repository;
+        this.runMapper = runMapper;
         this.commandService = commandService;
         this.sessionMapper = sessionMapper;
         this.historyMapper = historyMapper;
@@ -129,9 +130,9 @@ public class AgentRunService {
             }
             return result;
         } catch (DataIntegrityViolationException conflict) {
-            AgentRun sameRequest = repository.findByRequest(userId, requestId);
+            AgentRun sameRequest = runMapper.findByClientRequestId(userId, requestId);
             if (sameRequest != null) return existingRequest(sameRequest, requestHash);
-            if (externalSessionId != null && repository.findActiveBySession(externalSessionId) != null) {
+            if (externalSessionId != null && runMapper.findActiveBySession(externalSessionId) != null) {
                 throw new AgentRunConflictException("该会话已有一轮对话正在运行");
             }
             throw conflict;
@@ -140,7 +141,7 @@ public class AgentRunService {
 
     private StartRunResult acceptInTransaction(UUID userId, UUID requestId, UUID externalSessionId,
                                                String question, String requestHash) {
-        AgentRun existing = repository.findByRequest(userId, requestId);
+        AgentRun existing = runMapper.findByClientRequestId(userId, requestId);
         if (existing != null) return existingRequest(existing, requestHash);
 
         OffsetDateTime now = OffsetDateTime.now(ZONE);
@@ -157,13 +158,13 @@ public class AgentRunService {
                 .leaseExpiresAt(now.plusSeconds(agentProperties.getLeaseSeconds()))
                 .planRounds(0).toolCallCount(0).lastEventSeq(0L).glossaryHitsApplied(false)
                 .metricsJson(shadowSampled ? "{\"shadow_sampled\":true}" : "{}").build();
-        repository.insert(run);
+        runMapper.insertRun(run);
 
         ConversationHistory userMessage = ConversationHistory.builder().runId(runId)
                 .sessionId(session.getId()).userId(userId).role("user").content(question)
                 .createdAt(now).isFallback(false).build();
         historyMapper.insert(userMessage);
-        repository.linkUserMessage(runId, userMessage.getId());
+        runMapper.linkUserMessage(runId, userMessage.getId());
         run.setUserMessageId(userMessage.getId());
         org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext assistantContext =
                 assistantContextService.build(userId, session.getId(), question);
@@ -192,11 +193,11 @@ public class AgentRunService {
             replayExisting(start.run(), emitter);
             return;
         }
-        AgentRun run = repository.findById(start.run().getRunId());
+        AgentRun run = runMapper.findByRunId(start.run().getRunId());
         if (run != null && finishCancelledBeforeDispatch(run, start.invocation(), emitter, true)) return;
         if (run == null || !"running".equals(run.getStatus())
                 || run.getLeaseExpiresAt() == null || !run.getLeaseExpiresAt().isAfter(OffsetDateTime.now())) {
-            if (run != null && "running".equals(run.getStatus())) repository.markAbandoned(run.getRunId());
+            if (run != null && "running".equals(run.getStatus())) runMapper.markAbandoned(run.getRunId());
             completeEmitter(emitter);
             return;
         }
@@ -230,7 +231,7 @@ public class AgentRunService {
             if (call != null) call.cancel();
         });
         activeExecutions.put(run.getRunId(), execution);
-        AgentRun current = repository.findById(run.getRunId());
+        AgentRun current = runMapper.findByRunId(run.getRunId());
         if (current != null && finishCancelledBeforeDispatch(current, invocation, emitter, false)) {
             activeExecutions.remove(run.getRunId(), execution);
             return;
@@ -248,13 +249,13 @@ public class AgentRunService {
                 public void onNext(AgentProto.AgentEvent event) {
                     try {
                         adapter.accept(event);
-                        if (!repository.recordEventSequence(run.getRunId(), adapter.lastSequence())) {
+                        if (runMapper.recordEventSequence(run.getRunId(), adapter.lastSequence()) != 1) {
                             throw new AgentEventAdapter.AgentProtocolException("Agent event sequence was rejected");
                         }
                     } catch (Exception error) {
                         adapter.protocolFailure("AGENT_PROTOCOL_ERROR");
                         if (clientDisconnected(error)) {
-                            repository.requestCancel(run.getRunId(), invocation.userId());
+                            runMapper.requestCancel(run.getRunId(), invocation.userId());
                             lifecycle.stopLease(run.getRunId());
                         }
                         execution.cancel();
@@ -291,7 +292,7 @@ public class AgentRunService {
     private boolean finishCancelledBeforeDispatch(AgentRun run, ChatInvocation invocation,
                                                   SseEmitter emitter, boolean includeMeta) {
         if (!"cancel_requested".equals(run.getStatus())) return false;
-        boolean marked = repository.markCancelled(run.getRunId(), "cancelled_before_dispatch");
+        boolean marked = runMapper.markCancelled(run.getRunId(), "cancelled_before_dispatch") == 1;
         if (marked) {
             run.setStatus("cancelled");
             run.setStopReason("cancelled_before_dispatch");
@@ -302,7 +303,7 @@ public class AgentRunService {
         }
 
         // Another terminal path won the race; replay its stored truth rather than dispatching again.
-        AgentRun latest = repository.findById(run.getRunId());
+        AgentRun latest = runMapper.findByRunId(run.getRunId());
         if (latest != null) replayExisting(latest, emitter);
         else completeEmitter(emitter);
         return true;
@@ -338,7 +339,7 @@ public class AgentRunService {
     }
 
     public void cancelRun(UUID runId, UUID userId, String reason) {
-        if (!repository.requestCancel(runId, userId)) return;
+        if (runMapper.requestCancel(runId, userId) != 1) return;
         lifecycle.stopLease(runId);
         ActiveExecution execution = activeExecutions.get(runId);
         if (execution != null) execution.cancel();
@@ -346,18 +347,18 @@ public class AgentRunService {
     }
 
     public void cancelActiveForSession(UUID sessionId, UUID userId) {
-        AgentRun active = repository.findActiveBySession(sessionId);
+        AgentRun active = runMapper.findActiveBySession(sessionId);
         if (active == null || !userId.equals(active.getUserId())) return;
-        if (repository.requestCancelForSession(sessionId, userId)) {
+        if (runMapper.requestCancelForSession(sessionId, userId) == 1) {
             lifecycle.stopLease(active.getRunId());
             ActiveExecution execution = activeExecutions.get(active.getRunId());
             if (execution != null) execution.cancel();
-            repository.markCancelled(active.getRunId(), "session_deleted");
+            runMapper.markCancelled(active.getRunId(), "session_deleted");
         }
     }
 
     public RunStatusVO getRun(UUID runId, UUID userId) {
-        AgentRun run = repository.findById(runId);
+        AgentRun run = runMapper.findByRunId(runId);
         if (run == null || !userId.equals(run.getUserId())) throw new RunNotFoundException();
         if (run.getUserMessageId() == null || sessionMapper.selectById(run.getSessionId()) == null) {
             throw new RunGoneException("该请求对应的会话已删除");
@@ -388,7 +389,7 @@ public class AgentRunService {
     }
 
     private void onLeaseLost(UUID runId) {
-        repository.markAbandoned(runId);
+        runMapper.markAbandoned(runId);
         ActiveExecution execution = activeExecutions.get(runId);
         if (execution != null) execution.cancel();
         log.warn("Agent run lease lost and execution cancelled: runId={}", runId);
@@ -402,7 +403,7 @@ public class AgentRunService {
         }
         AgentRun latest;
         try {
-            latest = repository.findById(parent.getRunId());
+            latest = runMapper.findByRunId(parent.getRunId());
         } catch (Exception error) {
             log.info("Skipping sampled shadow run because the parent state could not be checked: parentRunId={}",
                     parent.getRunId());
@@ -422,7 +423,7 @@ public class AgentRunService {
     private void runShadow(AgentRun parent, ChatInvocation parentInvocation) {
         boolean foregroundGraphActive;
         try {
-            foregroundGraphActive = !activeExecutions.isEmpty() || repository.hasActiveForegroundGraph();
+            foregroundGraphActive = !activeExecutions.isEmpty() || Boolean.TRUE.equals(runMapper.hasActiveForegroundGraph());
         } catch (Exception error) {
             log.info("Skipping sampled shadow run because foreground capacity could not be checked: parentRunId={}",
                     parent.getRunId());
@@ -460,7 +461,7 @@ public class AgentRunService {
         if (!activeShadow.compareAndSet(null, state)) return;
 
         try {
-            repository.insert(shadow);
+            runMapper.insertRun(shadow);
         } catch (Exception error) {
             activeShadow.compareAndSet(state, null);
             log.warn("Could not create sampled shadow run for parent {}: {}", parent.getRunId(), error.getMessage());
@@ -468,13 +469,13 @@ public class AgentRunService {
         }
         boolean foregroundArrived;
         try {
-            foregroundArrived = !activeExecutions.isEmpty() || repository.hasActiveForegroundGraph();
+            foregroundArrived = !activeExecutions.isEmpty() || Boolean.TRUE.equals(runMapper.hasActiveForegroundGraph());
         } catch (Exception error) {
             foregroundArrived = true;
         }
         if (cancelPending.get() || foregroundArrived) {
             try {
-                repository.requestShadowCancel(shadowRunId, "foreground_priority");
+                runMapper.requestShadowCancel(shadowRunId, "foreground_priority");
             } catch (Exception error) {
                 log.debug("Could not mark shadow skip before gRPC dispatch: runId={}", shadowRunId);
             }
@@ -531,10 +532,12 @@ public class AgentRunService {
             finalResult = ChatFinalResult.failed("", "SHADOW_WRITE_BLOCKED", "shadow_write_blocked", "");
         }
         try {
-            boolean persisted = repository.completeShadow(execution.run(), finalResult.status(), finalResult.outcome(),
-                    finalResult.stopReason(), finalResult.errorCode(), finalResult.planRounds(),
-                    finalResult.toolCallCount(), finalResult.lastEventSeq(),
-                    metricsWithRoute(finalResult.metricsJson(), finalResult.route()));
+            String shadowMetrics = metricsWithRoute(finalResult.metricsJson(), finalResult.route());
+            boolean persisted = runMapper.completeShadow(execution.run().getRunId(), finalResult.status(),
+                    finalResult.outcome(), finalResult.stopReason(), finalResult.errorCode(),
+                    Math.max(0, finalResult.planRounds()), Math.max(0, finalResult.toolCallCount()),
+                    Math.max(0, finalResult.lastEventSeq()),
+                    shadowMetrics == null ? "{}" : shadowMetrics) == 1;
             if (!persisted) {
                 log.info("Sampled shadow run finished after its state was no longer active: runId={}",
                         execution.run().getRunId());
@@ -553,7 +556,7 @@ public class AgentRunService {
         ShadowExecution shadow = activeShadow.get();
         if (shadow != null) {
             try {
-                repository.requestShadowCancel(shadow.run().getRunId(), "foreground_priority");
+                runMapper.requestShadowCancel(shadow.run().getRunId(), "foreground_priority");
             } catch (Exception error) {
                 log.info("Could not mark shadow cancellation before foreground dispatch: runId={}",
                         shadow.run().getRunId());
@@ -577,7 +580,7 @@ public class AgentRunService {
         ShadowExecution shadow = activeShadow.get();
         if (shadow != null) {
             try {
-                repository.requestShadowCancel(shadow.run().getRunId(), "service_shutdown");
+                runMapper.requestShadowCancel(shadow.run().getRunId(), "service_shutdown");
             } catch (Exception error) {
                 log.debug("Could not mark shadow cancellation during shutdown: runId={}", shadow.run().getRunId());
             }
@@ -628,14 +631,14 @@ public class AgentRunService {
     }
 
     private CompletionCommit completeRun(UUID runId, ChatFinalResult result, List<Long> contextSourceMessageIds) {
-        AgentRun run = repository.lockRun(runId);
+        AgentRun run = runMapper.lockByRunId(runId);
         if (run == null || isTerminal(run.getStatus())) return new CompletionCommit(false, run, null, null, "", false);
         if (run.getLeaseExpiresAt() == null || !run.getLeaseExpiresAt().isAfter(OffsetDateTime.now())) {
-            repository.markAbandoned(runId);
+            runMapper.markAbandoned(runId);
             return new CompletionCommit(false, run, null, null, "", false);
         }
         if (sessionMapper.selectById(run.getSessionId()) == null) {
-            repository.markAbandoned(runId);
+            runMapper.markAbandoned(runId);
             return new CompletionCommit(false, run, null, null, "", false);
         }
         java.util.Optional<AgentCommandResponse> receipt = commandService.findReceiptForRun(run.getUserId(), runId);
@@ -674,9 +677,10 @@ public class AgentRunService {
         }
         String runMetrics = metricsWithRoute(result.metricsJson(), result.route());
         if (shadowSampled(run.getMetricsJson())) runMetrics = withShadowSampled(runMetrics);
-        boolean updated = repository.complete(run, status, result.outcome(), stopReason, errorCode,
-                result.planRounds(), result.toolCallCount(), result.lastEventSeq(), assistant.getId(),
-                runMetrics);
+        boolean updated = runMapper.complete(run.getRunId(), run.getUserId(), status, result.outcome(),
+                stopReason, errorCode, Math.max(0, result.planRounds()), Math.max(0, result.toolCallCount()),
+                Math.max(0, result.lastEventSeq()), assistant.getId(),
+                runMetrics == null ? "{}" : runMetrics) == 1;
         if (!updated) throw new IllegalStateException("Agent run left its active lease before completion");
         run.setStatus(status);
         run.setOutcome(result.outcome());

@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
-import org.xianshen.mumirrorb.agent.AgentRunRepository;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto;
@@ -82,7 +82,7 @@ public class GlossaryServiceImpl implements GlossaryService {
     private final ChunkMapper chunkMapper;
     private final RecordMapper recordMapper;
     private final AiGrpcClient aiGrpcClient;
-    private final AgentRunRepository agentRunRepository;
+    private final AgentRunMapper agentRunMapper;
 
     /**
      * confirmed 注入列表缓存：userId → (加载时间, 词条列表)
@@ -279,7 +279,7 @@ public class GlossaryServiceImpl implements GlossaryService {
             return;
         }
         List<Long> distinctIds = termIds.stream().filter(id -> id != null && id > 0).distinct().toList();
-        if (distinctIds.isEmpty() || agentRunRepository.applyGlossaryHitsOnce(userId, runId) != 1) {
+        if (distinctIds.isEmpty() || agentRunMapper.applyGlossaryHitsOnce(userId, runId) != 1) {
             return;
         }
         int updated = termMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserTerm>()

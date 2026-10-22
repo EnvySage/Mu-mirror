@@ -2,6 +2,7 @@ package org.xianshen.mumirrorb.agent;
 
 import org.junit.jupiter.api.Test;
 import org.xianshen.mumirrorb.config.AgentProperties;
+import org.xianshen.mumirrorb.mapper.AgentRunMapper;
 
 import java.util.UUID;
 import java.time.Duration;
@@ -23,26 +24,27 @@ class AgentLifecycleTest {
 
     @Test
     void leaseLossStopsRenewalAndCancelsRunOnce() throws Exception {
-        AgentRunRepository repository = mock(AgentRunRepository.class);
+        AgentRunMapper runMapper = mock(AgentRunMapper.class);
+        AgentRunRetentionService retention = mock(AgentRunRetentionService.class);
         AgentProperties properties = new AgentProperties();
         properties.setHeartbeatSeconds(1);
         properties.setLeaseSeconds(3);
-        when(repository.renewLease(any(), anyInt())).thenReturn(false);
+        when(runMapper.renewLease(any(), anyInt())).thenReturn(0);
         UUID runId = UUID.randomUUID();
         CountDownLatch lost = new CountDownLatch(1);
         AtomicInteger callbacks = new AtomicInteger();
-        AgentLifecycleService lifecycle = new AgentLifecycleService(repository, properties);
+        AgentLifecycleService lifecycle = new AgentLifecycleService(runMapper, retention, properties);
 
         try {
             lifecycle.startLease(runId, () -> { callbacks.incrementAndGet(); lost.countDown(); });
             assertTrue(lost.await(3, TimeUnit.SECONDS));
             Thread.sleep(100);
             assertEquals(1, callbacks.get());
-            verify(repository).renewLease(runId, 3);
+            verify(runMapper).renewLease(runId, 3);
             lifecycle.sweepExpiredRuns();
-            verify(repository).abandonExpired();
+            verify(runMapper).abandonExpired();
             ArgumentCaptor<OffsetDateTime> cutoff = ArgumentCaptor.forClass(OffsetDateTime.class);
-            verify(repository).deleteExpired(cutoff.capture());
+            verify(retention).deleteExpired(cutoff.capture());
             assertTrue(Duration.between(cutoff.getValue(), OffsetDateTime.now().minusDays(30))
                     .abs().toMillis() < 1_000);
         } finally {
