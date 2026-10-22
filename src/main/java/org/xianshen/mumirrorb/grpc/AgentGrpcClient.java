@@ -14,12 +14,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.xianshen.mumirrorb.agent.ChatInvocation;
-import org.xianshen.mumirrorb.agent.AgentWriteGrantService;
 import org.xianshen.mumirrorb.config.AgentProperties;
 import org.xianshen.mumirrorb.grpc.gen.AgentProto;
 import org.xianshen.mumirrorb.grpc.gen.AgentRunnerGrpc;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
+import org.xianshen.mumirrorb.tools.ToolRegistry;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -37,7 +37,7 @@ public class AgentGrpcClient {
 
     private final AgentProperties properties;
     private final AiGrpcClient aiGrpcClient;
-    private final AgentWriteGrantService writeGrantService;
+    private final ToolRegistry toolRegistry;
     private ManagedChannel channel;
 
     @PostConstruct
@@ -70,10 +70,7 @@ public class AgentGrpcClient {
         if ("shadow".equals(run.getMode())) {
             request.setShadow(true);
         } else {
-            writeGrantService.authorizeCreate(invocation.question(), run).ifPresent(grant -> request
-                    .setCommandGrant(grant.token())
-                    .setAuthorizedRecordContent(grant.authorizedContent())
-                    .addAllowedWriteTools("create_record"));
+            request.addAllPrepareTools(toolRegistry.prepareWriteProtoSpecs());
         }
         return request.build();
     }

@@ -117,20 +117,30 @@ public class SettingsServiceImpl implements SettingsService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "请先配置 AI 提供商和 API Key");
         }
 
-        String apiKey = CryptoUtils.decrypt(settings.getAiApiKey());
+        String apiKey;
+        try {
+            apiKey = CryptoUtils.decrypt(settings.getAiApiKey());
+        } catch (RuntimeException e) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "已保存的 AI API Key 无法解密，请重新录入后再测试");
+        }
         String maskedKey = CryptoUtils.mask(apiKey);
 
-        // 真实探测：走 gRPC GetModelInfo 探测 AI 服务可达性（Python 端健康检查端点，9.2 #9）
+        // 真实调用记录整理所用的大模型；Embedding 连接由独立的 testEmbeddingConnection 检查。
+        org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto.ClassifyResponse probe;
         try {
-            aiGrpcClient.getModelInfo(userId);
+            probe = aiGrpcClient.testLlmConnection(userId);
         } catch (Exception e) {
             log.error("AI 服务连接测试失败，用户: {}", userId, e);
             throw new BusinessException(ResultCode.INTERNAL_ERROR,
-                    "AI 服务不可达: " + e.getMessage() + "（请确认 Python AI 服务已启动）");
+                    "AI 大模型调用失败: " + e.getMessage());
+        }
+        if (probe.getSkip() || probe.getItemsCount() == 0) {
+            throw new BusinessException(ResultCode.INTERNAL_ERROR,
+                    "AI 大模型已响应，但没有返回有效的记录整理结果");
         }
 
-        log.info("测试 AI 连接成功，用户: {}, provider: {}, model: {}", userId, settings.getAiProvider(), settings.getAiModel());
-        return String.format("连接正常。提供商: %s, 模型: %s, API Key: %s",
+        log.info("测试 AI 大模型成功，用户: {}, provider: {}, model: {}", userId, settings.getAiProvider(), settings.getAiModel());
+        return String.format("大模型连接正常。提供商: %s, 模型: %s, API Key: %s",
                 settings.getAiProvider(),
                 settings.getAiModel() != null ? settings.getAiModel() : "未设置",
                 maskedKey);
@@ -229,17 +239,21 @@ public class SettingsServiceImpl implements SettingsService {
      * DO → VO 转换（API Key 脱敏）
      */
     private SettingsVO toVO(UserSettings settings) {
+        ApiKeyDisplay aiApiKey = toApiKeyDisplay(settings.getAiApiKey(), "AI", settings.getUserId());
+        ApiKeyDisplay embeddingApiKey = toApiKeyDisplay(settings.getEmbeddingApiKey(), "Embedding", settings.getUserId());
         return SettingsVO.builder()
                 .id(settings.getId())
                 .userId(settings.getUserId())
                 .aiProvider(settings.getAiProvider())
                 .aiProtocol(settings.getAiProtocol())
-                .aiApiKey(settings.getAiApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getAiApiKey())) : null)
+                .aiApiKey(aiApiKey.maskedValue())
+                .aiApiKeyNeedsReentry(aiApiKey.needsReentry())
                 .aiBaseUrl(settings.getAiBaseUrl())
                 .aiModel(settings.getAiModel())
                 .embeddingSource(settings.getEmbeddingSource())
                 .embeddingBaseUrl(settings.getEmbeddingBaseUrl())
-                .embeddingApiKey(settings.getEmbeddingApiKey() != null ? CryptoUtils.mask(CryptoUtils.decrypt(settings.getEmbeddingApiKey())) : null)
+                .embeddingApiKey(embeddingApiKey.maskedValue())
+                .embeddingApiKeyNeedsReentry(embeddingApiKey.needsReentry())
                 .embeddingModel(settings.getEmbeddingModel())
                 // 自动审核永久停用：存量偏好不再影响片段记忆与待办授权。
                 .reviewMode("manual")
@@ -250,5 +264,20 @@ public class SettingsServiceImpl implements SettingsService {
                 .createdAt(settings.getCreatedAt())
                 .updatedAt(settings.getUpdatedAt())
                 .build();
+    }
+
+    private ApiKeyDisplay toApiKeyDisplay(String encryptedValue, String keyName, UUID userId) {
+        if (encryptedValue == null || encryptedValue.isBlank()) {
+            return new ApiKeyDisplay(null, false);
+        }
+        try {
+            return new ApiKeyDisplay(CryptoUtils.mask(CryptoUtils.decrypt(encryptedValue)), false);
+        } catch (RuntimeException e) {
+            log.warn("用户 {} 的 {} API Key 无法解密，需要重新录入", userId, keyName);
+            return new ApiKeyDisplay(null, true);
+        }
+    }
+
+    private record ApiKeyDisplay(String maskedValue, boolean needsReentry) {
     }
 }

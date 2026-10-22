@@ -8,6 +8,7 @@ import org.xianshen.mumirrorb.grpc.AgentGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.AgentProto;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
+import org.xianshen.mumirrorb.tools.ToolRegistry;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -25,10 +26,9 @@ class AgentShadowRequestTest {
     void shadowAgentRequestHasNoJavaWriteGrant() {
         AgentProperties properties = new AgentProperties();
         AiGrpcClient aiGrpcClient = mock(AiGrpcClient.class);
-        AgentWriteGrantService grantService = mock(AgentWriteGrantService.class);
         when(aiGrpcClient.buildLlmConfigFor(any())).thenReturn(CommonProto.LlmConfig.getDefaultInstance());
         when(aiGrpcClient.buildEmbeddingConfigFor(any())).thenReturn(CommonProto.EmbeddingConfig.getDefaultInstance());
-        AgentGrpcClient client = new AgentGrpcClient(properties, aiGrpcClient, grantService);
+        AgentGrpcClient client = new AgentGrpcClient(properties, aiGrpcClient, mock(ToolRegistry.class));
 
         UUID userId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
@@ -44,6 +44,5 @@ class AgentShadowRequestTest {
         assertTrue(request.getCommandGrant().isEmpty());
         assertTrue(request.getAuthorizedRecordContent().isEmpty());
         assertTrue(request.getAllowedWriteToolsList().isEmpty());
-        verify(grantService, never()).authorizeCreate(any(), any());
     }
 }

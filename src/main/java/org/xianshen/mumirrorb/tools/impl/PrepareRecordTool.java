@@ -19,7 +19,7 @@ public class PrepareRecordTool implements ToolExecutor {
     @Override public String name() { return "prepare_record"; }
     @Override public ToolEffect effect() { return ToolEffect.PREPARE_WRITE; }
     @Override public ToolDefinition definition() {
-        return new ToolDefinition(name(), "准备创建、整理或删除记录的可编辑操作卡；等待用户确认后才保存、授权或删除。",
+        return new ToolDefinition(name(), "准备创建、整理或删除记录的可编辑操作卡；助手新增或整理默认 AI_ASSISTED，生成分类与五维建议，确认后保存并授权；仅用户明确要求仅保存、不分析时使用 ONLY_SAVE。",
                 "{kind:record.create|record.organize|record.delete,rawContent?:string(1..2000),mode?:ONLY_SAVE|AI_ASSISTED,sourceRecordId?:integer,recordId?:integer}", effect());
     }
 
@@ -44,6 +44,9 @@ public class PrepareRecordTool implements ToolExecutor {
             throw new IllegalArgumentException("整理操作缺少记录 ID");
 
         Map<String, Object> payload = new LinkedHashMap<>(args);
+        // kind belongs to the action envelope, not the handler's record payload.
+        payload.remove("kind");
+        if (!"record.delete".equals(kind)) payload.putIfAbsent("mode", "AI_ASSISTED");
         var proposal = actions.prepare(userId, new ActionPrepareDTO(kind, json.valueToTree(payload),
                 context.prepareKey(), context.sessionId(), context.sourceMessageId()));
         return ToolExecutionResult.builder().success(true).summary("已准备记录操作卡，尚未保存或授权")

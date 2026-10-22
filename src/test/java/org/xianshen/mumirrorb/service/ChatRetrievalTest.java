@@ -3,6 +3,8 @@ package org.xianshen.mumirrorb.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -148,6 +150,58 @@ class ChatRetrievalTest {
                 .setTimeRange(timeRange)
                 .setRewrittenQuery("改写后的问题")
                 .build();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void preparedRecordUsesActualCardStateWithoutCallingAnswerModel(boolean loopEnabled) {
+        vaultProperties.setChatLoopEnabled(loopEnabled);
+        var prepared = org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
+                .setTool("prepare_record").setSuccess(true).setSummary("prepared")
+                .setPayloadJson("{\"proposal\":{\"id\":\"card-1\",\"state\":\"PENDING\",\"kind\":\"record.create\"}}")
+                .build();
+        when(toolOrchestrator.loopAndExecute(eq(USER_ID), eq(SESSION_ID), eq(900L), anyString(), any(), any(), any()))
+                .thenReturn(List.of(prepared));
+        when(toolOrchestrator.planAndExecute(eq(USER_ID), eq(SESSION_ID), eq(900L), anyString(), any()))
+                .thenReturn(List.of(prepared));
+        when(aiGrpcClient.extractIntent(eq(USER_ID), anyString(), any())).thenReturn(intent("structured", ""));
+
+        ChatFinalResult result = invoke(ChatRequestDTO.builder().question("帮我写个日记，我今天改bug改到头晕")
+                .sessionId(SESSION_ID).build(), new SseEmitter());
+
+        assertEquals("action_prepared", result.outcome());
+        assertTrue(result.answerText().contains("确认"));
+        verify(aiGrpcClient, never()).chatStream(any(), any());
+    }
+
+    @Test
+    void cancelledRecordIsNotReportedAsNewPendingCard() {
+        vaultProperties.setChatLoopEnabled(true);
+        var cancelled = org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
+                .setTool("prepare_record").setSuccess(true)
+                .setPayloadJson("{\"proposal\":{\"id\":\"card-1\",\"state\":\"CANCELLED\"}}")
+                .build();
+        when(toolOrchestrator.loopAndExecute(eq(USER_ID), eq(SESSION_ID), eq(900L), anyString(), any(), any(), any()))
+                .thenReturn(List.of(cancelled));
+        ChatFinalResult result = invoke(ChatRequestDTO.builder().question("帮我写日记")
+                .sessionId(SESSION_ID).build(), new SseEmitter());
+        assertTrue(result.answerText().contains("已取消"));
+        assertFalse(result.answerText().contains("确认后"));
+        verify(aiGrpcClient, never()).chatStream(any(), any());
+    }
+
+    @Test
+    void failedPrepareDoesNotLetAnswerModelPretendThereIsACard() {
+        vaultProperties.setChatLoopEnabled(true);
+        var failed = org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolResult.newBuilder()
+                .setTool("prepare_record").setSuccess(false).setSummary("invalid arguments").build();
+        when(toolOrchestrator.loopAndExecute(eq(USER_ID), eq(SESSION_ID), eq(900L), anyString(), any(), any(), any()))
+                .thenReturn(List.of(failed));
+        ChatFinalResult result = invoke(ChatRequestDTO.builder().question("帮我写日记")
+                .sessionId(SESSION_ID).build(), new SseEmitter());
+        assertEquals("action_failed", result.outcome());
+        assertTrue(result.answerText().contains("未能生成"));
+        verify(aiGrpcClient, never()).chatStream(any(), any());
     }
 
     private ChatFinalResult invoke(ChatRequestDTO dto, SseEmitter emitter) {

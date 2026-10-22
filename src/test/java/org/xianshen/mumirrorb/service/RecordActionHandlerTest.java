@@ -2,6 +2,8 @@ package org.xianshen.mumirrorb.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.xianshen.mumirrorb.action.RecordActionHandler;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
@@ -228,6 +230,42 @@ class RecordActionHandlerTest {
     }
 
     private final java.util.concurrent.atomic.AtomicReference<ActionProposal> stored = new java.util.concurrent.atomic.AtomicReference<>();
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void growthDefinitionCheckAppliesOnlyToAiScoringCandidates(boolean aiAssisted) {
+        var proposals = mock(ActionProposalMapper.class);
+        when(proposals.insertIfAbsent(any())).thenAnswer(call -> { stored.set(call.getArgument(0)); return 1; });
+        when(proposals.lockOwned(eq(userId), any())).thenAnswer(call -> stored.get());
+        when(proposals.save(any(), anyInt())).thenReturn(1);
+        var records = mock(RecordService.class);
+        when(records.create(any(), eq(userId))).thenReturn(org.xianshen.mumirrorb.pojo.VO.RecordVO.builder().id(42L).build());
+        var drafts = saveOnlyDraftService();
+        var oldDraft = drafts.prepare(userId, new RecordDraftDTO());
+        oldDraft.setAxesVersion(0);
+        oldDraft.setGrowthSuggestions(java.util.List.of(java.util.Map.of("dimensionId", "knowledge", "points", 0, "reason", "")));
+        var handler = new RecordActionHandler(drafts, records, mock(RecordMapper.class), mock(ChunkMapper.class), json, mock(SettingsService.class));
+        var growth = mock(GrowthService.class);
+        when(growth.axesVersion(userId)).thenReturn(5L);
+        org.springframework.test.util.ReflectionTestUtils.setField(handler, "growthService", growth);
+        var service = new ActionProposalServiceImpl(proposals, java.util.List.of(handler));
+        var card = service.prepare(userId, new ActionPrepareDTO("record.create", json.valueToTree(java.util.Map.of(
+                "rawContent", "更正内容", "mode", "ONLY_SAVE")), "save-only-zero-scores", null, null));
+
+        if (aiAssisted) {
+            ((com.fasterxml.jackson.databind.node.ObjectNode) stored.get().getPayload().path("recordDraft")).put("mode", "AI_ASSISTED");
+            assertThrows(BusinessException.class, () -> service.confirm(userId, card.getId(),
+                    new ActionConfirmDTO(card.getVersion(), "confirm-stale-ai")));
+            verifyNoInteractions(records);
+            return;
+        }
+
+        var confirmed = service.confirm(userId, card.getId(), new ActionConfirmDTO(card.getVersion(), "confirm-save-only"));
+
+        assertEquals("SUCCEEDED", confirmed.getState());
+        verify(records).create(any(), eq(userId));
+        verifyNoInteractions(growth);
+    }
 
     private Record correctionSource() {
         return Record.builder().id(22L).userId(userId).source("user").status(RecordStatus.DONE)

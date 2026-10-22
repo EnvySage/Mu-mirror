@@ -143,6 +143,41 @@ class ChatLoopTest {
         return orchestrator.loopAndExecute(USER_ID, SESSION_ID, QUESTION, List.of(), listener);
     }
 
+    @Test
+    void prepareResultEndsPlanningEvenWhenModelForgotDone() throws Exception {
+        ToolExecutor executor = mock(ToolExecutor.class);
+        when(executor.name()).thenReturn("prepare_record");
+        when(executor.effect()).thenReturn(org.xianshen.mumirrorb.tools.ToolEffect.PREPARE_WRITE);
+        when(executor.execute(eq(USER_ID), any(), any())).thenReturn(ToolExecutionResult.builder()
+                .success(true).summary("prepared").payload(Map.of("proposal", Map.of("id", "card-1", "state", "PENDING"))).build());
+        when(registry.get("prepare_record")).thenReturn(Optional.of(executor));
+        stubStreams(List.of(finalFrame(false, "prepare_record", "{\"kind\":\"record.create\",\"rawContent\":\"今天修bug\"}")),
+                List.of(finalFrame(true)));
+
+        var results = orchestrator.loopAndExecute(USER_ID, SESSION_ID, 900L, "帮我写日记，今天修bug", List.of(), listener);
+
+        assertEquals(1, results.size());
+        verify(aiGrpcClient, times(1)).planNextStep(eq(USER_ID), any(), anyLong());
+    }
+
+    @Test
+    void preparationExceptionIsReturnedAsFailureInsteadOfEmptyToolResults() throws Exception {
+        ToolExecutor executor = mock(ToolExecutor.class);
+        when(executor.name()).thenReturn("prepare_record");
+        when(executor.effect()).thenReturn(org.xianshen.mumirrorb.tools.ToolEffect.PREPARE_WRITE);
+        when(executor.execute(eq(USER_ID), any(), any())).thenThrow(new IllegalArgumentException("记录候选不允许字段: kind"));
+        when(registry.get("prepare_record")).thenReturn(Optional.of(executor));
+        stubStreams(List.of(finalFrame(true, "prepare_record", "{\"kind\":\"record.create\",\"rawContent\":\"今天修bug\"}")));
+
+        var results = orchestrator.loopAndExecute(USER_ID, SESSION_ID, 901L, "记下今天修bug", List.of(), listener);
+
+        assertEquals(1, results.size());
+        assertEquals("prepare_record", results.get(0).getTool());
+        assertFalse(results.get(0).getSuccess());
+        assertTrue(results.get(0).getSummary().contains("准备失败"));
+        verify(aiGrpcClient, times(1)).planNextStep(eq(USER_ID), any(), anyLong());
+    }
+
     // ==================== 终止条件 1：done == true ====================
 
     @Test

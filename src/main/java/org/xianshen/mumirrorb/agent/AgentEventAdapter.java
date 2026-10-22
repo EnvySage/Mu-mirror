@@ -1,12 +1,15 @@
 package org.xianshen.mumirrorb.agent;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xianshen.mumirrorb.grpc.gen.AgentProto;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
 import org.xianshen.mumirrorb.tools.AuditService;
+import org.xianshen.mumirrorb.tools.ToolExecutionResult;
+import org.xianshen.mumirrorb.tools.ToolOrchestrator;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -24,6 +27,7 @@ public class AgentEventAdapter {
     private final ChatInvocation invocation;
     private final SseEmitter emitter;
     private final AuditService auditService;
+    private final ToolOrchestrator toolOrchestrator;
     private final ObjectMapper objectMapper;
     private final boolean shadow;
 
@@ -37,6 +41,9 @@ public class AgentEventAdapter {
     private final Set<String> toolCallIds = new HashSet<>();
     private long lastSequence;
     private boolean terminal;
+    private boolean prepareActionReceived;
+    private String prepareActionOutcome = "action_prepared";
+    private String prepareActionReply = "";
     private String route = "";
     private ChatFinalResult result;
 
@@ -60,6 +67,7 @@ public class AgentEventAdapter {
                 send("delta", Map.of("content", delta));
             }
             case TOOL_FINISHED -> onToolFinished(event.getToolFinished());
+            case PREPARE_ACTION -> onPrepareAction(event.getPrepareAction());
             case COMPLETED -> onCompleted(event.getCompleted());
             case FAILED -> onFailed(event.getFailed());
             case EVENT_NOT_SET -> throw new AgentProtocolException("Agent event has no payload");
@@ -131,8 +139,74 @@ public class AgentEventAdapter {
         toolsUsed.add(item);
     }
 
+    private void onPrepareAction(AgentProto.AgentPrepareAction action) {
+        if (shadow || "shadow".equals(run.getMode())) {
+            throw new AgentProtocolException("Shadow runs cannot prepare actions");
+        }
+        if (prepareActionReceived) {
+            throw new AgentProtocolException("Only one action card may be prepared per turn");
+        }
+        String callId = action.getCallId();
+        String tool = action.getTool();
+        if (callId.isBlank() || callId.length() > 128 || !tool.startsWith("prepare_")
+                || !toolCallIds.add(callId) || action.getArgsJson().isBlank()
+                || action.getArgsJson().length() > 12_000) {
+            throw new AgentProtocolException("Prepare action identity is invalid or duplicated");
+        }
+        prepareActionReceived = true;
+        Map<String, Object> args = parseArgs(action.getArgsJson());
+        long started = System.currentTimeMillis();
+        ToolExecutionResult result;
+        try {
+            result = toolOrchestrator.prepareAgentAction(invocation.userId(), invocation.sessionId(),
+                    invocation.userMessageId(), tool, action.getArgsJson());
+        } catch (Exception error) {
+            auditService.record(invocation.userId(), invocation.sessionId(), invocation.runId(), callId,
+                    run.getEngine(), tool, args, "prepare failed: " + error.getMessage(), false,
+                    System.currentTimeMillis() - started, "ACTION_PREPARE_FAILED");
+            throw new AgentProtocolException("Agent action preparation failed", error);
+        }
+
+        long latency = System.currentTimeMillis() - started;
+        auditService.record(invocation.userId(), invocation.sessionId(), invocation.runId(), callId,
+                run.getEngine(), tool, args, result.getSummary(), result.isSuccess(), latency,
+                result.isSuccess() ? "" : "ACTION_PREPARE_FAILED");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("tool", tool);
+        item.put("summary", result.getSummary());
+        item.put("success", result.isSuccess());
+        toolsUsed.add(item);
+        if (!result.isSuccess()) {
+            throw new AgentProtocolException("Agent action preparation was rejected");
+        }
+
+        JsonNode payload = objectMapper.valueToTree(result.getPayload());
+        var reply = org.xianshen.mumirrorb.tools.PreparedActionReply.from(tool, true, payload);
+        if ("action_failed".equals(reply.outcome())) {
+            throw new AgentProtocolException("Prepare tool returned no usable card or target selection");
+        }
+        prepareActionReply = reply.text();
+        prepareActionOutcome = reply.outcome();
+        JsonNode proposal = payload.path("proposal");
+        if (proposal.isObject()) {
+            send("action_proposal", proposal);
+            send("action_status", proposal);
+            return;
+        }
+        if (payload.path("requiresTargetSelection").asBoolean(false)) {
+            return;
+        }
+        throw new AgentProtocolException("Prepare tool returned no proposal or target selection");
+    }
+
     private void onCompleted(AgentProto.AgentCompleted completed) {
-        if (!answer.toString().equals(completed.getAnswerText())) {
+        if (prepareActionReceived) {
+            if (!answer.isEmpty() || !completed.getAnswerText().isEmpty()) {
+                throw new AgentProtocolException("Prepare action turn must not contain an AI-generated answer");
+            }
+            send("delta", Map.of("content", prepareActionReply));
+            answer.append(prepareActionReply);
+        } else if (!answer.toString().equals(completed.getAnswerText())) {
             throw new AgentProtocolException("completed.answer_text differs from streamed delta text");
         }
         for (org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.Source source : completed.getSourcesList()) {
@@ -173,8 +247,9 @@ public class AgentEventAdapter {
         }
         terminal = true;
         result = new ChatFinalResult(
-                completed.getAnswerText(), sources, toolsUsed, vaultRefs, createdRecords,
-                completed.getFallback(), false, "completed", completed.getOutcome(), route,
+                answer.toString(), sources, toolsUsed, vaultRefs, createdRecords,
+                completed.getFallback(), false, "completed",
+                prepareActionReceived ? prepareActionOutcome : completed.getOutcome(), route,
                 completed.getStopReason(), "", completed.getPlanRounds(), completed.getToolCallCount(),
                 lastSequence, metricsJson(completed.getMetrics()),
                 List.copyOf(completed.getGlossaryHitIdsList()));

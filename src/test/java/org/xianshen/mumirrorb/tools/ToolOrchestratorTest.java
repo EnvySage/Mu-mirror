@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -59,13 +60,45 @@ class ToolOrchestratorTest {
         var registry=new ToolRegistry(List.of(tool));
         var runner=new ToolOrchestrator(aiGrpcClient, registry, auditService, glossaryService, new VaultProperties(), new com.fasterxml.jackson.databind.ObjectMapper());
         when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply("prepare_probe", "{\"title\":\"材料\",\"notes\":\"明天\"}"));
-        assertTrue(runner.planAndExecute(USER_ID,SESSION_ID,"创建待办").isEmpty()); assertEquals(0,tool.calls);
+        var denied = runner.planAndExecute(USER_ID,SESSION_ID,"创建待办");
+        assertEquals(1, denied.size()); assertTrue(!denied.get(0).getSuccess()); assertEquals(0,tool.calls);
         runner.planAndExecute(USER_ID,SESSION_ID,71L,"创建待办");
         String key=tool.context.prepareKey(); assertEquals(71L,tool.context.sourceMessageId());
         assertEquals("PREPARE_WRITE",registry.toProtoSpecs().get(0).getEffect());
         when(aiGrpcClient.planTools(eq(USER_ID), any(), anyLong())).thenReturn(reply("prepare_probe", "{\"notes\":\"明天\",\"title\":\"材料\"}"));
         runner.planAndExecute(USER_ID,SESSION_ID,71L,"创建待办"); assertEquals(key,tool.context.prepareKey());
         runner.planAndExecute(USER_ID,SESSION_ID,72L,"新的明确指令"); org.junit.jupiter.api.Assertions.assertNotEquals(key,tool.context.prepareKey());
+    }
+
+    @Test
+    void graphPrepareDispatchAllowsOnlyRegisteredPrepareWriteToolsAndTrustedContext() throws Exception {
+        var preparation = new PreparationProbe();
+        var read = new EchoTool();
+        registry = new ToolRegistry(List.of(preparation, read));
+        orchestrator = new ToolOrchestrator(aiGrpcClient, registry, auditService,
+                glossaryService, new VaultProperties(), new com.fasterxml.jackson.databind.ObjectMapper());
+
+        ToolExecutionResult result = orchestrator.prepareAgentAction(USER_ID, SESSION_ID, 71L,
+                "prepare_probe", "{\"title\":\"材料\"}");
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, preparation.calls);
+        assertEquals(71L, preparation.context.sourceMessageId());
+        assertEquals(SESSION_ID, preparation.context.sessionId());
+        assertThrows(IllegalArgumentException.class, () -> orchestrator.prepareAgentAction(
+                USER_ID, SESSION_ID, 71L, "echo_tool", "{}"));
+        assertThrows(IllegalArgumentException.class, () -> orchestrator.prepareAgentAction(
+                USER_ID, SESSION_ID, 71L, "prepare_probe", "{\"userId\":\"forged\"}"));
+        assertEquals(1, preparation.calls);
+    }
+
+    @Test
+    void prepareWriteProtoSpecsExcludeReadToolsAndRetainEffect() {
+        var registryWithBoth = new ToolRegistry(List.of(new PreparationProbe(), new EchoTool()));
+
+        assertEquals(List.of("prepare_probe"), registryWithBoth.prepareWriteProtoSpecs().stream()
+                .map(CommonProto.ToolSpec::getName).toList());
+        assertEquals("PREPARE_WRITE", registryWithBoth.prepareWriteProtoSpecs().get(0).getEffect());
     }
 
     @Test

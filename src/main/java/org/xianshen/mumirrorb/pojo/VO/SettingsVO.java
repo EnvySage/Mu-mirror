@@ -42,6 +42,9 @@ public class SettingsVO {
     @Schema(description = "AI API Key（脱敏）", example = "sk-***")
     private String aiApiKey;
 
+    @Schema(description = "AI API Key 是否无法解密并需要重新录入", example = "false")
+    private boolean aiApiKeyNeedsReentry;
+
     @Schema(description = "AI API 地址", example = "https://api.openai.com/v1")
     private String aiBaseUrl;
 
@@ -59,6 +62,9 @@ public class SettingsVO {
      */
     @Schema(description = "Embedding API Key（脱敏）")
     private String embeddingApiKey;
+
+    @Schema(description = "Embedding API Key 是否无法解密并需要重新录入", example = "false")
+    private boolean embeddingApiKeyNeedsReentry;
 
     @Schema(description = "Embedding 模型名称", example = "BAAI/bge-m3")
     private String embeddingModel;

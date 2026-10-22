@@ -24,6 +24,7 @@ import org.xianshen.mumirrorb.service.AssistantContextService;
 import org.xianshen.mumirrorb.service.GlossaryService;
 import org.xianshen.mumirrorb.service.impl.DailyChatSessionResolver;
 import org.xianshen.mumirrorb.tools.AuditService;
+import org.xianshen.mumirrorb.tools.ToolOrchestrator;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.UUID;
@@ -66,6 +67,7 @@ class AgentRunServiceTest {
     private final ChatEngineProperties engineProperties = new ChatEngineProperties();
     private final AgentProperties agentProperties = new AgentProperties();
     private final AuditService auditService = mock(AuditService.class);
+    private final ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
     private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     private AgentRunService service;
 
@@ -93,7 +95,7 @@ class AgentRunServiceTest {
         service = new AgentRunService(repository, commandService, sessionMapper, historyMapper, chatService,
                 assistantContextService, dailySessionResolver,
                 agentGrpcClient, lifecycle, glossaryService, engineProperties, agentProperties,
-                auditService, new ObjectMapper(), transactionManager);
+                auditService, toolOrchestrator, new ObjectMapper(), transactionManager);
     }
 
     @Test

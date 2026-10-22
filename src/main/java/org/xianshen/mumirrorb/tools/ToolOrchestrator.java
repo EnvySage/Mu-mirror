@@ -113,6 +113,7 @@ public class ToolOrchestrator {
                     log.warn("PlanTools 工具「{}」参数解析失败（跳过）: {}", toolName, e.getMessage());
                     auditService.record(userId, sessionId, toolName, Map.of("raw", call.getArgsJson()),
                             "args parse error", false, System.currentTimeMillis() - start);
+                    addPreparationFailure(results, executor.get());
                     continue;
                 }
                 if (args == null) {
@@ -157,6 +158,7 @@ public class ToolOrchestrator {
                     log.warn("工具「{}」执行异常（跳过），用户: {}, 原因: {}", toolName, userId, e.getMessage());
                     auditService.record(userId, sessionId, toolName, args,
                             "execute error: " + e.getMessage(), false, latency);
+                    addPreparationFailure(results, executor.get());
                 }
             }
             // 3. 兜底补读：Planner 只规划了 find_item 却没规划 recall_item 时，自动补一次。
@@ -346,6 +348,9 @@ public class ToolOrchestrator {
                                 "unknown tool", false, 0);
                         continue;
                     }
+                    // A prepare attempt ends this turn, including malformed args
+                    // and failures. Its result must reach the operation reply.
+                    if (executor.get().effect() == ToolEffect.PREPARE_WRITE) finalBatch = true;
                     long callStart = System.currentTimeMillis();
                     Map<String, Object> args;
                     try {
@@ -356,6 +361,7 @@ public class ToolOrchestrator {
                         auditService.record(userId, sessionId, toolName,
                                 Map.of("raw", call.getArgsJson()),
                                 "args parse error", false, System.currentTimeMillis() - callStart);
+                        addPreparationFailure(results, executor.get());
                         continue;
                     }
                     // recall_item 没给 id → 自动接前面 find_item 命中的首个文件（同旧 planAndExecute）。
@@ -405,6 +411,7 @@ public class ToolOrchestrator {
                                 step, toolName, userId, e.getMessage());
                         auditService.record(userId, sessionId, toolName, args,
                                 "execute error: " + e.getMessage(), false, latency);
+                        addPreparationFailure(results, executor.get());
                     }
                 }
                 executedSteps++;
@@ -414,7 +421,7 @@ public class ToolOrchestrator {
                     break;
                 }
                 if (finalBatch) {
-                    log.info("循环终止（模型 done=true 并附最后一批工具，执行完即收尾），用户: {}, 已执行 {} 步",
+                    log.info("循环终止（最后一批工具或操作卡准备已结束），用户: {}, 已执行 {} 步",
                             userId, executedSteps);
                     normalExit = true;
                     break;
@@ -573,6 +580,29 @@ public class ToolOrchestrator {
             for (Object child : list) if (hasAuthorityArgument(child)) return true;
         }
         return false;
+    }
+
+    /** Keep operation failures visible to ChatService so it cannot generate a fake success. */
+    private void addPreparationFailure(List<CommonProto.ToolResult> results, ToolExecutor executor) {
+        if (executor.effect() != ToolEffect.PREPARE_WRITE) return;
+        results.add(CommonProto.ToolResult.newBuilder().setTool(executor.name()).setSuccess(false)
+                .setSummary("操作卡准备失败，未生成可用卡片")
+                .setPayloadJson("{\"code\":\"ACTION_PREPARE_FAILED\"}").build());
+    }
+
+    /** Executes one graph_v2 request to prepare a user-confirmable card. */
+    public ToolExecutionResult prepareAgentAction(UUID userId, UUID sessionId, Long sourceMessageId,
+                                                  String toolName, String argsJson) throws Exception {
+        if (argsJson == null || argsJson.isBlank() || argsJson.length() > 12_000) {
+            throw new IllegalArgumentException("Prepare action arguments are missing or too large");
+        }
+        ToolExecutor executor = registry.get(toolName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown prepare tool"));
+        if (executor.effect() != ToolEffect.PREPARE_WRITE || !toolName.startsWith("prepare_")) {
+            throw new IllegalArgumentException("Only confirmation-card tools are allowed here");
+        }
+        Map<String, Object> args = parseArgs(argsJson);
+        return executeAllowed(executor, userId, sessionId, sourceMessageId, args);
     }
 
     private Map<String, Object> parseArgs(String argsJson) throws Exception {

@@ -7,6 +7,8 @@ import org.xianshen.mumirrorb.grpc.gen.AgentProto;
 import org.xianshen.mumirrorb.grpc.gen.MirrorChatProto;
 import org.xianshen.mumirrorb.pojo.DO.AgentRun;
 import org.xianshen.mumirrorb.tools.AuditService;
+import org.xianshen.mumirrorb.tools.ToolExecutionResult;
+import org.xianshen.mumirrorb.tools.ToolOrchestrator;
 
 import java.util.UUID;
 
@@ -15,11 +17,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 class AgentEventAdapterTest {
 
     private final UUID runId = UUID.randomUUID();
     private final AuditService auditService = mock(AuditService.class);
+    private final ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
     private AgentEventAdapter adapter;
 
     @BeforeEach
@@ -28,7 +32,8 @@ class AgentEventAdapterTest {
                 .sessionId(UUID.randomUUID()).engine("graph_v2").mode("live").status("running").build();
         ChatInvocation invocation = new ChatInvocation(run.getUserId(), run.getSessionId(), runId,
                 UUID.randomUUID(), 15L, "question", "graph_v2");
-        adapter = new AgentEventAdapter(run, invocation, null, auditService, new ObjectMapper(), false);
+        adapter = new AgentEventAdapter(run, invocation, null, auditService, toolOrchestrator,
+                new ObjectMapper(), false);
     }
 
     @Test
@@ -109,7 +114,7 @@ class AgentEventAdapterTest {
         ChatInvocation invocation = new ChatInvocation(run.getUserId(), run.getSessionId(), runId,
                 UUID.randomUUID(), 15L, "question", "graph_v2");
         AgentEventAdapter shadow = new AgentEventAdapter(run, invocation, null, auditService,
-                new ObjectMapper(), true);
+                toolOrchestrator, new ObjectMapper(), true);
         AgentProto.AgentToolTrace trace = AgentProto.AgentToolTrace.newBuilder()
                 .setCallId("shadow-call").setTool("search_records").setArgsJson("{\"query\":\"x\"}")
                 .setSummary("one result").setSuccess(true).build();
@@ -121,6 +126,46 @@ class AgentEventAdapterTest {
 
         assertEquals("completed", shadow.result().status());
         verifyNoMoreInteractions(auditService);
+    }
+
+    @Test
+    void preparesOnlyAConfirmationCardAndSuppliesJavaAuthoredReply() throws Exception {
+        when(toolOrchestrator.prepareAgentAction(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq("prepare_record"), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(ToolExecutionResult.builder().success(true).summary("已准备记录操作卡")
+                        .payload(java.util.Map.of("proposal", java.util.Map.of("id", "proposal-1", "state", "PENDING")))
+                        .build());
+        AgentProto.AgentPrepareAction action = AgentProto.AgentPrepareAction.newBuilder()
+                .setCallId("prepare-call-1").setTool("prepare_record")
+                .setArgsJson("{\"kind\":\"record.create\",\"rawContent\":\"今天改 bug 改到头晕。\"}")
+                .build();
+
+        adapter.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString())
+                .setSeq(1).setPrepareAction(action).build());
+        adapter.accept(completed(runId, 2, ""));
+
+        assertEquals("我把内容放进记录卡了，你看一眼；确认后我再保存。", adapter.result().answerText());
+        assertEquals("action_prepared", adapter.result().outcome());
+        assertEquals(1, adapter.result().toolsUsed().size());
+        verify(toolOrchestrator).prepareAgentAction(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq("prepare_record"), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void reusedCancelledCardNeverGetsAPendingConfirmationReply() throws Exception {
+        when(toolOrchestrator.prepareAgentAction(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq("prepare_record"), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(ToolExecutionResult.builder().success(true).summary("reused")
+                        .payload(java.util.Map.of("proposal", java.util.Map.of("id", "proposal-1", "state", "CANCELLED"))).build());
+        var action = AgentProto.AgentPrepareAction.newBuilder().setCallId("prepare-call-cancelled")
+                .setTool("prepare_record").setArgsJson("{\"kind\":\"record.create\",\"rawContent\":\"今天修bug\"}");
+        adapter.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString()).setSeq(1).setPrepareAction(action).build());
+        adapter.accept(completed(runId, 2, ""));
+        org.junit.jupiter.api.Assertions.assertTrue(adapter.result().answerText().contains("已取消"));
+        org.junit.jupiter.api.Assertions.assertFalse(adapter.result().answerText().contains("确认后"));
     }
 
     private static AgentProto.AgentEvent delta(UUID runId, long sequence, String text) {

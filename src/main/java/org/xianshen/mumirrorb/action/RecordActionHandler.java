@@ -173,7 +173,7 @@ public class RecordActionHandler implements ActionHandler {
             return ActionExecution.applied(json.createObjectNode().put("recordId", target.getId()).put("deleted", true));
         }
         RecordDraftDTO draft = json.convertValue(payload.path("recordDraft"), RecordDraftDTO.class);
-        if (!draft.getGrowthSuggestions().isEmpty() && growthService != null
+        if ("AI_ASSISTED".equals(draft.getMode()) && !draft.getGrowthSuggestions().isEmpty() && growthService != null
                 && growthService.axesVersion(action.getUserId()) != draft.getAxesVersion())
             throw new BusinessException(409, "成长维度已变化，请重新准备审核卡");
         Long sourceId = "record.organize".equals(action.getKind()) ? draft.getSourceRecordId() : null;

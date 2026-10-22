@@ -200,6 +200,17 @@ public class ChatServiceImpl implements ChatService {
             java.util.List<Map<String, Object>> toolsUsedRecords = toolsUsedRecords(toolResults);
             publishActionEvents(emitter, toolResults);
 
+            // A prepared card is the answer to an operation request. A second
+            // generative answer can invent calls or contradict its durable state.
+            var actionReply = preparedActionReply(toolResults);
+            if (actionReply != null) {
+                sendEvent(emitter, "delta", Map.of("content", actionReply.text()));
+                return new org.xianshen.mumirrorb.agent.ChatFinalResult(
+                        actionReply.text(), List.of(), toolsUsedRecords, List.of(), List.of(),
+                        false, false, "completed", actionReply.outcome(), route.toUpperCase(),
+                        actionReply.outcome(), null, 0, toolResults.size(), 0, "{}", List.of());
+            }
+
             // 5. 无材料也交给模型（2026-09-23 改）。
             //
             // 原实现：chunks 空 && 工具无料 → 直接 return 分档写死文案，模型一句话都不说。
@@ -594,6 +605,26 @@ public class ChatServiceImpl implements ChatService {
         if (summary == null) return null;
         return ChatSessionVO.ChatDaySummaryVO.builder().sourceDate(summary.getSourceDate())
                 .summary(summary.getSummary()).sourceHash(summary.getSourceHash()).state(summary.getState()).build();
+    }
+
+    private org.xianshen.mumirrorb.tools.PreparedActionReply preparedActionReply(List<CommonProto.ToolResult> results) {
+        List<String> replies = new ArrayList<>();
+        String outcome = "action_prepared";
+        for (CommonProto.ToolResult result : results) {
+            if (!result.getTool().startsWith("prepare_")) continue;
+            com.fasterxml.jackson.databind.JsonNode payload = null;
+            try {
+                if (!result.getPayloadJson().isBlank()) payload = objectMapper.readTree(result.getPayloadJson());
+            } catch (Exception error) {
+                log.warn("操作卡返回格式无效，tool={}", result.getTool());
+            }
+            var reply = org.xianshen.mumirrorb.tools.PreparedActionReply.from(result.getTool(), result.getSuccess(), payload);
+            replies.add(reply.text());
+            if ("action_failed".equals(reply.outcome()) || "clarification".equals(reply.outcome()) && !"action_failed".equals(outcome)) {
+                outcome = reply.outcome();
+            }
+        }
+        return replies.isEmpty() ? null : new org.xianshen.mumirrorb.tools.PreparedActionReply(String.join("\n", replies), outcome);
     }
 
     private void publishActionEvents(SseEmitter emitter, List<CommonProto.ToolResult> results) {

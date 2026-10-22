@@ -43,6 +43,15 @@ public class ToolRegistry {
                 .toList();
     }
 
+    /** Only confirmation-card tools are exposed to graph_v2; direct submission tools are excluded. */
+    public List<org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolSpec> prepareWriteProtoSpecs() {
+        return executors.values().stream()
+                .filter(executor -> executor.effect() == ToolEffect.PREPARE_WRITE)
+                .map(ToolExecutor::definition)
+                .map(ToolDefinition::toProto)
+                .toList();
+    }
+
     /**
      * 分发执行（未知工具返回 empty）
      */

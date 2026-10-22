@@ -266,6 +266,25 @@ public class AiGrpcClient {
         }
     }
 
+    /**
+     * 真实探测用户配置的大模型：发送固定的无个人数据探针到与记录整理相同的 Python Classify RPC。
+     * 与 Embedding 的 GetModelInfo 分开，连接测试不会把测试内容写入数据库。
+     */
+    public RecordProcessorProto.ClassifyResponse testLlmConnection(UUID userId) {
+        RecordProcessorProto.ClassifyRequest request = RecordProcessorProto.ClassifyRequest.newBuilder()
+                .setContent("今天完成了一次 AI 模型连接测试。")
+                .setProcessingAuthorized(true)
+                .setLlmConfig(buildLlmConfig(userId))
+                .setSingle(true)
+                .build();
+        try {
+            return recordStub.withDeadlineAfter(180, TimeUnit.SECONDS).classify(request);
+        } catch (StatusRuntimeException e) {
+            log.error("gRPC LLM 连接测试失败，用户: {}, status={}", userId, e.getStatus(), e);
+            throw e;
+        }
+    }
+
     private CommonProto.GrowthContext growthContext(UUID userId) {
         try {
             var service = applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class);

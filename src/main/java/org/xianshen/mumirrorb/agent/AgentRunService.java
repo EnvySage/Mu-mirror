@@ -27,6 +27,7 @@ import org.xianshen.mumirrorb.service.AssistantContextService;
 import org.xianshen.mumirrorb.service.impl.DailyChatSessionResolver;
 import org.xianshen.mumirrorb.service.GlossaryService;
 import org.xianshen.mumirrorb.tools.AuditService;
+import org.xianshen.mumirrorb.tools.ToolOrchestrator;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -66,6 +67,7 @@ public class AgentRunService {
     private final ChatEngineProperties engineProperties;
     private final AgentProperties agentProperties;
     private final AuditService auditService;
+    private final ToolOrchestrator toolOrchestrator;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
     private final ConcurrentHashMap<UUID, ActiveExecution> activeExecutions = new ConcurrentHashMap<>();
@@ -90,6 +92,7 @@ public class AgentRunService {
                           ChatEngineProperties engineProperties,
                           AgentProperties agentProperties,
                           AuditService auditService,
+                          ToolOrchestrator toolOrchestrator,
                           ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager) {
         this.repository = repository;
@@ -105,6 +108,7 @@ public class AgentRunService {
         this.engineProperties = engineProperties;
         this.agentProperties = agentProperties;
         this.auditService = auditService;
+        this.toolOrchestrator = toolOrchestrator;
         this.objectMapper = objectMapper;
         this.transactions = new TransactionTemplate(transactionManager);
     }
@@ -216,7 +220,8 @@ public class AgentRunService {
 
     private void runGraph(AgentRun run, ChatInvocation invocation, SseEmitter emitter) {
         cancelShadowForForeground();
-        AgentEventAdapter adapter = new AgentEventAdapter(run, invocation, emitter, auditService, objectMapper, false);
+        AgentEventAdapter adapter = new AgentEventAdapter(run, invocation, emitter, auditService,
+                toolOrchestrator, objectMapper, false);
         AtomicReference<AgentGrpcClient.CancellableCall> callRef = new AtomicReference<>();
         AtomicBoolean cancelPending = new AtomicBoolean(false);
         ActiveExecution execution = new ActiveExecution(() -> {
@@ -477,7 +482,8 @@ public class AgentRunService {
             return;
         }
 
-        AgentEventAdapter adapter = new AgentEventAdapter(shadow, invocation, null, auditService, objectMapper, true);
+        AgentEventAdapter adapter = new AgentEventAdapter(shadow, invocation, null, auditService,
+                toolOrchestrator, objectMapper, true);
         AtomicBoolean finalized = new AtomicBoolean(false);
         try {
             AgentProto.AgentRunRequest request = agentGrpcClient.buildRequest(invocation, shadow);
