@@ -444,7 +444,7 @@ public class ChatServiceImpl implements ChatService {
                         intent.getMoodsList(),
                         toPgTextArray(intent.getMoodsList()),
                         timeStart(intent.getTimeRange()), timeEnd(intent.getTimeRange()),
-                        CONTEXT_CHUNK_LIMIT);
+                        CONTEXT_CHUNK_LIMIT, 0);
             }
             case "semantic" -> searchSemantic(userId, intent);
             default -> searchHybrid(userId, intent);

@@ -50,14 +50,18 @@ public class SearchRecordsTool implements ToolExecutor {
     @Override
     public ToolDefinition definition() {
         return new ToolDefinition(name(),
-                "检索用户已授权的日记片段。按问题选择 mode：structured 用日期/情绪/类型等明确条件；"
-                        + "semantic 用自然语言含义找记录；hybrid 在语义检索上叠加明确过滤条件。"
+                "检索用户已授权的日记片段。宽泛回顾（最近做了什么、这一个月发生了什么、有哪些没完成的计划）用 mode=structured 加 days/日期范围，按时间拿全部记录；"
+                        + "structured 也用于明确日期/情绪/类型等条件，可用 offset 翻页。"
+                        + "只有问题点名具体主题、事件、关键词时才用 semantic；需要字面关键词/全文匹配时用 keyword + keyword 参数；"
+                        + "hybrid 在语义检索上叠加明确过滤条件。"
+                        + "已知某条记录的 record_id 时传 record_id 直接读取该记录片段。"
                         + "semantic/hybrid 的 query 写用户问题的核心意思，不要求复用原文词语。"
                         + "问某一天或明确日期范围时填写 date/date_from/date_to；问画像快照使用 get_profile。",
-                "{\"mode\": \"structured|semantic|hybrid（必填）\", \"query\": \"自然语言检索意图（语义/组合检索必填）\", "
+                "{\"mode\": \"structured|semantic|hybrid|keyword（必填）\", \"query\": \"自然语言检索意图（语义/组合检索必填）\", "
+                        + "\"keyword\": \"字面关键词（keyword 模式必填）\", \"record_id\": 123, "
                         + "\"date\": \"2026-09-12（可选）\", \"date_from\": \"2026-09-01（可选）\", "
                         + "\"date_to\": \"2026-09-07（可选，含当天）\", \"days\": 7, "
-                        + "\"moods\": [\"happy\"], \"content_type\": \"learning|todo|...\", \"limit\": 10}");
+                        + "\"moods\": [\"happy\"], \"content_type\": \"learning|todo|...\", \"limit\": 10, \"offset\": 0}");
     }
 
     @Override
@@ -66,6 +70,9 @@ public class SearchRecordsTool implements ToolExecutor {
         int days = intOf(args.get("days"), 0);
         String contentType = strOf(args.get("content_type"));
         String query = strOf(args.get("query"));
+        String keyword = strOf(args.get("keyword"));
+        long recordId = longOf(args.get("record_id"), -1);
+        int offset = Math.max(0, intOf(args.get("offset"), 0));
         String requestedMode = strOf(args.get("mode"));
         boolean explicitMode = requestedMode != null && !requestedMode.isBlank();
 
@@ -102,12 +109,16 @@ public class SearchRecordsTool implements ToolExecutor {
         List<String> moods = listOf(args.get("moods"));
         String normalizedType = emptyToNull(contentType);
         boolean hasFilters = normalizedType != null || !moods.isEmpty() || byDate || days > 0;
-        String mode = normalizeMode(requestedMode, query, hasFilters);
+        String mode = normalizeMode(requestedMode, query, keyword, hasFilters);
         List<String> normalizedMoods = moods.isEmpty() ? null : moods;
         List<RetrievedChunkDTO> rows;
-        if ("structured".equals(mode)) {
+        if (recordId > 0) {
+            rows = searchMapper.searchByRecordId(userId, recordId, limit);
+        } else if ("keyword".equals(mode)) {
+            rows = searchMapper.searchKeyword(userId, keyword, since, until, limit, offset);
+        } else if ("structured".equals(mode)) {
             rows = searchMapper.searchStructured(userId, normalizedType, normalizedMoods,
-                    toPgTextArray(moods), since, until, limit);
+                    toPgTextArray(moods), since, until, limit, offset);
         } else {
             String vector = embedQueryVector(userId, query);
             Double maxDistance = mirrorProperties.getRagMaxCosineDistance() <= 0
@@ -125,6 +136,16 @@ public class SearchRecordsTool implements ToolExecutor {
         // 文件正文与元信息由 find_item/recall_item 提供 [F] 来源卡；search_records 只回日记记录，
         // 避免把 vault 资产伪装成可点击的日记来源。
         rows = rows.stream().filter(r -> r.getVaultItemId() == null).toList();
+
+        // 宽泛问题（"最近做了什么"）的语义距离经常高于相关性阈值，但用户要的是近期记录本身。
+        // 语义/混合检索 0 条且带时间范围时，回退为按时间倒序取最近记录，避免只拿到统计没有内容。
+        boolean fallbackRecent = false;
+        if (rows.isEmpty() && !"structured".equals(mode) && !"keyword".equals(mode) && since != null) {
+            rows = searchMapper.searchStructured(userId, normalizedType, normalizedMoods,
+                    toPgTextArray(moods), since, until, limit, 0);
+            rows = rows.stream().filter(r -> r.getVaultItemId() == null).toList();
+            fallbackRecent = !rows.isEmpty();
+        }
 
         if ("structured".equals(mode) && query != null && !query.isBlank()) {
             String q = query.trim();
@@ -149,23 +170,28 @@ public class SearchRecordsTool implements ToolExecutor {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("count", items.size());
         payload.put("records", items);
+        if (fallbackRecent) payload.put("fallback", "semantic_empty_recent_records");
         // 按日期查时把区间写进 summary：回答模型据此知道"这就是那天的全部记录"，前端芯片也看得出查的是哪天
         String range = !byDate ? "" : (from != null && from.equals(to)) ? "（" + from + "）"
                 : "（" + (from == null ? "…" : from) + "~" + (to == null ? "…" : to) + "）";
         return ToolExecutionResult.builder()
                 .success(true)
                 .summary(name() + ":" + items.size() + "条"
-                        + (explicitMode ? "（" + mode + "）" : "") + range)
+                        + (explicitMode ? "（" + mode + "）" : "") + range
+                        + (fallbackRecent ? "（语义未命中，已回退最近记录）" : ""))
                 .payload(payload)
                 .build();
     }
 
-    private String normalizeMode(String requested, String query, boolean hasFilters) {
+    private String normalizeMode(String requested, String query, String keyword, boolean hasFilters) {
         String mode = requested == null ? "structured" : requested.trim().toLowerCase();
-        if (!List.of("structured", "semantic", "hybrid").contains(mode)) {
+        if (!List.of("structured", "semantic", "hybrid", "keyword").contains(mode)) {
             mode = "structured";
         }
-        if (!"structured".equals(mode) && (query == null || query.isBlank())) {
+        if ("keyword".equals(mode) && (keyword == null || keyword.isBlank())) {
+            return "structured";
+        }
+        if (!"structured".equals(mode) && !"keyword".equals(mode) && (query == null || query.isBlank())) {
             return "structured";
         }
         // 语义查询与明确过滤条件同时出现时，切到可叠加过滤条件的 SQL + 向量路径。
@@ -253,6 +279,17 @@ public class SearchRecordsTool implements ToolExecutor {
         }
         try {
             return o == null ? def : Integer.parseInt(String.valueOf(o));
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    static long longOf(Object o, long def) {
+        if (o instanceof Number n) {
+            return n.longValue();
+        }
+        try {
+            return o == null ? def : Long.parseLong(String.valueOf(o));
         } catch (NumberFormatException e) {
             return def;
         }
