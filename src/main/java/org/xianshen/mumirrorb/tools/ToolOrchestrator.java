@@ -42,6 +42,8 @@ public class ToolOrchestrator {
     private final GlossaryService glossaryService;
     private final VaultProperties props;
     private final ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.service.AssistantContextService assistantContextService;
 
     /** 循环末尾兜底补读的审计标记（tool_calls 里区分"模型自己续的"和"执行器补的"） */
     public static final String AUTO_BACKSTOP_PREFIX = "[auto-backstop] ";
@@ -53,6 +55,15 @@ public class ToolOrchestrator {
      * @return 执行结果列表（空 = 本轮无工具；上层旧对话路径继续执行 RAG）
      */
     public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, String question) {
+        return planAndExecute(userId, sessionId, null, question);
+    }
+
+    public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question) {
+        return planAndExecute(userId, sessionId, sourceMessageId, question, null);
+    }
+
+    public List<CommonProto.ToolResult> planAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
+                                                       org.xianshen.mumirrorb.service.ActionProposalService actions) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
         try {
             // 0. 未配置 LLM 直接跳过（与每日总结幂等口径一致）
@@ -65,6 +76,7 @@ public class ToolOrchestrator {
                     .addAllGlossary(org.xianshen.mumirrorb.grpc.GlossaryProtoMapper
                             .toProtoList(glossaryService.confirmedForInjection(userId)))
                     .addAllTools(registry.toProtoSpecs())
+                    .setAssistantContext(assistantContext(userId, sessionId, question, actions))
                     .build();
             MirrorChatProto.PlanToolsReply reply = aiGrpcClient.planTools(userId, request,
                     props.getPlanToolsTimeoutMs());
@@ -101,6 +113,7 @@ public class ToolOrchestrator {
                     log.warn("PlanTools 工具「{}」参数解析失败（跳过）: {}", toolName, e.getMessage());
                     auditService.record(userId, sessionId, toolName, Map.of("raw", call.getArgsJson()),
                             "args parse error", false, System.currentTimeMillis() - start);
+                    addPreparationFailure(results, executor.get());
                     continue;
                 }
                 if (args == null) {
@@ -113,7 +126,7 @@ public class ToolOrchestrator {
                     log.info("recall_item 未给 vault_item_id，自动接 find_item 命中 id={}", lastFoundItemId);
                 }
                 try {
-                    ToolExecutionResult result = executor.get().execute(userId, args);
+                    ToolExecutionResult result = executeAllowed(executor.get(), userId, sessionId, sourceMessageId, args);
                     long latency = System.currentTimeMillis() - start;
                     auditService.record(userId, sessionId, toolName, args,
                             result.getSummary(), result.isSuccess(), latency);
@@ -145,6 +158,7 @@ public class ToolOrchestrator {
                     log.warn("工具「{}」执行异常（跳过），用户: {}, 原因: {}", toolName, userId, e.getMessage());
                     auditService.record(userId, sessionId, toolName, args,
                             "execute error: " + e.getMessage(), false, latency);
+                    addPreparationFailure(results, executor.get());
                 }
             }
             // 3. 兜底补读：Planner 只规划了 find_item 却没规划 recall_item 时，自动补一次。
@@ -161,7 +175,7 @@ public class ToolOrchestrator {
                 autoArgs.put("query", question);
                 long start = System.currentTimeMillis();
                 try {
-                    ToolExecutionResult auto = recallExecutor.get().execute(userId, autoArgs);
+                    ToolExecutionResult auto = executeAllowed(recallExecutor.get(), userId, sessionId, sourceMessageId, autoArgs);
                     auditService.record(userId, sessionId, "recall_item", autoArgs,
                             auto.getSummary(), auto.isSuccess(), System.currentTimeMillis() - start);
                     results.add(CommonProto.ToolResult.newBuilder()
@@ -241,6 +255,19 @@ public class ToolOrchestrator {
     public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, String question,
                                                       List<MirrorChatProto.ChatMessage> history,
                                                       StepListener listener) {
+        return loopAndExecute(userId, sessionId, null, question, history, listener);
+    }
+
+    public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
+                                                      List<MirrorChatProto.ChatMessage> history,
+                                                      StepListener listener) {
+        return loopAndExecute(userId, sessionId, sourceMessageId, question, history, null, listener);
+    }
+
+    public List<CommonProto.ToolResult> loopAndExecute(UUID userId, UUID sessionId, Long sourceMessageId, String question,
+                                                      List<MirrorChatProto.ChatMessage> history,
+                                                      org.xianshen.mumirrorb.service.ActionProposalService actions,
+                                                      StepListener listener) {
         List<CommonProto.ToolResult> results = new ArrayList<>();
         List<String> summaries = new ArrayList<>();
         // 指纹集：tool + 规范化 args JSON（终止条件 5 的判据）
@@ -280,7 +307,7 @@ public class ToolOrchestrator {
                 StepPlan plan;
                 try {
                     plan = planOneStep(userId, question, glossary, tools, safeHistory,
-                            results, step, maxSteps, listener);
+                            results, step, maxSteps, actions, sessionId, listener);
                 } catch (Exception e) {
                     // 终止 6：不重试，带着已有结果正常退出。
                     // 必须是 WARN：2026-09-21 联调时第 1 步因思考预算过大撞 60s deadline，这条是 INFO，
@@ -321,6 +348,9 @@ public class ToolOrchestrator {
                                 "unknown tool", false, 0);
                         continue;
                     }
+                    // A prepare attempt ends this turn, including malformed args
+                    // and failures. Its result must reach the operation reply.
+                    if (executor.get().effect() == ToolEffect.PREPARE_WRITE) finalBatch = true;
                     long callStart = System.currentTimeMillis();
                     Map<String, Object> args;
                     try {
@@ -331,6 +361,7 @@ public class ToolOrchestrator {
                         auditService.record(userId, sessionId, toolName,
                                 Map.of("raw", call.getArgsJson()),
                                 "args parse error", false, System.currentTimeMillis() - callStart);
+                        addPreparationFailure(results, executor.get());
                         continue;
                     }
                     // recall_item 没给 id → 自动接前面 find_item 命中的首个文件（同旧 planAndExecute）。
@@ -355,7 +386,7 @@ public class ToolOrchestrator {
                         recallExecuted = true;
                     }
                     try {
-                        ToolExecutionResult result = executor.get().execute(userId, args);
+                        ToolExecutionResult result = executeAllowed(executor.get(), userId, sessionId, sourceMessageId, args);
                         long latency = System.currentTimeMillis() - callStart;
                         // 审计一步不漏（成功/失败都落 tool_calls，论文的步数/成功率/延迟素材）
                         auditService.record(userId, sessionId, toolName, args,
@@ -380,6 +411,7 @@ public class ToolOrchestrator {
                                 step, toolName, userId, e.getMessage());
                         auditService.record(userId, sessionId, toolName, args,
                                 "execute error: " + e.getMessage(), false, latency);
+                        addPreparationFailure(results, executor.get());
                     }
                 }
                 executedSteps++;
@@ -389,7 +421,7 @@ public class ToolOrchestrator {
                     break;
                 }
                 if (finalBatch) {
-                    log.info("循环终止（模型 done=true 并附最后一批工具，执行完即收尾），用户: {}, 已执行 {} 步",
+                    log.info("循环终止（最后一批工具或操作卡准备已结束），用户: {}, 已执行 {} 步",
                             userId, executedSteps);
                     normalExit = true;
                     break;
@@ -418,7 +450,7 @@ public class ToolOrchestrator {
                     autoArgs.put("query", question);
                     long start = System.currentTimeMillis();
                     try {
-                        ToolExecutionResult auto = recallExecutor.get().execute(userId, autoArgs);
+                        ToolExecutionResult auto = executeAllowed(recallExecutor.get(), userId, sessionId, sourceMessageId, autoArgs);
                         // 审计要认得出这是兜底补的（args 加标记 + summary 前缀）：论文里
                         // "模型自己续的" 和 "执行器补的" 不能混成一个数
                         Map<String, Object> auditArgs = new java.util.LinkedHashMap<>(autoArgs);
@@ -475,6 +507,7 @@ public class ToolOrchestrator {
                                  List<MirrorChatProto.ChatMessage> history,
                                  List<CommonProto.ToolResult> previousResults,
                                  int step, int maxSteps,
+                                 org.xianshen.mumirrorb.service.ActionProposalService actions, UUID sessionId,
                                  StepListener listener) {
         MirrorChatProto.PlanNextStepRequest request = MirrorChatProto.PlanNextStepRequest.newBuilder()
                 .setQuestion(question)
@@ -484,6 +517,7 @@ public class ToolOrchestrator {
                 .addAllPreviousResults(previousResults)
                 .setStep(step)
                 .setMaxSteps(maxSteps)
+                .setAssistantContext(assistantContext(userId, sessionId, question, actions))
                 .build();
         Iterator<MirrorChatProto.PlanStepChunk> stream =
                 aiGrpcClient.planNextStep(userId, request, props.getPlanToolsTimeoutMs());
@@ -500,6 +534,17 @@ public class ToolOrchestrator {
         throw new IllegalStateException("PlanNextStep 流结束但没有终帧（final=true）");
     }
 
+    private CommonProto.AssistantContext assistantContext(UUID userId, UUID sessionId, String question,
+            org.xianshen.mumirrorb.service.ActionProposalService actions) {
+        if (assistantContextService != null) return assistantContextService.build(userId, sessionId, question);
+        String summary = org.xianshen.mumirrorb.service.ActionStatusSummary.format(
+                actions == null || sessionId == null || userId == null ? List.of()
+                        : actions.listForSession(userId, sessionId));
+        return CommonProto.AssistantContext.newBuilder().setRoleTone("温和、直接、基于用户提供的信息，不夸大执行结果")
+                .setCurrentDate(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString())
+                .setTimezone("Asia/Shanghai").setActionStatusSummary(summary).build();
+    }
+
     /** 参数指纹：tool + 规范化 args（key 排序后序列化，{"a":1,"b":2} 与 {"b":2,"a":1} 同指纹） */
     private String fingerprint(String tool, Map<String, Object> args) {
         try {
@@ -507,6 +552,57 @@ public class ToolOrchestrator {
         } catch (Exception e) {
             return tool + "#" + String.valueOf(args);
         }
+    }
+
+    /** Every planned and automatic call passes the Java effect gate. Model arguments carry no authority. */
+    private ToolExecutionResult executeAllowed(ToolExecutor executor, UUID userId, UUID sessionId,
+                                               Long sourceMessageId, Map<String, Object> args) throws Exception {
+        if (args == null || hasAuthorityArgument(args)) throw new IllegalArgumentException("Untrusted authority argument");
+        if (executor.effect() == ToolEffect.READ) return executor.execute(userId, args);
+        if (executor.effect() != ToolEffect.PREPARE_WRITE) throw new IllegalArgumentException("Tool effect is not allowed");
+        if (sessionId == null || sourceMessageId == null) throw new IllegalArgumentException("Preparation requires a persisted user turn");
+        String normalized = objectMapper.writer().with(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+                .writeValueAsString(args);
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest((executor.name() + "#" + normalized).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String key = "tool:" + sourceMessageId + ":" + java.util.HexFormat.of().formatHex(digest);
+        return executor.execute(userId, args, new ToolCallContext(sessionId, sourceMessageId, key));
+    }
+
+    private boolean hasAuthorityArgument(Object value) {
+        if (value instanceof Map<?,?> map) {
+            for (var entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey()).replace("_", "").toLowerCase(java.util.Locale.ROOT);
+                if (java.util.Set.of("userid", "confirmed", "confirmation", "preparekey", "sourcesessionid", "sourcemessageid", "requestid").contains(key)
+                        || hasAuthorityArgument(entry.getValue())) return true;
+            }
+        } else if (value instanceof Iterable<?> list) {
+            for (Object child : list) if (hasAuthorityArgument(child)) return true;
+        }
+        return false;
+    }
+
+    /** Keep operation failures visible to ChatService so it cannot generate a fake success. */
+    private void addPreparationFailure(List<CommonProto.ToolResult> results, ToolExecutor executor) {
+        if (executor.effect() != ToolEffect.PREPARE_WRITE) return;
+        results.add(CommonProto.ToolResult.newBuilder().setTool(executor.name()).setSuccess(false)
+                .setSummary("操作卡准备失败，未生成可用卡片")
+                .setPayloadJson("{\"code\":\"ACTION_PREPARE_FAILED\"}").build());
+    }
+
+    /** Executes one graph_v2 request to prepare a user-confirmable card. */
+    public ToolExecutionResult prepareAgentAction(UUID userId, UUID sessionId, Long sourceMessageId,
+                                                  String toolName, String argsJson) throws Exception {
+        if (argsJson == null || argsJson.isBlank() || argsJson.length() > 12_000) {
+            throw new IllegalArgumentException("Prepare action arguments are missing or too large");
+        }
+        ToolExecutor executor = registry.get(toolName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown prepare tool"));
+        if (executor.effect() != ToolEffect.PREPARE_WRITE || !toolName.startsWith("prepare_")) {
+            throw new IllegalArgumentException("Only confirmation-card tools are allowed here");
+        }
+        Map<String, Object> args = parseArgs(argsJson);
+        return executeAllowed(executor, userId, sessionId, sourceMessageId, args);
     }
 
     private Map<String, Object> parseArgs(String argsJson) throws Exception {

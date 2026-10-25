@@ -87,4 +87,5 @@ public interface ChunkEmbeddingJobMapper extends BaseMapper<ChunkEmbeddingJob> {
             ORDER BY created_at DESC, id DESC LIMIT 1
             """)
     ChunkEmbeddingJob findLatest(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
+
 }

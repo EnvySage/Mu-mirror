@@ -24,6 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class TodoStatusCaliberTest {
 
+    @Test
+    void directTodosParticipateWithoutTurningOrphansIntoDirect() {
+        String s = sql(TodoRegistryMapper.class, "selectOpenTodos", UUID.class, int.class);
+        assertTrue(s.contains("t.origin_kind = 'direct'"));
+        assertTrue(s.contains("t.origin_kind = 'record'"));
+        assertTrue(s.contains("LEFT JOIN chunks"));
+    }
+
     private static String sql(Class<?> mapper, String method, Class<?>... paramTypes) {
         try {
             Method m = mapper.getMethod(method, paramTypes);
@@ -40,7 +48,7 @@ class TodoStatusCaliberTest {
     private static void assertRegistryCaliber(String sql) {
         assertTrue(sql.contains("FROM todo_registry"), "主表应为 todo_registry：" + sql);
         assertTrue(sql.contains("t.deleted_at IS NULL"), "必须过滤软删行：" + sql);
-        assertTrue(sql.contains("JOIN chunks c ON c.id = t.source_chunk_id"),
+        assertTrue(sql.contains("LEFT JOIN chunks c ON c.id = t.source_chunk_id"),
                 "应 INNER JOIN chunks（排 orphan，与 TodoRegistryMapper.selectOpenTodos 同口径）：" + sql);
         assertFalse(sql.contains("metadata->>'taskStatus'"),
                 "待办状态不得再读 chunk 快照 taskStatus（状态变更只写 registry）：" + sql);
@@ -74,7 +82,7 @@ class TodoStatusCaliberTest {
                 UUID.class, OffsetDateTime.class, OffsetDateTime.class);
         assertRegistryCaliber(s);
         assertTrue(s.contains("t.current_status != 'completed'"), "只取未完成：" + s);
-        assertTrue(s.contains("r.created_at >= #{dayStart}") && s.contains("r.created_at < #{dayEnd}"),
+        assertTrue(s.contains("COALESCE(r.created_at, t.created_at) >= #{dayStart}") && s.contains("COALESCE(r.created_at, t.created_at) < #{dayEnd}"),
                 "昨日窗口保留（源头记录创建时间）：" + s);
     }
 

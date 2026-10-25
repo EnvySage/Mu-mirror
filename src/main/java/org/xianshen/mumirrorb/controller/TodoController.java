@@ -14,6 +14,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.xianshen.mumirrorb.pojo.DTO.TodoCommandDTO;
+import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.TodoChainVO;
 import org.xianshen.mumirrorb.pojo.VO.TodoItemVO;
@@ -24,19 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * 待办登记控制器（todo-registry-design.md §4-B；交互重构见 todo-status-removal-design.md）
- *
- * <p>GET /api/todos/pending-suggestions（侧栏角标+建议卡）·
- * POST /api/todos/suggestions/{id}/resolve（裁决：confirmed/dismissed，body 可带三态 status）·
- * DELETE /api/todos/{id}（删除特例：软删 + 源头标记 + 建议作废）·
- * GET /todos（registry 列表，带 evidence 关联计数，"全部待办"入口）</p>
- *
- * <p>已移除侧栏直调端点 PUT /todos/{id}/status：状态变更唯一入口 = 记录审核页
- * （PUT /records/{id}/confirm 携带 todoResolutions），杜绝绕过审核窗口的通道。</p>
- *
- * <p>安全：全接口 JWT + ownership（非本人一律 4041 不暴露存在性，模式照 VaultController）。</p>
- */
+/** Existing todo routes plus explicit direct create/update submissions. Identity comes from authentication. */
 @Tag(name = "待办登记", description = "跨日记待办状态跟踪：建议裁决与删除")
 @RestController
 @RequestMapping("/todos")
@@ -44,6 +36,18 @@ import java.util.UUID;
 public class TodoController {
 
     private final TodoRegistryService todoRegistryService;
+
+    @PostMapping
+    public R<TodoItemVO> create(@RequestBody TodoCommandDTO body) {
+        return R.ok(todoRegistryService.createDirect(getCurrentUserId(), body));
+    }
+
+    @PatchMapping("/{id}")
+    public R<TodoItemVO> update(@PathVariable Long id, @RequestBody TodoCommandDTO body) {
+        if (body.getExpectedTargetVersion() == null)
+            throw new BusinessException(400, "expectedTargetVersion 必填");
+        return R.ok(todoRegistryService.updateDirect(getCurrentUserId(), id, body.getExpectedTargetVersion(), body));
+    }
 
     private UUID getCurrentUserId() {
         String userIdStr = (String) SecurityContextHolder.getContext()
@@ -71,8 +75,7 @@ public class TodoController {
 
     @Operation(
             summary = "裁决建议（确认/忽略）",
-            description = "action=confirmed：事务内三写——chunk.metadata.taskStatus（真源）+ "
-                    + "registry.current_status/closed_at + evidence 关联（用户背书才落）+ 建议行 confirmed。"
+            description = "action=confirmed：更新 registry 当前状态，记录 evidence 关联与建议确认；来源片段保持只读。"
                     + "status 可选三态（用户可改 LLM 建议，缺省按 suggested_status）。"
                     + "action=dismissed：建议行 dismissed 永久静默（同一证据不再提示），todo 不动，关联不落。"
     )
@@ -131,8 +134,7 @@ public class TodoController {
 
     @Operation(
             summary = "删除待办（软删）",
-            description = "特例动线（侧栏直删+弹框）：registry.deleted_at 落时间戳（行保留）+ 源头片段 "
-                    + "metadata 加 todoRemoved=true + 该待办 pending 建议全部作废。"
+            description = "明确删除：版本检查后软删 registry，并作废 pending 建议。来源片段保持只读。"
                     + "删除后所有视图（清单/注入/证据链/统计）不可见，不再产生新建议、不可改状态；"
                     + "原始记录保留，终态可追溯。已删除幂等返回成功。"
     )
@@ -144,9 +146,11 @@ public class TodoController {
     @DeleteMapping("/{id}")
     public R<Void> delete(
             @Parameter(description = "登记ID", required = true, example = "1")
-            @PathVariable Long id) {
+            @PathVariable Long id,
+            @RequestParam(required = false) Long expectedVersion) {
         UUID userId = getCurrentUserId();
-        todoRegistryService.deleteTodo(id, userId);
+        if (expectedVersion == null) todoRegistryService.deleteTodo(id, userId);
+        else todoRegistryService.deleteTodo(id, userId, expectedVersion);
         return R.ok("待办已删除", null);
     }
 }

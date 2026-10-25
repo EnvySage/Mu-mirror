@@ -7,6 +7,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
 import org.xianshen.mumirrorb.mapper.RecordMapper;
@@ -54,7 +55,7 @@ class ChunkEditInvalidationTest {
                 .embedding(List.of(0.25f, 0.75f))
                 .build();
         when(chunkMapper.selectById(CHUNK_ID)).thenReturn(chunk);
-        when(recordMapper.selectById(RECORD_ID)).thenReturn(Record.builder()
+        lenient().when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(Record.builder()
                 .id(RECORD_ID).userId(USER_ID).status(RecordStatus.REVIEWING).build());
     }
 
@@ -106,5 +107,30 @@ class ChunkEditInvalidationTest {
         assertTrue(result.getHasEmbedding());
         verify(chunkMapper, never()).clearEmbedding(anyLong(), any());
         verify(snapshotLineageService, never()).invalidateSource(any(), anyString(), anyLong(), anyString());
+    }
+
+    @Test
+    void readyRecordRejectsTextAndMetadataEdits() {
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(Record.builder()
+                .id(RECORD_ID).userId(USER_ID).status(RecordStatus.DONE).memoryState(RecordMemoryState.READY).build());
+        ChunkDTO edit = new ChunkDTO();
+        edit.setSegment("修改过的正文");
+
+        assertThrows(RuntimeException.class, () -> service.update(CHUNK_ID, edit, USER_ID));
+
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
+        verify(chunkEmbeddingJobService, never()).cancel(anyLong(), any());
+    }
+
+    @Test
+    void pendingRecordRejectsConcurrentSegmentEdit() {
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(Record.builder()
+                .id(RECORD_ID).userId(USER_ID).status(RecordStatus.DONE).memoryState(RecordMemoryState.PENDING).build());
+        ChunkDTO edit = new ChunkDTO();
+        edit.setSegment("并发修改");
+
+        assertThrows(RuntimeException.class, () -> service.update(CHUNK_ID, edit, USER_ID));
+
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
     }
 }

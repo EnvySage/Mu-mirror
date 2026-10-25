@@ -62,6 +62,7 @@ public interface UserTermMapper extends BaseMapper<UserTerm> {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND r.created_at &gt;= #{since}
               AND <foreach collection="patterns" item="p" open="(" separator=" OR " close=")">
                   c.segment ILIKE #{p}

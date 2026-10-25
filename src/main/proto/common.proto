@@ -46,6 +46,8 @@ enum TaskStatus {
 
 // 模型协议
 enum AiProtocol {
+  option allow_alias = true;
+  AI_PROTOCOL_UNKNOWN = 0;
   PROTOCOL_UNKNOWN = 0;
   OPENAI = 1;       // OpenAI 兼容协议（OpenAI、通义千问、智谱等）
   ANTHROPIC = 2;    // Anthropic 协议（Claude 系列）
@@ -89,6 +91,7 @@ message ToolSpec {
   string name = 1;          // 工具名（B 侧执行查找键，如 search_records）
   string description = 2;   // 用途描述（Python prompt 逐条渲染）
   string args_schema = 3;   // 参数说明（JSON Schema 简化文本，prompt 渲染）
+  string effect = 4;       // READ | PREPARE_WRITE; submission tools are not available
 }
 
 // 工具执行结果（B 执行后塞 ChatRequest.tool_results，Python 渲染成上下文块）
@@ -98,6 +101,43 @@ message ToolResult {
   string payload_json = 3;  // 完整结果 JSON（进 prompt 上下文块）
   bool success = 4;         // 执行成败（false 时 Python 只渲染失败说明，不把失败 payload 喂给 LLM）
 }
+
+message AssistantContext {
+  string role_tone = 1;
+  string current_date = 2;
+  string timezone = 3;
+  string action_status_summary = 4;
+  repeated ChatMemoryContext memories = 5;
+  DivinationContext divination = 6;
+}
+
+message ChatMemoryContext {
+  string memory_id = 1;
+  string content = 2;
+  string kind = 3;
+  string source_date = 4;
+  repeated int64 source_message_ids = 5;
+  optional string event_date = 6;
+  optional string expires_at = 7;
+}
+
+message DivinationCard {
+  string card_name = 1;
+  string orientation = 2;
+  string interpretation = 3;
+}
+
+message DivinationContext {
+  string draw_id = 1;
+  string drawn_at = 2;
+  string question = 3;
+  repeated DivinationCard cards = 4;
+  bool entertainment_only = 5;
+}
+
+message GrowthAxis { string id = 1; string name = 2; string description = 3; int64 definition_version = 4; }
+message GrowthContext { repeated GrowthAxis axes = 1; }
+message GrowthSuggestion { string dimension_id = 1; int32 points = 2; string reason = 3; }
 
 // Embedding 配置（每次请求携带）
 message EmbeddingConfig {

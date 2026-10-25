@@ -60,7 +60,6 @@ import java.util.UUID;
 public class MirrorServiceImpl implements MirrorService {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
-    private static final int RECENT_CHATS_LIMIT = 20;
     private static final int KEYWORD_TOP = 10;
     /** 待办明细最多条数（前端协议） */
     private static final int TODO_ITEMS_LIMIT = 10;
@@ -77,6 +76,8 @@ public class MirrorServiceImpl implements MirrorService {
     private final MirrorProperties mirrorProperties;
     private final TransactionTemplate transactionTemplate;
     private final SnapshotLineageService snapshotLineageService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.xianshen.mumirrorb.service.AssistantContextService assistantContextService;
 
     @Override
     @Transactional(readOnly = true)
@@ -230,16 +231,15 @@ public class MirrorServiceImpl implements MirrorService {
         // 生成手动镜子前，先补齐已有失效月度链；没有失效链时不额外生成月度镜子。
         replayInvalidatedMonthlyChainThrough(userId, YearMonth.now(ZONE).minusMonths(1));
 
-        // 1. 五维统计（最近 30 天口径）+ recent_chats
+        // 1. 五维统计（最近 30 天口径）；聊天语料只通过可信记忆上下文授权注入。
         ProfileStatsDTO stats = collectStats(userId);
-        List<Map<String, Object>> recentChats = statsMapper.selectRecentChats(userId, RECENT_CHATS_LIMIT);
         List<SnapshotSourceRef> sourceRefs = new ArrayList<>(selectStatsSourceRefs(userId, null));
 
         // 2. gRPC GenerateProfile（AiGrpcClient 内部补 llm_config）
         // manual 快照语义为"截至现在的累计画像"：rolling mirror 四块输入同样生效
         // （上期镜子=最新 monthly 或 manual，回看窗口=近 30 天）
         MirrorProfileProto.GenerateProfileResponse response =
-                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats, null, sourceRefs));
+                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, null, sourceRefs));
         boolean archiveDiscontinuity = hasDiscontinuousParent(sourceRefs);
 
         // 3. 存快照
@@ -260,6 +260,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .build();
         snapshotMapper.insert(snapshot);
         saveInputs(snapshot, sourceRefs);
+        recordChatMemoryInputs(snapshot, sourceRefs);
         log.info("画像快照已保存，ID: {}, 类型: manual", snapshot.getId());
 
         // 4. 五维文本固定顺序拼接 → Embed → 回写向量（失败不阻断：向量缺失仅影响漂移检测）
@@ -483,12 +484,11 @@ public class MirrorServiceImpl implements MirrorService {
         }
 
         ProfileStatsDTO stats = collectStats(userId, month);
-        List<Map<String, Object>> recentChats = statsMapper.selectRecentChats(userId, RECENT_CHATS_LIMIT);
         List<SnapshotSourceRef> sourceRefs = new ArrayList<>(selectStatsSourceRefs(userId, month));
         ProfileSnapshot previousCurrent = snapshotMapper.selectCurrentMonthlyForUpdate(userId, month.toString());
         int versionNo = snapshotMapper.selectMaxVersionNo(userId, month.toString()) + 1;
         MirrorProfileProto.GenerateProfileResponse response =
-                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, recentChats, month, sourceRefs));
+                aiGrpcClient.generateProfile(userId, buildRequest(userId, stats, month, sourceRefs));
         boolean archiveDiscontinuity = replayDiscontinuity || hasDiscontinuousParent(sourceRefs);
 
         if (previousCurrent != null) {
@@ -515,6 +515,7 @@ public class MirrorServiceImpl implements MirrorService {
                 .build();
         snapshotMapper.insert(snapshot);
         saveInputs(snapshot, sourceRefs);
+        recordChatMemoryInputs(snapshot, sourceRefs);
 
         try {
             String text = snapshot.joinedAnalysisText();
@@ -781,6 +782,14 @@ public class MirrorServiceImpl implements MirrorService {
         if (!inputs.isEmpty()) snapshotInputMapper.insertAll(snapshot.getId(), inputs);
     }
 
+    private void recordChatMemoryInputs(ProfileSnapshot snapshot, List<SnapshotSourceRef> sourceRefs) {
+        List<Long> messageIds = sourceRefs.stream()
+                .filter(ref -> ref != null && "chat_message".equals(ref.getInputKind())
+                        && "memory_source".equals(ref.getInputRole()) && ref.getInputId() != null)
+                .map(SnapshotSourceRef::getInputId).distinct().toList();
+        if (!messageIds.isEmpty()) snapshotLineageService.recordChatMessageInputs(snapshot.getId(), messageIds);
+    }
+
     private static void addSources(Set<SnapshotSourceRef> target, List<SnapshotSourceRef> refs) {
         if (refs != null) refs.stream().filter(java.util.Objects::nonNull).forEach(target::add);
     }
@@ -805,16 +814,25 @@ public class MirrorServiceImpl implements MirrorService {
     }
 
     /**
-     * 组装 GenerateProfileRequest（llm_config 由 AiGrpcClient 补齐）+ 个人词典注入（第 4 节 top 30 全量）
+     * 组装 GenerateProfileRequest（llm_config 由 AiGrpcClient 补齐）+ 可信聊天记忆和个人词典
      *
      * <p>递归累计镜子（rolling-mirror-design.md §1）：month 非空（monthly 快照）时携带四块输入；
      * month 为 null（manual 快照）时同样按"截至现在的累计画像"组装——
      * 上期镜子取最新 monthly（无则最新 manual），回看窗口取近 30 天。</p>
      */
     private MirrorProfileProto.GenerateProfileRequest buildRequest(
-            UUID userId, ProfileStatsDTO stats, List<Map<String, Object>> recentChats, YearMonth month,
+            UUID userId, ProfileStatsDTO stats, YearMonth month,
             List<SnapshotSourceRef> sourceRefs) {
-        MirrorProfileProto.GenerateProfileRequest.Builder request = buildRequest(stats, recentChats).toBuilder();
+        MirrorProfileProto.GenerateProfileRequest.Builder request = buildRequest(stats).toBuilder();
+
+        org.xianshen.mumirrorb.service.AssistantContextService.BuiltContext profileContext = assistantContextService == null
+                ? new org.xianshen.mumirrorb.service.AssistantContextService.BuiltContext(
+                        org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext.getDefaultInstance(), List.of())
+                : assistantContextService.buildForProfile(userId, "");
+        request.setAssistantContext(profileContext.context());
+        profileContext.sourceMessageIds().stream().distinct().forEach(messageId -> sourceRefs.add(
+                SnapshotSourceRef.builder().inputKind("chat_message").inputId(messageId)
+                        .inputRole("memory_source").build()));
 
         RollingContext rolling = collectRollingInputs(userId, month, stats);
         sourceRefs.addAll(rolling.sourceRefs());
@@ -1120,13 +1138,12 @@ public class MirrorServiceImpl implements MirrorService {
     }
 
     /**
-     * 组装 GenerateProfileRequest 基础块（五维统计 + recent_chats；llm_config 由 AiGrpcClient 补齐）
+     * 组装 GenerateProfileRequest 基础块（五维统计；llm_config 由 AiGrpcClient 补齐）
      *
      * <p>④ 待办统计实况不在 proto 结构化字段里重复——设计稿 §1 "④用现有统计字段，不加 proto"，
      * 另以 stats_facts（field 14，B 提案）携带渲染好的实况文本。</p>
      */
-    private MirrorProfileProto.GenerateProfileRequest buildRequest(
-            ProfileStatsDTO stats, List<Map<String, Object>> recentChats) {
+    private MirrorProfileProto.GenerateProfileRequest buildRequest(ProfileStatsDTO stats) {
 
         MirrorProfileProto.GenerateProfileRequest.Builder builder =
                 MirrorProfileProto.GenerateProfileRequest.newBuilder()
@@ -1135,7 +1152,7 @@ public class MirrorServiceImpl implements MirrorService {
 
         // 个人词典注入（lexicon-design.md 第 4 节）：GenerateProfile 传 confirmed top 30 全量（软约束）
         // userId 在 generate/generateMonthly 调用链上无法直接传入（stats 不含），经 ThreadLocal 上下文省略——
-        // 改为在 generate()/generateMonthly() 组装后补齐（见 buildRequest(userId, stats, recentChats) 重载）
+        // 由 buildRequest(userId, stats, month, sourceRefs) 注入个人词典。
         for (ProfileStatsDTO.TodoItemDTO t : stats.getTodos()) {
             builder.addTodos(MirrorProfileProto.TodoItem.newBuilder()
                     .setRecordId(t.getRecordId() == null ? 0 : t.getRecordId())
@@ -1180,13 +1197,6 @@ public class MirrorServiceImpl implements MirrorService {
         }
         builder.setActiveTime(active);
 
-        // recent_chats：优先近 7 天，不足则前补（SQL 已按时间倒序取最近 N 条，天然满足优先近 7 天）
-        for (Map<String, Object> row : recentChats) {
-            builder.addRecentChats(MirrorProfileProto.ChatRecord.newBuilder()
-                    .setRole(nullToEmpty((String) row.get("role")))
-                    .setContent(nullToEmpty((String) row.get("content")))
-                    .setCreatedAt(nullToEmpty((String) row.get("createdAt"))));
-        }
         return builder.build();
     }
 

@@ -76,6 +76,33 @@ class TodoRegistryServiceTest {
 
     private TodoRegistryServiceImpl service;
 
+    @Test
+    void directTodoHasVersionAndNeverWritesAChunk() {
+        var command = new org.xianshen.mumirrorb.pojo.DTO.TodoCommandDTO();
+        command.setTitle("交材料");
+        command.setCurrentStatus("not_started");
+        org.mockito.Mockito.doAnswer(inv -> {
+            TodoRegistry todo = inv.getArgument(0);
+            todo.setId(91L);
+            return 1;
+        }).when(registryMapper).insert(any(TodoRegistry.class));
+        var created = service.createDirect(USER_ID, command);
+        assertEquals("direct", created.getOriginKind());
+        assertEquals(1L, created.getVersion());
+        assertEquals(false, created.getOrphan());
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
+    }
+
+    @Test
+    void independentTodoIsNotReportedAsLegacyOrphan() {
+        when(registryMapper.selectAllByUserRaw(USER_ID)).thenReturn(List.of(
+                Map.of("todoid", 91L, "originkind", "direct", "version", 1L),
+                Map.of("todoid", 92L, "originkind", "record", "version", 1L)));
+        var todos = service.listAll(USER_ID);
+        assertEquals(false, todos.get(0).getOrphan());
+        assertEquals(true, todos.get(1).getOrphan());
+    }
+
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID OTHER_USER_ID = UUID.randomUUID();
     private static final Long RECORD_ID = 100L;
@@ -98,9 +125,11 @@ class TodoRegistryServiceTest {
     void setUp() {
         service = new TodoRegistryServiceImpl(registryMapper, linkMapper, suggestionMapper,
                 chunkMapper, recordMapper);
+        when(registryMapper.selectById(1L)).thenReturn(registry(1L, "not_started"));
         // 默认无重复登记/无重复建议
         when(registryMapper.selectCount(any())).thenReturn(0L);
         when(suggestionMapper.selectCount(any())).thenReturn(0L);
+        when(registryMapper.deleteVersioned(any(), anyLong(), anyLong())).thenReturn(1);
     }
 
     private Chunk todoChunk(Long id, String title, String taskStatus) {
@@ -290,9 +319,7 @@ class TodoRegistryServiceTest {
         service.resolve(9L, USER_ID, "confirmed", null); // 缺省按 suggested_status
 
         // ① 真源：chunk metadata 定向改（updateById 携带改过的 metadata——hstore Handler 坑见实现注释）
-        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
-        verify(chunkMapper).updateById(chunkCaptor.capture());
-        assertEquals("completed", chunkCaptor.getValue().getMetadata().get("taskStatus"));
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
         // ② registry：completed → closed_at 落值（update wrapper 携带 closedAt）
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<TodoRegistry>> regWrapper =
                 ArgumentCaptor.forClass(castClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class));
@@ -384,6 +411,7 @@ class TodoRegistryServiceTest {
     void listAll_mapsRows() {
         Map<String, Object> row = new java.util.HashMap<>();
         row.put("todoid", 1L);
+        row.put("originkind", "record");
         row.put("title", "补作业");
         row.put("currentstatus", "completed");
         row.put("sourcechunkid", CHUNK_ID);
@@ -546,10 +574,8 @@ class TodoRegistryServiceTest {
 
         service.deleteTodo(1L, USER_ID);
 
-        verify(registryMapper).update(isNull(), any()); // deleted_at 落值（软删）
-        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
-        verify(chunkMapper).updateById(chunkCaptor.capture());
-        assertEquals(Boolean.TRUE, chunkCaptor.getValue().getMetadata().get("todoRemoved"));
+        verify(registryMapper).deleteVersioned(eq(USER_ID), eq(1L), eq(1L)); // deleted_at 落值（软删）
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
         verify(suggestionMapper).update(isNull(), any()); // pending 建议作废
     }
 
@@ -576,7 +602,7 @@ class TodoRegistryServiceTest {
         service.deleteTodo(1L, USER_ID);
 
         verify(chunkMapper, never()).updateById(any());
-        verify(registryMapper).update(isNull(), any());
+        verify(registryMapper).deleteVersioned(eq(USER_ID), eq(1L), eq(1L));
         verify(suggestionMapper).update(isNull(), any());
     }
 
@@ -643,11 +669,7 @@ class TodoRegistryServiceTest {
                 List.of(resolution(9L, "confirmed", "completed")));
 
         // 源头 + 证据两处 taskStatus 回写（补现状缺口）
-        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
-        verify(chunkMapper, org.mockito.Mockito.times(2)).updateById(chunkCaptor.capture());
-        for (Chunk c : chunkCaptor.getAllValues()) {
-            assertEquals("completed", c.getMetadata().get("taskStatus"));
-        }
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
         verify(registryMapper).update(isNull(), any());
         ArgumentCaptor<TodoRegistryLink> linkCaptor = ArgumentCaptor.forClass(TodoRegistryLink.class);
         verify(linkMapper).insert(linkCaptor.capture());
@@ -743,10 +765,7 @@ class TodoRegistryServiceTest {
         service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(mount(6L, "confirmed", "completed")));
 
         // ① 源头片段 taskStatus 回写（真源；仅源头一处，evidence 片段不回写）
-        ArgumentCaptor<Chunk> chunkCaptor = ArgumentCaptor.forClass(Chunk.class);
-        verify(chunkMapper).updateById(chunkCaptor.capture());
-        assertEquals(CHUNK_ID, chunkCaptor.getValue().getId());
-        assertEquals("completed", chunkCaptor.getValue().getMetadata().get("taskStatus"));
+        verify(chunkMapper, never()).updateById(any(Chunk.class));
         // ② registry 物化（closed_at 语义由 applyRegistryStatus 内部处理）
         verify(registryMapper).update(isNull(), any());
         // ③ 本记录 chunk 落 evidence link
@@ -773,7 +792,7 @@ class TodoRegistryServiceTest {
 
         service.applyRecordResolutions(RECORD_ID, USER_ID, List.of(mount(6L, "confirmed", "in_progress")));
 
-        verify(chunkMapper).updateById(any());       // 源头回写仍执行
+        verify(chunkMapper, never()).updateById(any(Chunk.class)); // 历史证据只读
         verify(registryMapper).update(isNull(), any()); // registry 同状态也走
         verify(linkMapper).insert(any(TodoRegistryLink.class));
     }

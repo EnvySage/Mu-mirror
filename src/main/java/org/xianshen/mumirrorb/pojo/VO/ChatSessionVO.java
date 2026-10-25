@@ -28,8 +28,17 @@ public class ChatSessionVO {
     @Schema(description = "会话标题", example = "我最近在忙什么")
     private String title;
 
+    private java.time.LocalDate dayKey;
+
+    private String timezone;
+
+    private ChatDaySummaryVO daySummary;
+
     @Schema(description = "历史消息（仅 GET /mirror/sessions/{id} 返回；列表接口为 null）")
     private List<MessageVO> messages;
+
+    @Schema(description = "会话内关联的持久化操作卡")
+    private List<ActionProposalVO> actions;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "创建时间")
@@ -38,6 +47,14 @@ public class ChatSessionVO {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
     @Schema(description = "更新时间（会话列表排序键）")
     private OffsetDateTime updatedAt;
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class ChatDaySummaryVO {
+        private java.time.LocalDate sourceDate;
+        private String summary;
+        private String sourceHash;
+        private String state;
+    }
 
     /**
      * 单条消息（含来源追溯）
@@ -71,6 +88,9 @@ public class ChatSessionVO {
 
         @Schema(description = "对话文件卡（assistant 消息，历史回放文件卡与 [Fn] 行内芯片）")
         private List<Map<String, Object>> vaultRefs;
+
+        @Schema(description = "本轮创建记录回执卡（不会伪装成AI来源）")
+        private List<Map<String, Object>> createdRecords;
 
         @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
         @Schema(description = "创建时间")

@@ -82,6 +82,15 @@ public class AiGrpcClient {
     private MirrorProfileGrpc.MirrorProfileBlockingStub profileStub;
     private MirrorChatGrpc.MirrorChatBlockingStub chatStub;
 
+    /** Summarizes only the supplied user's messages; validation of source ids happens again in Java. */
+    public MirrorChatProto.SummarizeDayResponse summarizeDay(UUID userId, java.time.LocalDate sourceDate,
+            String sourceHash, List<MirrorChatProto.ChatDayMessage> messages, String timezone) {
+        MirrorChatProto.SummarizeDayRequest request = MirrorChatProto.SummarizeDayRequest.newBuilder()
+                .addAllMessages(messages).setSourceHash(sourceHash).setSourceDate(sourceDate.toString())
+                .setTimezone(timezone).setLlmConfig(buildLlmConfig(userId)).build();
+        return chatStub.withDeadlineAfter(90, TimeUnit.SECONDS).summarizeDay(request);
+    }
+
     @PostConstruct
     public void init() {
         recordStub = RecordProcessorGrpc.newBlockingStub(channel);
@@ -143,6 +152,7 @@ public class AiGrpcClient {
                     .setContent(content)
                     .setProcessingAuthorized(true)
                     .setLlmConfig(llmConfig);
+            requestBuilder.setGrowthContext(growthContext(userId));
             if (referenceDate != null && !referenceDate.isBlank()) {
                 requestBuilder.setReferenceDate(referenceDate);
             }
@@ -236,6 +246,7 @@ public class AiGrpcClient {
                     .setProcessingAuthorized(true)
                     .setLlmConfig(llmConfig)
                     .setSingle(true)
+                    .setGrowthContext(growthContext(userId))
                     .addAllRecentContext(recentContextHints(userId, excludeRecordId));
             if (referenceDate != null && !referenceDate.isBlank()) {
                 requestBuilder.setReferenceDate(referenceDate);
@@ -253,6 +264,47 @@ public class AiGrpcClient {
             log.error("gRPC Classify(single) 调用失败: status={}, 用户: {}", e.getStatus(), userId, e);
             throw e;
         }
+    }
+
+    /**
+     * 真实探测用户配置的大模型：发送固定的无个人数据探针到与记录整理相同的 Python Classify RPC。
+     * 与 Embedding 的 GetModelInfo 分开，连接测试不会把测试内容写入数据库。
+     */
+    public RecordProcessorProto.ClassifyResponse testLlmConnection(UUID userId) {
+        RecordProcessorProto.ClassifyRequest request = RecordProcessorProto.ClassifyRequest.newBuilder()
+                .setContent("今天完成了一次 AI 模型连接测试。")
+                .setProcessingAuthorized(true)
+                .setLlmConfig(buildLlmConfig(userId))
+                .setSingle(true)
+                .build();
+        try {
+            return recordStub.withDeadlineAfter(180, TimeUnit.SECONDS).classify(request);
+        } catch (StatusRuntimeException e) {
+            log.error("gRPC LLM 连接测试失败，用户: {}, status={}", userId, e.getStatus(), e);
+            throw e;
+        }
+    }
+
+    private CommonProto.GrowthContext growthContext(UUID userId) {
+        try {
+            var service = applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class);
+            var builder = CommonProto.GrowthContext.newBuilder();
+            for (var axis : service.axes(userId)) builder.addAxes(CommonProto.GrowthAxis.newBuilder()
+                    .setId(axis.getDimensionId()).setName(axis.getName()).setDescription(axis.getDescription())
+                    .setDefinitionVersion(axis.getDefinitionVersion() == null ? 1 : axis.getDefinitionVersion()));
+            return builder.build();
+        } catch (Exception e) {
+            log.warn("growth_context 组装失败，按空维度继续分类：{}", e.getMessage());
+            return CommonProto.GrowthContext.getDefaultInstance();
+        }
+    }
+
+    public long growthAxesVersion(UUID userId) {
+        return applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class).axesVersion(userId);
+    }
+    public java.util.Set<String> growthAxisIds(UUID userId) {
+        return applicationContext.getBean(org.xianshen.mumirrorb.service.GrowthService.class).axes(userId).stream()
+                .map(org.xianshen.mumirrorb.pojo.DO.GrowthAxis::getDimensionId).collect(java.util.stream.Collectors.toSet());
     }
 
     /**
@@ -698,6 +750,11 @@ public class AiGrpcClient {
      */
     public CommonProto.LlmConfig buildLlmConfigFor(UUID userId) {
         return buildLlmConfig(userId);
+    }
+
+    /** Build the per-user EmbeddingConfig for the independent Agent RPC. */
+    public CommonProto.EmbeddingConfig buildEmbeddingConfigFor(UUID userId) {
+        return buildEmbeddingConfig(userId);
     }
 
     /**

@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
@@ -24,6 +25,7 @@ import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -55,10 +57,13 @@ public class ChunkServiceImpl implements ChunkService {
         }
 
         // 3. 允许审核中或已完成的用户记录编辑；编辑会撤回该片段已有的 AI 记忆授权。
-        Record record = recordMapper.selectById(chunk.getRecordId());
-        if (record == null || (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.DONE)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有已完成整理的记录才能修改片段");
+        Record record = recordMapper.selectOwnedForUpdate(userId, chunk.getRecordId());
+        if (record == null || (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.DONE
+                && record.getStatus() != RecordStatus.RECORD_ONLY)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有未锁定的记录才能修改片段");
         }
+        if (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE)
+            throw new BusinessException(ResultCode.PARAM_ERROR, "记忆处理中或已确认的片段为只读；请新建关联更正记录");
 
         boolean textChanged = false;
         // 4. 更新 segment
@@ -92,6 +97,12 @@ public class ChunkServiceImpl implements ChunkService {
         }
         if (dto.getKeywords() != null) {
             metadata.put("keywords", dto.getKeywords());
+            metadataChanged = true;
+        }
+        if (dto.getUserTags() != null) {
+            List<String> tags = dto.getUserTags().stream().filter(Objects::nonNull).map(String::trim)
+                    .filter(s -> !s.isBlank()).distinct().limit(30).toList();
+            metadata.put("tags", tags);
             metadataChanged = true;
         }
         // taskStatus（F 第八轮欠账）：null = 清空（用户"点已选项取消"），非空 = 覆盖
@@ -154,10 +165,12 @@ public class ChunkServiceImpl implements ChunkService {
         }
 
         // 3. 检查 Record 状态（只有 REVIEWING 允许删除片段）
-        Record record = recordMapper.selectById(chunk.getRecordId());
-        if (record == null || record.getStatus() != RecordStatus.REVIEWING) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能删除 Chunk");
+        Record record = recordMapper.selectOwnedForUpdate(userId, chunk.getRecordId());
+        if (record == null || (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.RECORD_ONLY)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "只有未锁定的记录才能删除 Chunk");
         }
+        if (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE)
+            throw new BusinessException(ResultCode.PARAM_ERROR, "记忆处理中或已确认的片段为只读");
 
         if (Boolean.TRUE.equals(chunk.getAiMemoryApproved())) {
             snapshotLineageService.invalidateSource(userId, "chunk", chunkId, "chunk_removed");
@@ -170,18 +183,15 @@ public class ChunkServiceImpl implements ChunkService {
     @Transactional
     public ChunkVO add(Long recordId, String segmentText, UUID userId) {
         // 1. 查询 Record 并校验
-        Record record = recordMapper.selectOne(
-                new LambdaQueryWrapper<Record>()
-                        .eq(Record::getId, recordId)
-                        .eq(Record::getUserId, userId)
-                        .isNull(Record::getDeletedAt)
-        );
+        Record record = recordMapper.selectOwnedForUpdate(userId, recordId);
         if (record == null) {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
         }
         if (record.getStatus() != RecordStatus.REVIEWING) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有待审查的记录才能新增片段");
         }
+        if (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE)
+            throw new BusinessException(ResultCode.PARAM_ERROR, "记忆处理中或已确认的记录不能新增片段");
         if (segmentText == null || segmentText.isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "片段内容不能为空");
         }

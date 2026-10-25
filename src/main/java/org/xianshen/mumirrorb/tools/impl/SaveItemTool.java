@@ -22,6 +22,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SaveItemTool implements ToolExecutor {
 
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
+
     private final VaultService vaultService;
 
     @Override

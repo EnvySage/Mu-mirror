@@ -22,6 +22,7 @@ import org.xianshen.mumirrorb.config.MirrorProperties;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileProto;
 import org.xianshen.mumirrorb.mapper.ProfileSnapshotMapper;
+import org.xianshen.mumirrorb.mapper.ConversationHistoryMapper;
 import org.xianshen.mumirrorb.pojo.DO.ProfileSnapshot;
 import org.xianshen.mumirrorb.service.impl.MirrorServiceImpl;
 import org.xianshen.mumirrorb.service.impl.SnapshotLineageService;
@@ -62,6 +63,9 @@ class MirrorLineageReplayDatabaseTest {
     private ProfileSnapshotMapper snapshotMapper;
 
     @Autowired
+    private ConversationHistoryMapper conversationHistoryMapper;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -85,6 +89,19 @@ class MirrorLineageReplayDatabaseTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.execute("ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS context_source_message_ids JSONB NOT NULL DEFAULT '[]'::jsonb");
+        // Recover only this class's uniquely tagged users if an earlier test process was interrupted.
+        List<UUID> abandonedUsers = jdbcTemplate.queryForList(
+                "SELECT id FROM users WHERE username LIKE 'mirror-replay-%'", UUID.class);
+        for (UUID abandoned : abandonedUsers) {
+            jdbcTemplate.update("DELETE FROM snapshot_inputs WHERE snapshot_id IN (SELECT id FROM profile_snapshots WHERE user_id=?)", abandoned);
+            jdbcTemplate.update("DELETE FROM profile_snapshots WHERE user_id=?", abandoned);
+            jdbcTemplate.update("DELETE FROM chunks WHERE user_id=?", abandoned);
+            jdbcTemplate.update("DELETE FROM records WHERE user_id=?", abandoned);
+            jdbcTemplate.update("DELETE FROM user_settings WHERE user_id=?", abandoned);
+            jdbcTemplate.update("DELETE FROM chat_sessions WHERE user_id=?", abandoned);
+            jdbcTemplate.update("DELETE FROM users WHERE id=?", abandoned);
+        }
         reset(aiGrpcClient);
         when(aiGrpcClient.generateProfile(any(), any())).thenReturn(MirrorProfileProto.GenerateProfileResponse
                 .newBuilder().build());
@@ -98,13 +115,33 @@ class MirrorLineageReplayDatabaseTest {
 
     @AfterEach
     void cleanUp() {
+        jdbcTemplate.update("DELETE FROM chat_sessions WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM snapshot_inputs WHERE snapshot_id IN " +
                 "(SELECT id FROM profile_snapshots WHERE user_id = ?)", userId);
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM snapshot_inputs si
+                JOIN profile_snapshots ps ON ps.id = si.snapshot_id
+                WHERE ps.user_id = ?
+                """, Integer.class, userId));
         jdbcTemplate.update("DELETE FROM profile_snapshots WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM chunks WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM records WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM user_settings WHERE user_id = ?", userId);
         jdbcTemplate.update("DELETE FROM users WHERE id = ?", userId);
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users WHERE id = ?",
+                Integer.class, userId));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM profile_snapshots WHERE user_id = ?",
+                Integer.class, userId));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chat_source_exclusions WHERE user_id = ?",
+                Integer.class, userId));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM assistant_actions WHERE user_id = ?",
+                Integer.class, userId));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chat_memories WHERE user_id = ?",
+                Integer.class, userId));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chat_day_summaries WHERE user_id = ?",
+                Integer.class, userId));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users WHERE username LIKE 'mirror-replay-%'",
+                Integer.class), "all users created by this integration fixture are removed after each case");
     }
 
     @Test
@@ -136,6 +173,36 @@ class MirrorLineageReplayDatabaseTest {
         var third = mirrorService.listSnapshots(userId, second.getNextCreatedAt(), second.getNextId(), 1);
         assertEquals(List.of(older.getId()), third.getItems().stream().map(item -> item.getId()).toList());
         assertFalse(third.isHasMore());
+    }
+
+    @Test
+    void lateAssistantReplyUsingForgottenMemoryIsExcludedFromFutureModelHistory() {
+        UUID sessionId = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO chat_sessions (id, user_id, title) VALUES (?, ?, ?)", sessionId, userId, "lineage-race");
+        Long forgottenSource = jdbcTemplate.queryForObject("""
+                INSERT INTO conversation_history (user_id, session_id, role, content, created_at)
+                VALUES (?, ?, 'user', 'old memory source', now()) RETURNING id
+                """, Long.class, userId, sessionId);
+        jdbcTemplate.update("""
+                INSERT INTO chat_source_exclusions(user_id,source_kind,source_id,reason)
+                VALUES (?,'chat_message',?,'memory_forgotten')
+                """, userId, forgottenSource);
+        Long newerQuestion = jdbcTemplate.queryForObject("""
+                INSERT INTO conversation_history (user_id, session_id, role, content, created_at)
+                VALUES (?, ?, 'user', 'newer user turn', now() + interval '1 second') RETURNING id
+                """, Long.class, userId, sessionId);
+        Long laterReply = jdbcTemplate.queryForObject("""
+                INSERT INTO conversation_history (user_id, session_id, role, content, context_source_message_ids, created_at)
+                VALUES (?, ?, 'assistant', 'late paraphrase', jsonb_build_array(?::bigint), now() + interval '2 seconds') RETURNING id
+                """, Long.class, userId, sessionId, forgottenSource);
+
+        var modelHistory = conversationHistoryMapper.selectRecentForModel(sessionId, userId, 20);
+        assertEquals(List.of(newerQuestion), modelHistory.stream().map(message -> message.getId()).toList(),
+                "the newer user turn remains while its late assistant reply that consumed the forgotten source is excluded");
+        assertTrue(conversationHistoryMapper.selectBySession(sessionId, userId).stream()
+                        .anyMatch(message -> laterReply.equals(message.getId()) && "late paraphrase".equals(message.getContent())),
+                "the retained UI history remains readable");
+        assertEquals(List.of(laterReply), conversationHistoryMapper.selectAssistantRepliesDependingOn(userId, new Long[]{forgottenSource}));
     }
 
     @Test
@@ -265,6 +332,98 @@ class MirrorLineageReplayDatabaseTest {
     }
 
     @Test
+    void forgottenChatSourceInvalidatesKnownDependentsAndUnknownLegacyDescendantsOnly() {
+        ProfileSnapshot chatDependent = insertMonthly("2026-06", false, false,
+                OffsetDateTime.parse("2026-07-01T02:00:00+08:00"));
+        snapshotLineageService.recordChatMessageInputs(chatDependent.getId(), List.of(81001L, 81002L));
+
+        ProfileSnapshot knownDescendant = insertMonthly("2026-07", false, false,
+                OffsetDateTime.parse("2026-08-01T02:00:00+08:00"));
+        jdbcTemplate.update("""
+                INSERT INTO snapshot_inputs (snapshot_id, input_kind, input_id, input_role)
+                VALUES (?, 'snapshot', ?, 'parent')
+                """, knownDescendant.getId(), chatDependent.getId());
+
+        ProfileSnapshot unrelatedRecordSnapshot = insertMonthly("2026-08", false, false,
+                OffsetDateTime.parse("2026-09-01T02:00:00+08:00"));
+        long unrelatedRecord = insertRecord(OffsetDateTime.parse("2026-08-12T10:00:00+08:00"), null);
+        jdbcTemplate.update("""
+                INSERT INTO snapshot_inputs (snapshot_id, input_kind, input_id, input_role)
+                VALUES (?, 'record', ?, 'stats')
+                """, unrelatedRecordSnapshot.getId(), unrelatedRecord);
+
+        ProfileSnapshot legacyUnknown = ProfileSnapshot.builder()
+                .userId(userId).snapshotType("manual").versionNo(1).isCurrent(true)
+                .lineageTracked(true).chatLineageKnown(false).invalidated(false)
+                .overallSummary("legacy unknown chat lineage").createdAt(OffsetDateTime.now()).build();
+        snapshotMapper.insert(legacyUnknown);
+        ProfileSnapshot legacyDescendant = insertMonthly("2026-09", false, false,
+                OffsetDateTime.parse("2026-10-01T02:00:00+08:00"));
+        jdbcTemplate.update("""
+                INSERT INTO snapshot_inputs (snapshot_id, input_kind, input_id, input_role)
+                VALUES (?, 'snapshot', ?, 'parent')
+                """, legacyDescendant.getId(), legacyUnknown.getId());
+
+        assertEquals(2, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM snapshot_inputs
+                WHERE snapshot_id = ? AND input_kind = 'chat_message' AND input_role = 'memory_source'
+                """, Integer.class, chatDependent.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM profile_snapshots
+                WHERE user_id = ? AND invalidated = TRUE
+                """, Integer.class, userId), "migration must preserve historical rows until a forget event");
+
+        snapshotLineageService.invalidateForForgottenChatSources(userId, List.of(81001L, 81002L));
+
+        assertTrue(snapshotMapper.selectById(chatDependent.getId()).getInvalidated());
+        assertTrue(snapshotMapper.selectById(knownDescendant.getId()).getInvalidated());
+        assertTrue(snapshotMapper.selectById(legacyUnknown.getId()).getInvalidated());
+        assertTrue(snapshotMapper.selectById(legacyDescendant.getId()).getInvalidated());
+        assertFalse(snapshotMapper.selectById(unrelatedRecordSnapshot.getId()).getInvalidated());
+        assertEquals(4, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM profile_snapshots
+                WHERE user_id = ? AND invalidated = TRUE
+                """, Integer.class, userId));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM profile_snapshots
+                WHERE user_id = ? AND id = ?
+                """, Integer.class, userId, legacyUnknown.getId()),
+                "invalidated legacy archive remains available for human history");
+    }
+
+    @Test
+    void lateSnapshotSaveAfterForgetIsRejectedAndRollsBackTheSnapshot() {
+        long forgottenMessageId = 82001L;
+        jdbcTemplate.update("""
+                INSERT INTO chat_source_exclusions (user_id, source_kind, source_id, reason)
+                VALUES (?, 'chat_message', ?, 'memory_forgotten')
+                """, userId, forgottenMessageId);
+        snapshotLineageService.invalidateForForgottenChatSources(userId, List.of(forgottenMessageId));
+        int snapshotsBeforeLateResult = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM profile_snapshots WHERE user_id = ?", Integer.class, userId);
+
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        assertThrows(IllegalStateException.class, () -> transactionTemplate.execute(status -> {
+            ProfileSnapshot lateSnapshot = ProfileSnapshot.builder()
+                    .userId(userId).snapshotType("manual").versionNo(1).isCurrent(true)
+                    .lineageTracked(true).chatLineageKnown(true).invalidated(false)
+                    .overallSummary("stale LLM result").createdAt(OffsetDateTime.now()).build();
+            snapshotMapper.insert(lateSnapshot);
+            snapshotLineageService.recordChatMessageInputs(lateSnapshot.getId(), List.of(forgottenMessageId));
+            return null;
+        }));
+
+        assertEquals(snapshotsBeforeLateResult, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM profile_snapshots WHERE user_id = ?", Integer.class, userId),
+                "the surrounding snapshot transaction must roll back when a source was forgotten");
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM snapshot_inputs si
+                JOIN profile_snapshots ps ON ps.id = si.snapshot_id
+                WHERE ps.user_id = ? AND si.input_kind = 'chat_message'
+                """, Integer.class, userId));
+    }
+
+    @Test
     void replayIncludesAuthorizedMonthsMissingFromArchiveAndMarksUnrecoverableGap() {
         YearMonth currentMonth = YearMonth.now(ZoneId.of("Asia/Shanghai"));
         YearMonth archivedMonth = currentMonth.minusMonths(3);
@@ -355,6 +514,7 @@ class MirrorLineageReplayDatabaseTest {
                 .versionNo(1)
                 .isCurrent(current)
                 .lineageTracked(true)
+                .chatLineageKnown(true)
                 .invalidated(invalidated)
                 .invalidatedAt(invalidated ? createdAt : null)
                 .invalidatedReason(invalidated ? "record_deleted" : null)
@@ -374,6 +534,7 @@ class MirrorLineageReplayDatabaseTest {
                 .versionNo(1)
                 .isCurrent(current)
                 .lineageTracked(true)
+                .chatLineageKnown(true)
                 .invalidated(invalidated)
                 .invalidatedAt(invalidated ? createdAt : null)
                 .invalidatedReason(invalidated ? "record_deleted" : null)
@@ -393,10 +554,24 @@ class MirrorLineageReplayDatabaseTest {
     }
 
     private void insertChunk(long recordId, boolean authorized) {
-        jdbcTemplate.update("""
-                INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved)
-                VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, ?)
-                """, userId, recordId, authorized);
+        if (authorized) {
+            jdbcTemplate.update("UPDATE records SET memory_state = 'READY' WHERE id = ? AND user_id = ?", recordId, userId);
+            jdbcTemplate.update("""
+                    INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved,
+                                        embedding, embedding_status)
+                    VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, TRUE, ?::vector, 'ready')
+                    """, userId, recordId, vectorLiteral());
+        } else {
+            jdbcTemplate.update("""
+                    INSERT INTO chunks (user_id, record_id, content, segment, metadata, ai_memory_approved,
+                                        embedding_status)
+                    VALUES (?, ?, 'test chunk', 'test chunk', '{}'::jsonb, FALSE, 'not_requested')
+                    """, userId, recordId);
+        }
+    }
+
+    private String vectorLiteral() {
+        return "[1" + ",0".repeat(1023) + "]";
     }
 
     @SpringBootConfiguration

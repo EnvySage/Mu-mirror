@@ -28,4 +28,7 @@ public class RecordConfirmDTO {
 
     @Schema(description = "待办决议列表（缺省 = 本记录未处理建议一律作废）")
     private List<TodoResolutionDTO> todoResolutions;
+    @Schema(description = "用户明确审核确认的独立成长调整；每项必须含可重试的 requestId")
+    private List<GrowthAdjustmentDTO> growthAdjustments;
+    private Long axesVersion;
 }

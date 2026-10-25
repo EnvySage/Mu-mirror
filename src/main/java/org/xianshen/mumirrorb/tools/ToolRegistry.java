@@ -23,8 +23,13 @@ public class ToolRegistry {
     private final Map<String, ToolExecutor> executors;
 
     public ToolRegistry(List<ToolExecutor> executorList) {
-        this.executors = executorList.stream()
-                .collect(Collectors.toMap(ToolExecutor::name, e -> e, (a, b) -> a, LinkedHashMap::new));
+        this.executors = new LinkedHashMap<>();
+        for (ToolExecutor executor : executorList) {
+            if (executor.effect() == null || executor.definition().effect() != executor.effect())
+                throw new IllegalArgumentException("Tool effect must be declared consistently: " + executor.name());
+            if (executors.putIfAbsent(executor.name(), executor) != null)
+                throw new IllegalArgumentException("Duplicate tool: " + executor.name());
+        }
         log.info("ToolRegistry 注册 {} 只工具: {}", executors.size(), executors.keySet());
     }
 
@@ -33,6 +38,15 @@ public class ToolRegistry {
      */
     public List<org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolSpec> toProtoSpecs() {
         return executors.values().stream()
+                .map(ToolExecutor::definition)
+                .map(ToolDefinition::toProto)
+                .toList();
+    }
+
+    /** Only confirmation-card tools are exposed to graph_v2; direct submission tools are excluded. */
+    public List<org.xianshen.mumirrorb.grpc.gen.CommonProto.ToolSpec> prepareWriteProtoSpecs() {
+        return executors.values().stream()
+                .filter(executor -> executor.effect() == ToolEffect.PREPARE_WRITE)
                 .map(ToolExecutor::definition)
                 .map(ToolDefinition::toProto)
                 .toList();

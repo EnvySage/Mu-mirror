@@ -1,15 +1,18 @@
 package org.xianshen.mumirrorb.service.impl;
 
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.mapper.ChunkEmbeddingJobMapper;
 import org.xianshen.mumirrorb.mapper.ChunkMapper;
+import org.xianshen.mumirrorb.mapper.RecordMapper;
 import org.xianshen.mumirrorb.pojo.DO.Chunk;
 import org.xianshen.mumirrorb.pojo.DO.ChunkEmbeddingJob;
 import org.xianshen.mumirrorb.service.ChunkEmbeddingJobService;
+import org.xianshen.mumirrorb.service.RecordMemoryLifecycleService;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -21,10 +24,32 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
     private final ChunkEmbeddingJobMapper jobMapper;
     private final ChunkMapper chunkMapper;
+    private final RecordMapper recordMapper;
+    private final RecordMemoryLifecycleService lifecycle;
+    private final ApplicationEventPublisher events;
+
+    public ChunkEmbeddingJobServiceImpl(ChunkEmbeddingJobMapper jobMapper, ChunkMapper chunkMapper,
+                                        RecordMapper recordMapper, RecordMemoryLifecycleService lifecycle) {
+        this(jobMapper, chunkMapper, recordMapper, lifecycle, null);
+    }
+
+    @Autowired
+    public ChunkEmbeddingJobServiceImpl(ChunkEmbeddingJobMapper jobMapper, ChunkMapper chunkMapper,
+                                        RecordMapper recordMapper, RecordMemoryLifecycleService lifecycle,
+                                        ApplicationEventPublisher events) {
+        this.jobMapper = jobMapper;
+        this.chunkMapper = chunkMapper;
+        this.recordMapper = recordMapper;
+        this.lifecycle = lifecycle;
+        this.events = events;
+    }
+
+    public ChunkEmbeddingJobServiceImpl(ChunkEmbeddingJobMapper jobMapper, ChunkMapper chunkMapper) {
+        this(jobMapper, chunkMapper, null, null);
+    }
 
     @Override
     @Transactional
@@ -37,6 +62,13 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
             chunk.setEmbeddingStatus("pending");
             chunk.setEmbeddingError(null);
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Long latestJobId(Long chunkId, UUID userId) {
+        ChunkEmbeddingJob latest = jobMapper.findLatest(chunkId, userId);
+        return latest == null ? null : latest.getId();
     }
 
     @Override
@@ -96,6 +128,7 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
                 job.getContentVersion(), job.getId(), embedding);
         if (updated == 1) {
             jobMapper.markReady(job.getId());
+            publishParentCheck(job, "READY", null);
         } else {
             jobMapper.finishAttempt(job.getId(), "cancelled", OffsetDateTime.now(), "片段内容或授权已变化");
         }
@@ -114,6 +147,7 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
         if (exhausted) {
             chunkMapper.markEmbeddingFailedIfCurrent(job.getChunkId(), job.getUserId(),
                     job.getContentVersion(), safeError);
+            publishParentCheck(job, "FAILED", safeError);
         } else {
             chunkMapper.markEmbeddingPending(job.getChunkId(), job.getUserId(), job.getContentVersion());
         }
@@ -133,5 +167,10 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 不可用", e);
         }
+    }
+
+    private void publishParentCheck(ChunkEmbeddingJob job, String state, String reason) {
+        if (events != null && recordMapper != null && lifecycle != null)
+            events.publishEvent(new ChunkEmbeddingJobStateChangedEvent(job.getUserId(), job.getChunkId(), state, reason));
     }
 }

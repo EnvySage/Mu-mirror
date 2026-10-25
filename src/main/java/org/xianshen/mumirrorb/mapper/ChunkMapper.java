@@ -76,6 +76,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND record_memory_is_complete(r.id)
               AND c.ai_memory_approved = TRUE
               AND c.segment IS NOT NULL AND c.segment <> ''
               AND c.vault_item_id IS NULL
@@ -151,6 +152,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
+              AND record_memory_is_complete(r.id)
               AND c.ai_memory_approved = TRUE
               AND c.segment IS NOT NULL AND c.segment <> ''
               AND c.vault_item_id IS NULL
@@ -181,6 +183,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND record_memory_is_complete(r.id)
               AND c.ai_memory_approved = TRUE
               AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
@@ -213,6 +216,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND record_memory_is_complete(r.id)
               AND c.ai_memory_approved = TRUE
               AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL
@@ -253,6 +257,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
+              AND record_memory_is_complete(r.id)
               AND c.ai_memory_approved = TRUE
               AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
               AND c.vault_item_id IS NULL

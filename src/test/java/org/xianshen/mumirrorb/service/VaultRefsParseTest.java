@@ -55,7 +55,9 @@ class VaultRefsParseTest {
                 MAPPER,
                 new org.xianshen.mumirrorb.config.MirrorProperties(),
                 new org.xianshen.mumirrorb.config.VaultProperties(),
-                org.mockito.Mockito.mock(org.xianshen.mumirrorb.mapper.ProfileStatsMapper.class));
+                org.mockito.Mockito.mock(org.xianshen.mumirrorb.mapper.ProfileStatsMapper.class),
+                org.mockito.Mockito.mock(org.xianshen.mumirrorb.service.ChatMemoryService.class),
+                new org.xianshen.mumirrorb.service.impl.DailyChatSessionResolver(sessionMapper));
     }
 
     private CommonProto.ToolResult findItemResult() throws Exception {

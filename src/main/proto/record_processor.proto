@@ -30,6 +30,7 @@ message ClassifyRequest {
   // 周计算口径：一周从周一起算（"本周一"= 参照日期所在周的周一）。
   string reference_date = 7;
   bool processing_authorized = 8;
+  GrowthContext growth_context = 9;
 }
 
 // 时间词替换项（LLM 判别输出）：把片段里的相对时间词替换成绝对日期
@@ -91,6 +92,7 @@ message ClassifyResponse {
   bool skip = 1;                    // 是否跳过（无意义内容）
   string skip_reason = 2;           // 跳过原因
   repeated ClassifyItem items = 3;  // 分类结果（1条或多条，拆分后的每条记录）
+  repeated GrowthSuggestion growth_suggestions = 4;
 }
 
 // 单条分类结果
@@ -104,4 +106,5 @@ message ClassifyItem {
   repeated string keywords = 7;     // 关键词 3-5 个
   TodoRef refers_to_todo = 8;       // 待办引用（todo-registry 判别期；无引用不设值）
   repeated TimeSubstitution time_substitutions = 9; // 本片段内的时间词替换（相对时间 → 绝对日期；无则不设值）
+  repeated string user_tags = 10;
 }

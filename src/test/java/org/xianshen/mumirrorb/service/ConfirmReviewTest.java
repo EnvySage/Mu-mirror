@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationContext;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
@@ -132,7 +133,7 @@ class ConfirmReviewTest {
     @Test
     @DisplayName("无 Chunk 时 confirm 报错（设计文档 5.2 约束）")
     void confirm_withNoChunks_throws() {
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
         when(chunkMapper.selectList(any())).thenReturn(List.of());
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -146,7 +147,7 @@ class ConfirmReviewTest {
     @DisplayName("非 REVIEWING / DONE 状态 confirm 报错")
     void confirm_notReviewing_throws() {
         record.setStatus(RecordStatus.PROCESSING);
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
 
         assertThrows(BusinessException.class, () -> recordService.confirmReview(RECORD_ID, USER_ID));
         verify(recordMapper, never()).updateById(any());
@@ -155,7 +156,7 @@ class ConfirmReviewTest {
     @Test
     @DisplayName("补分类失败不阻断：仍 DONE，metadata 保留旧值（5.6）")
     void confirm_classifyFails_stillDone() {
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
         Chunk chunk = Chunk.builder().id(10L).recordId(RECORD_ID).userId(USER_ID)
                 .content("原文").segment("改过的文本").classifiedSegment(null) // 文本已改，需补分类
                 .build();
@@ -175,7 +176,7 @@ class ConfirmReviewTest {
     @Test
     @DisplayName("Embedding 失败不阻断：仍 DONE（裁决 #5）")
     void confirm_embedFails_stillDone() {
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
         Chunk chunk = Chunk.builder().id(10L).recordId(RECORD_ID).userId(USER_ID)
                 .content("原文").segment("片段").classifiedSegment("片段") // 文本未变，无需补分类
                 .build();
@@ -195,7 +196,7 @@ class ConfirmReviewTest {
     @Test
     @DisplayName("补分类成功：回填 metadata + classified_segment")
     void confirm_classifySucceeds_fillsMetadata() {
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
         Chunk chunk = Chunk.builder().id(10L).recordId(RECORD_ID).userId(USER_ID)
                 .content("原文").segment("新文本").classifiedSegment(null)
                 .build();
@@ -218,7 +219,7 @@ class ConfirmReviewTest {
     @Test
     @DisplayName("补分类返回时间替换表 → segment 消解，且 embedding 吃的是消解后文本")
     void confirm_timeSubstitution_resolvesSegmentAndEmbedding() {
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
         Chunk chunk = Chunk.builder().id(11L).recordId(RECORD_ID).userId(USER_ID)
                 .content("今天学了 Spring Boot")
                 .segment("今天学了 Spring Boot")
@@ -248,7 +249,7 @@ class ConfirmReviewTest {
     @Test
     @DisplayName("未选择记忆授权时不分类、不生成向量并清除旧向量")
     void confirm_withoutMemoryApproval_keepsChunkOutOfAiMemory() {
-        when(recordMapper.selectOne(any())).thenReturn(record);
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
         Chunk chunk = Chunk.builder().id(12L).recordId(RECORD_ID).userId(USER_ID)
                 .content("私人记录").segment("私人记录").classifiedSegment("私人记录")
                 .aiMemoryApproved(true).embedding(List.of(0.4f, 0.5f))
@@ -262,5 +263,23 @@ class ConfirmReviewTest {
         assertFalse(chunk.getAiMemoryApproved());
         assertNull(chunk.getEmbedding());
         verify(snapshotLineageService).invalidateSource(USER_ID, "chunk", 12L, "memory_revoked");
+    }
+
+    @Test
+    @DisplayName("取消全部记忆时按仅保存处理并保持可重新授权")
+    void confirm_withoutAnyMemorySelectionBecomesOnlySave() {
+        when(recordMapper.selectOwnedForUpdate(USER_ID, RECORD_ID)).thenReturn(record);
+        Chunk chunk = Chunk.builder().id(13L).recordId(RECORD_ID).userId(USER_ID)
+                .content("正文").segment("正文").classifiedSegment("正文").build();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        var result = recordService.confirmReview(RECORD_ID, USER_ID, List.of(), List.of(), null);
+
+        assertEquals(RecordStatus.RECORD_ONLY, record.getStatus());
+        assertEquals(RecordMemoryState.NONE, result.getMemoryState());
+        assertFalse(record.getAiProcessingAuthorized());
+        assertEquals("record_only", record.getStatus().getValue());
+        verify(chunkEmbeddingJobService, never()).enqueue(any());
+        verify(chunkMapper, never()).deleteById(anyLong());
     }
 }

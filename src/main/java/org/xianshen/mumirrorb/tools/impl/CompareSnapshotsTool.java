@@ -21,6 +21,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CompareSnapshotsTool implements ToolExecutor {
 
+    @Override
+    public org.xianshen.mumirrorb.tools.ToolEffect effect() { return org.xianshen.mumirrorb.tools.ToolEffect.READ; }
+
     private final ProfileSnapshotMapper snapshotMapper;
 
     @Override

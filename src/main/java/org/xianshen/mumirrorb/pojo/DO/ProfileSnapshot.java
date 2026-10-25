@@ -93,6 +93,9 @@ public class ProfileSnapshot {
     /** 是否保存了本快照完整的输入来源依赖。 */
     private Boolean lineageTracked;
 
+    /** Whether this snapshot has a complete inventory of any chat-message inputs. */
+    private Boolean chatLineageKnown;
+
     /** 该累计链是否从无法完整恢复的历史开始；后续镜子沿父依赖继续保留此标记。 */
     private Boolean archiveDiscontinuity;
 

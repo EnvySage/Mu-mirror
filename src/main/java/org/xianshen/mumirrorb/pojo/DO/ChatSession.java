@@ -42,6 +42,12 @@ public class ChatSession {
     @Schema(description = "关联用户ID")
     private UUID userId;
 
+    /** Nullable for legacy sessions; new daily sessions use the server-local date. */
+    private java.time.LocalDate dayKey;
+
+    /** Timezone used to resolve dayKey (new sessions use Asia/Shanghai). */
+    private String timezone;
+
     /**
      * 会话标题（取首条用户提问截断，前端列表展示）
      */

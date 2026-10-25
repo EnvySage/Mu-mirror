@@ -43,6 +43,9 @@ public class ConversationHistory {
     @Schema(description = "关联用户ID")
     private UUID userId;
 
+    @TableField(typeHandler = UuidTypeHandler.class)
+    private UUID runId;
+
     /**
      * 角色：user / assistant
      */
@@ -75,6 +78,9 @@ public class ConversationHistory {
     @Schema(description = "对话文件卡（assistant 消息）")
     private List<Map<String, Object>> vaultRefs;
 
+    @TableField(typeHandler = JsonbTypeHandlerListMap.class)
+    private List<Map<String, Object>> createdRecords;
+
     /**
      * 兜底消息标记（chat-loop-design.md §6.2）：true = 这条 assistant 消息是系统兜底文案，
      * <b>不进后续轮次的历史上下文</b>（{@code buildChatRequest} 按此列过滤）。
@@ -86,6 +92,9 @@ public class ConversationHistory {
     @TableField("is_fallback")
     @Schema(description = "是否系统兜底文案（true 不进历史上下文）", example = "false")
     private Boolean isFallback;
+
+    @TableField(value = "context_source_message_ids", typeHandler = org.xianshen.mumirrorb.common.handler.JsonNodeTypeHandler.class)
+    private com.fasterxml.jackson.databind.JsonNode contextSourceMessageIds;
 
     @Schema(description = "创建时间")
     private OffsetDateTime createdAt;

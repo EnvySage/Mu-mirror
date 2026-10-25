@@ -328,4 +328,83 @@ public interface ProfileSnapshotMapper extends BaseMapper<ProfileSnapshot> {
               AND target.id IN (SELECT snapshot_id FROM affected)
             """)
     int invalidateUntrackedForUser(@Param("userId") java.util.UUID userId);
+
+    @Update("""
+            <script>
+            WITH RECURSIVE affected(snapshot_id) AS (
+                SELECT si.snapshot_id
+                FROM snapshot_inputs si
+                JOIN profile_snapshots source_snapshot ON source_snapshot.id = si.snapshot_id
+                WHERE source_snapshot.user_id = #{userId}::uuid
+                  AND si.input_kind = 'chat_message'
+                  AND si.input_id IN
+                  <foreach collection='sourceMessageIds' item='sourceMessageId' open='(' separator=',' close=')'>
+                    #{sourceMessageId}
+                  </foreach>
+                UNION
+                SELECT child.snapshot_id
+                FROM snapshot_inputs child
+                JOIN affected parent
+                  ON child.input_kind = 'snapshot'
+                 AND child.input_id = parent.snapshot_id
+                JOIN profile_snapshots child_snapshot ON child_snapshot.id = child.snapshot_id
+                WHERE child_snapshot.user_id = #{userId}::uuid
+            )
+            UPDATE profile_snapshots target
+            SET invalidated = TRUE,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidated_reason = #{reason}
+            WHERE target.user_id = #{userId}::uuid
+              AND target.invalidated = FALSE
+              AND target.id IN (SELECT snapshot_id FROM affected)
+            </script>
+            """)
+    int invalidateTrackedFromChatSources(@Param("userId") UUID userId,
+                                         @Param("sourceMessageIds") List<Long> sourceMessageIds,
+                                         @Param("reason") String reason);
+
+    @Update("""
+            WITH RECURSIVE affected(snapshot_id) AS (
+                SELECT id
+                FROM profile_snapshots
+                WHERE user_id = #{userId}::uuid
+                  AND chat_lineage_known = FALSE
+                UNION
+                SELECT child.snapshot_id
+                FROM snapshot_inputs child
+                JOIN affected parent
+                  ON child.input_kind = 'snapshot'
+                 AND child.input_id = parent.snapshot_id
+                JOIN profile_snapshots child_snapshot ON child_snapshot.id = child.snapshot_id
+                WHERE child_snapshot.user_id = #{userId}::uuid
+            )
+            UPDATE profile_snapshots target
+            SET invalidated = TRUE,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidated_reason = 'forgotten_chat_lineage_unknown'
+            WHERE target.user_id = #{userId}::uuid
+              AND target.invalidated = FALSE
+              AND target.id IN (SELECT snapshot_id FROM affected)
+            """)
+    int invalidateUnknownChatLineageForUser(@Param("userId") UUID userId);
+
+    @Update("UPDATE profile_snapshots SET chat_lineage_known = TRUE WHERE id = #{snapshotId}")
+    int markChatLineageKnown(@Param("snapshotId") Long snapshotId);
+
+    @Select("""
+            <script>
+            SELECT EXISTS (
+                SELECT 1
+                FROM chat_source_exclusions
+                WHERE user_id = #{userId}::uuid
+                  AND source_kind = 'chat_message'
+                  AND source_id IN
+                  <foreach collection='sourceMessageIds' item='sourceMessageId' open='(' separator=',' close=')'>
+                    #{sourceMessageId}
+                  </foreach>
+            )
+            </script>
+            """)
+    boolean hasForgottenChatSources(@Param("userId") UUID userId,
+                                    @Param("sourceMessageIds") List<Long> sourceMessageIds);
 }

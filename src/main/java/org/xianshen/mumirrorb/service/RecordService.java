@@ -55,6 +55,14 @@ public interface RecordService {
     RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
                            List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions);
 
+    RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                           List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions,
+                           UUID actionId, Integer actionExecutionVersion);
+
+    RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds, List<Long> todoChunkIds,
+                           List<TodoResolutionDTO> resolutions, UUID actionId, Integer actionExecutionVersion,
+                           List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments, Long axesVersion);
+
     /**
      * 软删除记录
      */

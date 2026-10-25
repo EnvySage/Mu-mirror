@@ -61,7 +61,8 @@ public interface ChatSearchMapper {
               AND r.deleted_at IS NULL
               AND r.status = 'done'
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.classified_segment IS NOT NULL
               <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
@@ -69,7 +70,7 @@ public interface ChatSearchMapper {
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
             ORDER BY r.created_at DESC
-            LIMIT #{limit}
+            LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
     List<RetrievedChunkDTO> searchStructured(@Param("userId") UUID userId,
@@ -78,7 +79,78 @@ public interface ChatSearchMapper {
                                              @Param("moodArray") String moodArray,
                                              @Param("timeStart") OffsetDateTime timeStart,
                                              @Param("timeEnd") OffsetDateTime timeEnd,
+                                             @Param("limit") int limit,
+                                             @Param("offset") int offset);
+
+    /** 兼容旧调用：不翻页。 */
+    default List<RetrievedChunkDTO> searchStructured(UUID userId, String contentType, List<String> moods,
+                                                     String moodArray, OffsetDateTime timeStart,
+                                                     OffsetDateTime timeEnd, int limit) {
+        return searchStructured(userId, contentType, moods, moodArray, timeStart, timeEnd, limit, 0);
+    }
+
+    /** 按记录 ID 读取单条已授权记录的片段（用户明确指向某条记录时使用）。 */
+    @Select("""
+            SELECT c.record_id,
+                   c.segment AS content,
+                   c.metadata->>'title'           AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id                AS vault_item_id,
+                   -1.0 AS score
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND c.record_id = #{recordId}
+              AND r.deleted_at IS NULL
+              AND r.status = 'done'
+              AND r.source <> 'system'
+              AND (r.source <> 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment <> ''))
+              AND (r.source <> 'vault' OR c.metadata->>'keyChunk' = 'true')
+              AND c.classified_segment IS NOT NULL
+            ORDER BY c.id
+            LIMIT #{limit}
+            """)
+    List<RetrievedChunkDTO> searchByRecordId(@Param("userId") UUID userId,
+                                             @Param("recordId") Long recordId,
                                              @Param("limit") int limit);
+
+    /** 关键词模式：正文/标题/原文的 ILIKE 匹配，按时间倒序。 */
+    @Select("""
+            <script>
+            SELECT c.record_id,
+                   c.segment AS content,
+                   c.metadata->>'title'           AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id                AS vault_item_id,
+                   -1.0 AS score
+            FROM chunks c
+            JOIN records r ON r.id = c.record_id
+            WHERE c.user_id = #{userId}::uuid
+              AND r.deleted_at IS NULL
+              AND r.status = 'done'
+              AND r.source &lt;&gt; 'system'
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
+              AND c.classified_segment IS NOT NULL
+              AND (c.segment ILIKE '%' || #{keyword} || '%'
+                   OR c.content ILIKE '%' || #{keyword} || '%'
+                   OR COALESCE(c.metadata->>'title', '') ILIKE '%' || #{keyword} || '%')
+              <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
+              <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
+            ORDER BY r.created_at DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<RetrievedChunkDTO> searchKeyword(@Param("userId") UUID userId,
+                                          @Param("keyword") String keyword,
+                                          @Param("timeStart") OffsetDateTime timeStart,
+                                          @Param("timeEnd") OffsetDateTime timeEnd,
+                                          @Param("limit") int limit,
+                                          @Param("offset") int offset);
 
     /**
      * SEMANTIC 路由：pgvector 余弦距离检索
@@ -119,7 +191,8 @@ public interface ChatSearchMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
@@ -169,7 +242,8 @@ public interface ChatSearchMapper {
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
+                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL

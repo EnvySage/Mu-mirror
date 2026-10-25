@@ -58,6 +58,8 @@ class GlossaryServiceTest {
     private org.xianshen.mumirrorb.mapper.RecordMapper recordMapper;
     @Mock
     private AiGrpcClient aiGrpcClient;
+    @Mock
+    private org.xianshen.mumirrorb.mapper.AgentRunMapper agentRunMapper;
 
     private GlossaryServiceImpl glossaryService;
 
@@ -68,7 +70,7 @@ class GlossaryServiceTest {
 
     @BeforeEach
     void setUp() {
-        glossaryService = new GlossaryServiceImpl(termMapper, chunkMapper, recordMapper, aiGrpcClient);
+        glossaryService = new GlossaryServiceImpl(termMapper, chunkMapper, recordMapper, aiGrpcClient, agentRunMapper);
         org.mockito.Mockito.doReturn(true).when(aiGrpcClient).hasLlmConfig(USER_ID);
         org.mockito.Mockito.doReturn(CommonProto.LlmConfig.newBuilder().setModel("test-model").build()).when(aiGrpcClient).buildLlmConfigFor(USER_ID);
         org.mockito.Mockito.doReturn(List.of()).when(termMapper).selectByUser(USER_ID);

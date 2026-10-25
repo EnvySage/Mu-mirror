@@ -28,7 +28,8 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             """)
@@ -49,6 +50,7 @@ public interface DailySummaryMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'contentType')
@@ -73,6 +75,7 @@ public interface DailySummaryMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'mood')
@@ -94,7 +97,8 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE)
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id))
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             GROUP BY 1
@@ -115,21 +119,20 @@ public interface DailySummaryMapper {
      * INNER JOIN chunks 排 orphan + records 侧 source='user'/status='done'/未删除）。</p>
      */
     @Select("""
-            SELECT COALESCE(c.metadata->>'title', t.title) AS title,
-                   c.metadata->>'summary' AS summary
+            SELECT t.title AS title,
+                   COALESCE(t.notes, c.metadata->>'summary') AS summary
             FROM todo_registry t
-            JOIN chunks c ON c.id = t.source_chunk_id
-            JOIN records r ON r.id = c.record_id
+            LEFT JOIN chunks c ON c.id = t.source_chunk_id
+            LEFT JOIN records r ON r.id = c.record_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
               AND t.current_status != 'completed'
-              AND r.deleted_at IS NULL
-              AND r.source = 'user'
-              AND r.status = 'done'
-              AND c.todo_approved = TRUE
-              AND r.created_at >= #{dayStart}
-              AND r.created_at < #{dayEnd}
-            ORDER BY r.created_at DESC
+              AND (t.origin_kind = 'direct' OR (t.origin_kind = 'record'
+                   AND r.deleted_at IS NULL AND r.source = 'user' AND r.status = 'done'
+                   AND c.todo_approved = TRUE AND c.user_id = t.user_id AND r.user_id = t.user_id))
+              AND COALESCE(r.created_at, t.created_at) >= #{dayStart}
+              AND COALESCE(r.created_at, t.created_at) < #{dayEnd}
+            ORDER BY COALESCE(r.created_at, t.created_at) DESC
             LIMIT 20
             """)
     List<Map<String, Object>> selectOpenTodos(@Param("userId") UUID userId,
@@ -153,6 +156,7 @@ public interface DailySummaryMapper {
               AND r.source = 'user'
               AND r.status = 'done'
               AND c.ai_memory_approved = TRUE
+              AND record_memory_is_complete(r.id)
               AND c.segment IS NOT NULL
               AND c.segment <> ''
               AND r.created_at >= #{dayStart}

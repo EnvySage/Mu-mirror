@@ -18,6 +18,12 @@ import java.util.UUID;
 @Mapper
 public interface RecordMapper extends BaseMapper<Record> {
 
+    @Select("SELECT * FROM records WHERE id = #{id} AND user_id = #{userId}::uuid AND source = 'user' AND deleted_at IS NULL FOR UPDATE")
+    Record selectOwnedForUpdate(@Param("userId") UUID userId, @Param("id") Long id);
+
+    @Select("SELECT * FROM records WHERE id = #{id} AND deleted_at IS NULL FOR UPDATE")
+    Record selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * 查询指定月份内每天的有效记录数（用于日历标记）
      *
@@ -35,8 +41,7 @@ public interface RecordMapper extends BaseMapper<Record> {
               AND source = 'user'
               AND status != 'failed'
               AND created_at >= #{monthStart}
-              AND created_at < #{monthEnd}
-            GROUP BY TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')
+              AND created_at < #{monthEnd}            GROUP BY TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')
             """)
     List<CalendarDayVO> countByDay(@Param("userId") UUID userId,
                                    @Param("monthStart") OffsetDateTime monthStart,

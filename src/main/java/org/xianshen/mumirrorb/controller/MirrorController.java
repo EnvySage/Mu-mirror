@@ -21,11 +21,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.xianshen.mumirrorb.agent.AgentRunService;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.pojo.DTO.ChatRequestDTO;
 import org.xianshen.mumirrorb.pojo.R;
 import org.xianshen.mumirrorb.pojo.VO.ChatSessionVO;
+import org.xianshen.mumirrorb.pojo.VO.TodayChatVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorProfileVO;
 import org.xianshen.mumirrorb.pojo.VO.MirrorStatsVO;
 import org.xianshen.mumirrorb.pojo.VO.SnapshotPageVO;
@@ -47,6 +49,7 @@ public class MirrorController {
 
     private final MirrorService mirrorService;
     private final ChatService chatService;
+    private final AgentRunService agentRunService;
     private final org.xianshen.mumirrorb.config.MirrorProperties mirrorProperties;
 
     private UUID getCurrentUserId() {
@@ -250,11 +253,18 @@ public class MirrorController {
         // 长超时（chat-loop-design.md §4.3）：循环预算 + Chat 流式 + 余量，配置化以便与
         // vault.plan-tools-timeout-ms / loop-budget-ms 一起对齐（硬编码 120s 曾小于单步超时 135s）
         SseEmitter emitter = new SseEmitter(mirrorProperties.getSseTimeoutMs());
-        // 客户端断开/超时时优雅终结，避免 Tomcat 转发 /error 触发安全链异常噪音
-        emitter.onCompletion(() -> { });
-        emitter.onTimeout(emitter::complete);
-        emitter.onError(e -> { });
-        chatService.chat(userId, dto, emitter);
+        org.xianshen.mumirrorb.agent.StartRunResult run = agentRunService.startOrFindRun(userId, dto);
+        emitter.onCompletion(() -> {
+            if (run.created()) agentRunService.cancelRun(run.run().getRunId(), userId, "sse_closed");
+        });
+        emitter.onTimeout(() -> {
+            if (run.created()) agentRunService.cancelRun(run.run().getRunId(), userId, "sse_timeout");
+            emitter.complete();
+        });
+        emitter.onError(e -> {
+            if (run.created()) agentRunService.cancelRun(run.run().getRunId(), userId, "client_disconnect");
+        });
+        agentRunService.dispatch(run, emitter);
         return emitter;
     }
 
@@ -266,6 +276,28 @@ public class MirrorController {
     public R<List<ChatSessionVO>> sessions() {
         UUID userId = getCurrentUserId();
         return R.ok("查询成功", chatService.listSessions(userId));
+    }
+
+    /** Read today's daily session without creating one; also schedules ended-day summaries in background. */
+    @Operation(summary = "查询今日聊天", description = "只读取今日会话；不存在时 session 为空，并返回已持久化的结束日期总结。")
+    @GetMapping("/sessions/today")
+    public R<TodayChatVO> todaySession() {
+        return R.ok("查询成功", chatService.today(getCurrentUserId(), false));
+    }
+
+    /** Idempotently resolve or create today's session. */
+    @Operation(summary = "解析今日聊天", description = "幂等创建/返回今日会话，日期由 Asia/Shanghai 服务端确定。")
+    @PostMapping("/sessions/today")
+    public R<TodayChatVO> resolveTodaySession() {
+        return R.ok("今日会话已就绪", chatService.today(getCurrentUserId(), true));
+    }
+
+    /** Retry one failed persisted daily summary asynchronously. */
+    @Operation(summary = "重试每日总结", description = "重试指定已结束日期的聊天总结，不阻塞今日聊天。")
+    @PostMapping("/sessions/{id}/summary/retry")
+    public R<Void> retryDaySummary(@PathVariable UUID id) {
+        chatService.retryDaySummary(getCurrentUserId(), id, java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")));
+        return R.ok("总结重试已排队", null);
     }
 
     /**
@@ -297,6 +329,7 @@ public class MirrorController {
             @Parameter(description = "会话ID", required = true)
             @PathVariable UUID id) {
         UUID userId = getCurrentUserId();
+        agentRunService.cancelActiveForSession(id, userId);
         chatService.deleteSession(id, userId);
         return R.ok("会话已删除", null);
     }

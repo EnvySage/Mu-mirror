@@ -7,6 +7,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.xianshen.mumirrorb.common.enums.RecordStatus;
+import org.xianshen.mumirrorb.common.enums.RecordMemoryState;
 import org.xianshen.mumirrorb.common.enums.ResultCode;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
 import org.xianshen.mumirrorb.grpc.AiGrpcClient;
@@ -36,6 +37,8 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -45,6 +48,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class RecordServiceImpl implements RecordService {
+    @org.springframework.beans.factory.annotation.Autowired private org.xianshen.mumirrorb.mapper.GrowthEntryMapper growthEntries;
+    @org.springframework.beans.factory.annotation.Autowired private org.xianshen.mumirrorb.service.GrowthService growthService;
 
     private final RecordMapper recordMapper;
     private final ChunkMapper chunkMapper;
@@ -74,6 +79,20 @@ public class RecordServiceImpl implements RecordService {
         if (dto.getContent() == null || dto.getContent().isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
         }
+        if (dto.isRequestAiProcessing()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "AI 整理必须先准备可审核的操作卡，请调用 /assistant/actions/prepare");
+        }
+
+        if (dto.getCorrectionOfRecordId() != null) {
+            Record source = recordMapper.selectOne(new LambdaQueryWrapper<Record>()
+                    .eq(Record::getId, dto.getCorrectionOfRecordId())
+                    .eq(Record::getUserId, userId).eq(Record::getSource, "user")
+                    .isNull(Record::getDeletedAt));
+            if (source == null || (source.getMemoryState() != RecordMemoryState.READY
+                    && source.getMemoryState() != RecordMemoryState.DISABLED))
+                throw new BusinessException(ResultCode.PARAM_ERROR, "更正来源必须是本人已确认或已停止使用的只读记录");
+        }
 
         Record record = Record.builder()
                 .userId(userId)
@@ -82,6 +101,8 @@ public class RecordServiceImpl implements RecordService {
                 .status(dto.isRequestAiProcessing() ? RecordStatus.PROCESSING : RecordStatus.RECORD_ONLY)
                 .aiProcessingAuthorized(dto.isRequestAiProcessing())
                 .processingVersion(dto.isRequestAiProcessing() ? 1 : 0)
+                .memoryState(RecordMemoryState.NONE)
+                .correctionOfRecordId(dto.getCorrectionOfRecordId())
                 .userReviewed(false)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
@@ -102,22 +123,8 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO organize(Long recordId, UUID userId) {
-        Record record = recordMapper.selectOne(new LambdaQueryWrapper<Record>()
-                .eq(Record::getId, recordId).eq(Record::getUserId, userId)
-                .eq(Record::getSource, "user").isNull(Record::getDeletedAt));
-        if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
-        if (record.getStatus() != RecordStatus.RECORD_ONLY) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有仅记录状态可以请求 AI 整理");
-        }
-        int version = (record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1;
-        record.setAiProcessingAuthorized(true);
-        record.setProcessingVersion(version);
-        record.setStatus(RecordStatus.PROCESSING);
-        record.setFailReason(null);
-        record.setUpdatedAt(OffsetDateTime.now());
-        recordMapper.updateById(record);
-        eventPublisher.publishEvent(new RecordCreatedEvent(this, recordId, userId, version));
-        return toVO(record);
+        throw new BusinessException(ResultCode.PARAM_ERROR,
+                "旧的直接整理入口已关闭，请先通过操作卡准备候选并由用户确认");
     }
 
     @Override
@@ -125,11 +132,10 @@ public class RecordServiceImpl implements RecordService {
     public RecordVO updateRaw(Long recordId, String content, UUID userId) {
         if (content == null || content.isBlank())
             throw new BusinessException(ResultCode.PARAM_ERROR, "内容不能为空");
-        Record record = recordMapper.selectOne(new LambdaQueryWrapper<Record>()
-                .eq(Record::getId, recordId).eq(Record::getUserId, userId)
-                .eq(Record::getSource, "user").isNull(Record::getDeletedAt));
+        Record record = recordMapper.selectOwnedForUpdate(userId, recordId);
         if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
-        if (record.getStatus() != RecordStatus.RECORD_ONLY || Boolean.TRUE.equals(record.getAiProcessingAuthorized()))
+        if (record.getStatus() != RecordStatus.RECORD_ONLY || Boolean.TRUE.equals(record.getAiProcessingAuthorized())
+                || (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE))
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有未授权 AI 的仅记录可以编辑原文");
         record.setContent(content);
         record.setUpdatedAt(OffsetDateTime.now());
@@ -165,6 +171,18 @@ public class RecordServiceImpl implements RecordService {
                 .orderByDesc(Record::getCreatedAt);
 
         List<Record> records = recordMapper.selectList(wrapper);
+        if (queryDTO.getTags() != null && !queryDTO.getTags().isEmpty()) {
+            Set<String> requested = queryDTO.getTags().stream().filter(Objects::nonNull).map(String::trim)
+                    .filter(s -> !s.isBlank()).collect(java.util.stream.Collectors.toSet());
+            if (!requested.isEmpty()) {
+                Set<Long> matching = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                                .eq(Chunk::getUserId, userId).in(Chunk::getRecordId, records.stream().map(Record::getId).toList()))
+                        .stream().filter(c -> c.getMetadata() != null && tagsOf(c.getMetadata()) instanceof List<?> tags
+                                && tags.stream().map(String::valueOf).anyMatch(requested::contains))
+                        .map(Chunk::getRecordId).collect(java.util.stream.Collectors.toSet());
+                records = records.stream().filter(r -> matching.contains(r.getId())).toList();
+            }
+        }
         log.info("查询到 {} 条记录，用户: {}, 日期范围: {} ~ {}", records.size(), userId, startDate, endDate);
 
         return records.stream()
@@ -208,6 +226,9 @@ public class RecordServiceImpl implements RecordService {
         record.setDeletedAt(OffsetDateTime.now());
         record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
         recordMapper.updateById(record);
+        if (growthEntries != null) growthEntries.delete(new LambdaQueryWrapper<org.xianshen.mumirrorb.pojo.DO.GrowthEntry>()
+                .eq(org.xianshen.mumirrorb.pojo.DO.GrowthEntry::getUserId, userId)
+                .eq(org.xianshen.mumirrorb.pojo.DO.GrowthEntry::getSourceRecordId, recordId));
         snapshotLineageService.invalidateSource(userId, "record", recordId, "record_deleted");
         log.info("记录已软删除，ID: {}, 用户: {}", recordId, userId);
     }
@@ -215,36 +236,7 @@ public class RecordServiceImpl implements RecordService {
     @Override
     @Transactional
     public RecordVO retry(Long recordId, UUID userId) {
-        log.info("============ retry 开始，记录ID: {}, 用户: {} ============", recordId, userId);
-
-        Record record = recordMapper.selectOne(
-                new LambdaQueryWrapper<Record>()
-                        .eq(Record::getId, recordId)
-                        .eq(Record::getUserId, userId)
-                        .isNull(Record::getDeletedAt)
-        );
-
-        if (record == null) {
-            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
-        }
-
-        // 裁决 #21：仅 FAILED 可重试（重跑分类管道）
-        if (record.getStatus() != RecordStatus.FAILED) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "只有处理失败的记录才能重试");
-        }
-        if (!Boolean.TRUE.equals(record.getAiProcessingAuthorized())) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "该记录尚未获得 AI 整理授权");
-        }
-
-        record.setStatus(RecordStatus.PROCESSING);
-        record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
-        record.setFailReason(null); // 清除上次失败原因
-        record.setUpdatedAt(OffsetDateTime.now());
-        recordMapper.updateById(record);
-
-        eventPublisher.publishEvent(new RecordCreatedEvent(this, record.getId(), userId, record.getProcessingVersion()));
-        log.info("记录已重置为 processing 并重新发布管道事件，ID: {}", recordId);
-        return toVO(record);
+        throw new BusinessException(ResultCode.PARAM_ERROR, "请通过记录重试操作卡准备候选，并由用户确认后执行");
     }
 
     @Override
@@ -257,14 +249,28 @@ public class RecordServiceImpl implements RecordService {
     @Transactional
     public RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
                                   List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions) {
-        Record record = recordMapper.selectOne(
-                new LambdaQueryWrapper<Record>()
-                        .eq(Record::getId, recordId)
-                        .eq(Record::getUserId, userId)
-                        .eq(Record::getSource, "user")
-                        .isNull(Record::getDeletedAt)
-        );
+        return confirmReview(recordId, userId, aiMemoryChunkIds, todoChunkIds, resolutions, null, null);
+    }
+
+    @Override
+    @Transactional
+    public RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                                  List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions,
+                                  UUID actionId, Integer actionExecutionVersion) {
+        return confirmReview(recordId,userId,aiMemoryChunkIds,todoChunkIds,resolutions,actionId,actionExecutionVersion,null,null);
+    }
+
+    @Override
+    @Transactional
+    public RecordVO confirmReview(Long recordId, UUID userId, List<Long> aiMemoryChunkIds,
+                                  List<Long> todoChunkIds, List<TodoResolutionDTO> resolutions,
+                                  UUID actionId, Integer actionExecutionVersion,
+                                  List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments, Long axesVersion) {
+        Record record = recordMapper.selectOwnedForUpdate(userId, recordId);
         if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
+        if (record.getMemoryState() == RecordMemoryState.PENDING || record.getMemoryState() == RecordMemoryState.READY
+                || record.getMemoryState() == RecordMemoryState.DISABLED)
+            throw new BusinessException(ResultCode.PARAM_ERROR, "该记录的已确认正文不可再次修改");
         if (record.getStatus() != RecordStatus.REVIEWING && record.getStatus() != RecordStatus.DONE) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有已完成 AI 整理的记录才能确认片段");
         }
@@ -346,14 +352,55 @@ public class RecordServiceImpl implements RecordService {
             if (needsEmbedding) {
                 if (chunk.getContentVersion() == null) chunk.setContentVersion(1L);
                 chunkEmbeddingJobService.enqueue(chunk);
+                Long jobId = chunkEmbeddingJobService.latestJobId(chunk.getId(), userId);
+                if (jobId != null) {
+                    if (record.getQueuedEmbeddingJobIds() == null) record.setQueuedEmbeddingJobIds(new java.util.ArrayList<>());
+                    record.getQueuedEmbeddingJobIds().add(jobId);
+                }
             }
             if (!approveMemory) chunkMapper.clearEmbedding(chunk.getId(), userId);
         }
 
-        if (record.getStatus() == RecordStatus.REVIEWING) record.setStatus(RecordStatus.DONE);
+        int generation = record.getProcessingVersion() == null ? 0 : record.getProcessingVersion();
+        if (approvedIds.isEmpty()) {
+            record.setMemoryState(RecordMemoryState.NONE);
+            record.setAiProcessingAuthorized(false);
+            record.setStatus(RecordStatus.RECORD_ONLY);
+            record.setMemoryActionId(null);
+            record.setMemoryActionExecutionVersion(null);
+        } else {
+            boolean selectedChunksReady = chunks.stream().filter(c -> approvedIds.contains(c.getId()))
+                    .allMatch(c -> "ready".equalsIgnoreCase(c.getEmbeddingStatus())
+                            && c.getEmbedding() != null && !c.getEmbedding().isEmpty());
+            record.setMemoryState(selectedChunksReady ? RecordMemoryState.READY : RecordMemoryState.PENDING);
+            record.setAiProcessingAuthorized(true);
+            record.setStatus(RecordStatus.DONE);
+            record.setProcessingVersion(generation + 1);
+            record.setMemoryActionId(selectedChunksReady ? null : actionId);
+            record.setMemoryActionExecutionVersion(selectedChunksReady ? null : actionExecutionVersion);
+        }
         record.setUserReviewed(true);
         record.setUpdatedAt(OffsetDateTime.now());
+        if (approvedIds.isEmpty() || growthAdjustments == null || growthAdjustments.isEmpty()) {
+            record.setGrowthSuggestions("[]"); record.setGrowthAxesVersion(0L);
+        } else {
+            long currentAxesVersion = growthService.axesVersion(userId);
+            if (axesVersion == null || axesVersion != currentAxesVersion)
+                throw new BusinessException(409, "成长维度已变化，请刷新审核建议");
+            try { record.setGrowthSuggestions(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(growthAdjustments)); }
+            catch (Exception e) { throw new BusinessException(400, "成长调整格式无效"); }
+            record.setGrowthAxesVersion(axesVersion);
+        }
         recordMapper.updateById(record);
+        if (record.getMemoryState() == RecordMemoryState.READY && record.getGrowthSuggestions() != null
+                && !"[]".equals(record.getGrowthSuggestions()) && growthService != null) {
+            try {
+                var adjustments = new com.fasterxml.jackson.databind.ObjectMapper().readValue(record.getGrowthSuggestions(),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO>>() {});
+                growthService.applyConfirmedRecord(userId, recordId, actionId, adjustments, record.getGrowthAxesVersion());
+            } catch (RuntimeException e) { throw e; }
+            catch (Exception e) { throw new BusinessException(400, "成长调整格式无效"); }
+        }
         for (Long revokedChunkId : revokedMemoryChunkIds) {
             snapshotLineageService.invalidateSource(userId, "chunk", revokedChunkId, "memory_revoked");
         }
@@ -388,6 +435,28 @@ public class RecordServiceImpl implements RecordService {
     /**
      * DO → VO 转换（包含关联的 Chunk 列表）
      */
+    /** 自由标签统一键：新数据 userTags，兼容旧 user_tags / tags。 */
+    private Object tagsOf(Map<String, Object> metadata) {
+        Object tags = metadata.get("userTags");
+        if (tags instanceof List) return tags;
+        tags = metadata.get("user_tags");
+        if (tags instanceof List) return tags;
+        return metadata.get("tags");
+    }
+
+    /** 解析记录上的五维成长建议；历史坏数据按空处理，不影响记录详情。 */
+    private List<Object> growthSuggestionsOf(Record record) {
+        String raw = record.getGrowthSuggestions();
+        if (raw == null || raw.isBlank()) return List.of();
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(raw, new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {});
+        } catch (Exception e) {
+            log.warn("记录成长建议解析失败，按空处理，recordId={}: {}", record.getId(), e.getMessage());
+            return List.of();
+        }
+    }
+
     private RecordVO toVO(Record record) {
         // 查询关联的 Chunks
         List<Chunk> chunks = chunkMapper.selectList(
@@ -405,6 +474,13 @@ public class RecordServiceImpl implements RecordService {
                 .segments(chunkVOs.stream().map(ChunkVO::getSegment).toList())
                 .status(record.getStatus())
                 .aiProcessingAuthorized(record.getAiProcessingAuthorized())
+                .memoryState(record.getMemoryState() == null ? RecordMemoryState.NONE : record.getMemoryState())
+                .processingVersion(record.getProcessingVersion())
+                .correctionOfRecordId(record.getCorrectionOfRecordId())
+                .memoryFailureReason(record.getMemoryFailureReason())
+                .queuedEmbeddingJobIds(record.getQueuedEmbeddingJobIds())
+                .growthSuggestions(growthSuggestionsOf(record))
+                .growthAxesVersion(record.getGrowthAxesVersion())
                 .userReviewed(record.getUserReviewed())
                 .failReason(record.getFailReason())
                 .chunks(chunkVOs)
