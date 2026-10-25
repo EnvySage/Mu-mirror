@@ -76,14 +76,51 @@ class AgentEventAdapterTest {
     }
 
     @Test
-    void rejectsSkippedSourceNumbers() {
+    void acceptsSkippedSourceNumbersInAnswerOrder() {
         AgentProto.AgentCompleted completed = AgentProto.AgentCompleted.newBuilder()
                 .setAnswerText("")
-                .addSources(MirrorChatProto.Source.newBuilder().setN(2).setRecordId(44).setQuote("q").setDate("2026-10-20"))
+                .addSources(source(6, 44))
+                .addSources(source(3, 45))
                 .build();
+
+        adapter.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString())
+                .setSeq(1).setCompleted(completed).build());
+
+        ChatFinalResult result = adapter.result();
+        assertEquals(2, result.sources().size());
+        assertEquals(6, result.sources().get(0).get("n"));
+        assertEquals(44L, result.sources().get(0).get("record_id"));
+        assertEquals(3, result.sources().get(1).get("n"));
+    }
+
+    @Test
+    void rejectsNonPositiveSourceNumber() {
         assertThrows(AgentEventAdapter.AgentProtocolException.class,
                 () -> adapter.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString())
-                        .setSeq(1).setCompleted(completed).build()));
+                        .setSeq(1).setCompleted(AgentProto.AgentCompleted.newBuilder()
+                                .setAnswerText("").addSources(source(0, 44)).build()).build()));
+    }
+
+    @Test
+    void rejectsDuplicateSourceNumber() {
+        assertThrows(AgentEventAdapter.AgentProtocolException.class,
+                () -> adapter.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString())
+                        .setSeq(1).setCompleted(AgentProto.AgentCompleted.newBuilder()
+                                .setAnswerText("").addSources(source(1, 44)).addSources(source(1, 45)).build()).build()));
+    }
+
+    @Test
+    void rejectsSourceWithoutRecordId() {
+        assertThrows(AgentEventAdapter.AgentProtocolException.class,
+                () -> adapter.accept(AgentProto.AgentEvent.newBuilder().setRunId(runId.toString())
+                        .setSeq(1).setCompleted(AgentProto.AgentCompleted.newBuilder()
+                                .setAnswerText("").addSources(source(1, 0)).build()).build()));
+    }
+
+    private MirrorChatProto.Source source(int n, long recordId) {
+        return MirrorChatProto.Source.newBuilder()
+                .setN(n).setRecordId(recordId).setQuote("q").setDate("2026-10-20")
+                .build();
     }
 
     @Test

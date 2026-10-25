@@ -211,7 +211,9 @@ public class AgentEventAdapter {
         }
         for (org.xianshen.mumirrorb.grpc.gen.MirrorChatProto.Source source : completed.getSourcesList()) {
             int n = source.getN();
-            if (n != sourceNumbers.size() + 1 || !sourceNumbers.add(n) || source.getRecordId() <= 0) {
+            // 引用编号是正文里的原始编号，只回被引用到的子集，允许跳号（[6][3][1]）。
+            // 消费方一律按 n 定位，不能用列表下标；这里只校验正整数、不重复、有记录 id。
+            if (n <= 0 || !sourceNumbers.add(n) || source.getRecordId() <= 0) {
                 throw new AgentProtocolException("Agent source numbering or record id is invalid");
             }
             sources.add(Map.of(
