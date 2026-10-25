@@ -21,8 +21,10 @@ public class ChatEngineProperties {
     private boolean createRecordEnabled = false;
 
     public boolean graphEnabled(UUID userId) {
-        return userId != null && "graph_v2".equalsIgnoreCase(engine)
-                && graphEnabledUserIds.stream().anyMatch(value -> userId.toString().equalsIgnoreCase(value.trim()));
+        if (userId == null || !"graph_v2".equalsIgnoreCase(engine)) return false;
+        // "*" 表示全量开启；其余按用户 id 白名单精确匹配（保留灰度与回滚能力）。
+        return graphEnabledUserIds.stream().map(String::trim)
+                .anyMatch(value -> "*".equals(value) || userId.toString().equalsIgnoreCase(value));
     }
 
     public boolean shadowMode() {
