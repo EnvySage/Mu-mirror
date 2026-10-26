@@ -82,4 +82,28 @@ class TarotExperienceDatabaseTest {
         assertEquals(409,assertThrows(BusinessException.class,()->service.updatePreferences(user,new PreferencesInput(true,7,false,false,defaults.version()))).getCode());
         assertEquals(400,assertThrows(BusinessException.class,()->service.updatePreferences(user,new PreferencesInput(true,100,false,false,changed.version()))).getCode());
     }
+    @Test void chatKeepsTasksClearAndOffersDailyCardOnlyOnce() throws Exception {
+        var service=at("2026-10-26T04:00:00Z"); service.drawDaily(user,UUID.randomUUID());
+        var session=UUID.randomUUID();db.update("INSERT INTO chat_sessions(id,user_id) VALUES(?,?)",session,user);
+        var chat=new org.xianshen.mumirrorb.service.TarotChatContextService(db,service,catalog,transactions.getTransactionManager());
+        var base=org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext.newBuilder().setCurrentDate("2026-10-26").build();
+        for(String task:List.of("写一个排序函数","帮我把待办标完成","查昨天的记录","今天的塔罗牌如何，帮我写代码"))
+            assertFalse(chat.attach(user,session,UUID.randomUUID(),task,base,false).hasDivination());
+        var pool=Executors.newFixedThreadPool(2);
+        try {
+            var results=pool.invokeAll(List.of(
+                (Callable<Boolean>)()->chat.attach(user,session,UUID.randomUUID(),"想尝试画画但怕不会",base,false).hasDivination(),
+                (Callable<Boolean>)()->chat.attach(user,session,UUID.randomUUID(),"想尝试画画但怕不会",base,false).hasDivination()));
+            assertEquals(1,(results.get(0).get()?1:0)+(results.get(1).get()?1:0));
+        } finally {pool.shutdownNow();}
+        assertTrue(chat.attach(user,session,UUID.randomUUID(),"今天抽到什么牌",base,false).hasDivination());
+        assertFalse(chat.attach(user,session,UUID.randomUUID(),"今天抽到什么牌",base,true).hasDivination());
+        chat.attach(user,session,UUID.randomUUID(),"不要提塔罗",base,false);
+        db.update("UPDATE tarot_chat_state SET last_offered_date=NULL WHERE session_id=?",session);
+        assertFalse(chat.attach(user,session,UUID.randomUUID(),"想尝试画画",base,false).hasDivination());
+        chat.attach(user,session,UUID.randomUUID(),"恢复塔罗",base,false);
+        assertTrue(chat.attach(user,session,UUID.randomUUID(),"想尝试画画",base,false).hasDivination());
+        db.update("DELETE FROM chat_sessions WHERE id=?",session);
+        assertEquals(0,db.queryForObject("SELECT count(*) FROM tarot_chat_state WHERE session_id=?",Integer.class,session));
+    }
 }
