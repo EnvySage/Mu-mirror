@@ -29,6 +29,15 @@ class TarotExperienceDatabaseTest {
     @BeforeAll static void database() throws Exception {
         var ds = new DriverManagerDataSource(System.getenv("MIRROR_TEST_DB_URL"),
                 System.getenv("MIRROR_TEST_DB_USERNAME"), System.getenv("MIRROR_TEST_DB_PASSWORD"));
+        var admin = new JdbcTemplate(ds);
+        String database = admin.queryForObject("SELECT current_database()", String.class);
+        if(database == null || !(database.startsWith("codex_assistant_growth_test_") || database.equals("mirror_tarot_test")))
+            throw new IllegalStateException("Tarot tests require an explicitly named disposable database");
+        String schema = "tarot_fixture_" + UUID.randomUUID().toString().replace("-", "");
+        admin.execute("CREATE SCHEMA " + schema);
+        var connectionProperties = new java.util.Properties();
+        connectionProperties.setProperty("currentSchema", schema);
+        ds.setConnectionProperties(connectionProperties);
         db = new JdbcTemplate(ds);
         // Minimal existing-table fixtures; the feature migration itself is executed unmodified.
         db.execute("CREATE TABLE IF NOT EXISTS users(id UUID PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL)");
