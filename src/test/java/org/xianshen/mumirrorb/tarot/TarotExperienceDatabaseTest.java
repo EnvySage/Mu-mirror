@@ -110,7 +110,7 @@ class TarotExperienceDatabaseTest {
         chat.attach(user,session,UUID.randomUUID(),"不要提塔罗",base,false);
         db.update("UPDATE tarot_chat_state SET last_offered_date=NULL WHERE session_id=?",session);
         assertFalse(chat.attach(user,session,UUID.randomUUID(),"想尝试画画",base,false).hasDivination());
-        chat.attach(user,session,UUID.randomUUID(),"恢复塔罗",base,false);
+        chat.attach(user,session,UUID.randomUUID(),"可以再提",base,false);
         assertTrue(chat.attach(user,session,UUID.randomUUID(),"想尝试画画",base,false).hasDivination());
         db.update("DELETE FROM chat_sessions WHERE id=?",session);
         assertEquals(0,db.queryForObject("SELECT count(*) FROM tarot_chat_state WHERE session_id=?",Integer.class,session));
