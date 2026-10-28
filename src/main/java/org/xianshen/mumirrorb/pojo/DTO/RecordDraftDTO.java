@@ -18,6 +18,7 @@ public class RecordDraftDTO {
     private String preparationError;
     private int axesVersion;
     private List<Object> growthSuggestions = new ArrayList<>();
+    private List<java.util.Map<String, Object>> todoSuggestions = new ArrayList<>();
     private List<Segment> segments = new ArrayList<>();
 
     @Data
@@ -32,5 +33,6 @@ public class RecordDraftDTO {
         private List<String> tags = new ArrayList<>();
         private String taskStatus;
         private boolean memoryEnabled;
+        private boolean todoEnabled;
     }
 }

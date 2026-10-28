@@ -227,6 +227,7 @@ public class RecordActionHandler implements ActionHandler {
         recordMapper.updateById(record);
 
         List<Long> approvedMemory = new ArrayList<>();
+        List<Long> approvedTodos = new ArrayList<>();
         for (RecordDraftDTO.Segment segment : draft.getSegments()) {
             Map<String, Object> metadata = new LinkedHashMap<>();
             if (segment.getTitle() != null) metadata.put("title", segment.getTitle());
@@ -242,6 +243,7 @@ public class RecordActionHandler implements ActionHandler {
                     .contentVersion(1L).embeddingStatus("not_requested").createdAt(OffsetDateTime.now()).build();
             chunkMapper.insert(chunk);
             if ("AI_ASSISTED".equals(draft.getMode()) || segment.isMemoryEnabled()) approvedMemory.add(chunk.getId());
+            if (segment.isTodoEnabled()) approvedTodos.add(chunk.getId());
         }
         List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments;
         try {
@@ -251,7 +253,7 @@ public class RecordActionHandler implements ActionHandler {
         } catch (Exception e) {
             throw new BusinessException(400, "成长建议格式无效");
         }
-        var confirmed = records.confirmReview(record.getId(), action.getUserId(), approvedMemory, List.of(),
+        var confirmed = records.confirmReview(record.getId(), action.getUserId(), approvedMemory, approvedTodos,
                 resolutions(payload), action.getActionId(), action.getExecutionVersion(),
                 growthAdjustments, (long) draft.getAxesVersion());
         ObjectNode result = json.createObjectNode().put("recordId", record.getId()).put("reviewed", true)
@@ -324,16 +326,17 @@ public class RecordActionHandler implements ActionHandler {
 
     private void validateDraftShape(JsonNode draft) {
         Set<String> allowed = Set.of("sourceRecordId", "sourceRecordVersion", "rawContent", "finalContent", "mode",
-                "privateInput", "preparationStatus", "preparationError", "axesVersion", "growthSuggestions", "segments");
+                "privateInput", "preparationStatus", "preparationError", "axesVersion", "growthSuggestions", "todoSuggestions", "segments");
         if (draft == null || !draft.isObject()) throw invalid("recordDraft 必须为对象");
         draft.fieldNames().forEachRemaining(field -> { if (!allowed.contains(field)) throw invalid("recordDraft 不允许字段: " + field); });
         if (draft.has("privateInput") && !draft.get("privateInput").isBoolean()) throw invalid("privateInput 必须为布尔值");
         if (draft.has("axesVersion") && !draft.get("axesVersion").isIntegralNumber()) throw invalid("axesVersion 必须为整数");
         JsonNode segments = draft.get("segments");
         if (segments != null && segments.isArray()) {
-            Set<String> segmentAllowed = Set.of("draftId", "text", "title", "summary", "contentType", "moods", "keywords", "tags", "taskStatus", "memoryEnabled");
+            Set<String> segmentAllowed = Set.of("draftId", "text", "title", "summary", "contentType", "moods", "keywords", "tags", "taskStatus", "memoryEnabled", "todoEnabled");
             for (JsonNode segment : segments) {
                 if (!segment.isObject()) throw invalid("片段必须为对象");
+                if (segment.has("todoEnabled") && !segment.get("todoEnabled").isBoolean()) throw invalid("todoEnabled 必须为布尔值");
                 segment.fieldNames().forEachRemaining(field -> { if (!segmentAllowed.contains(field)) throw invalid("片段不允许字段: " + field); });
             }
         }
@@ -360,6 +363,9 @@ public class RecordActionHandler implements ActionHandler {
             throw invalid("候选片段数量须为 1..20");
         int reviewedLength = 0;
         for (RecordDraftDTO.Segment segment : draft.getSegments()) {
+            if (segment != null && segment.isTodoEnabled() && (!"AI_ASSISTED".equals(draft.getMode())
+                    || !Set.of("todo", "plan").contains(Objects.toString(segment.getContentType(), ""))))
+                throw invalid("只有待办分类可授权加入侧栏待办");
             if (segment == null || segment.getText() == null || segment.getText().isBlank() || segment.getText().length() > 2000)
                 throw invalid("片段内容不能为空且不能超过 2000 字");
             reviewedLength += segment.getText().length();

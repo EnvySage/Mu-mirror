@@ -247,6 +247,7 @@ public class AiGrpcClient {
                     .setLlmConfig(llmConfig)
                     .setSingle(true)
                     .setGrowthContext(growthContext(userId))
+                    .addAllOpenTodos(todoHintTerms(userId))
                     .addAllRecentContext(recentContextHints(userId, excludeRecordId));
             if (referenceDate != null && !referenceDate.isBlank()) {
                 requestBuilder.setReferenceDate(referenceDate);

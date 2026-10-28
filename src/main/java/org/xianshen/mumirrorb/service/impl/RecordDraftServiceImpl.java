@@ -25,6 +25,8 @@ public class RecordDraftServiceImpl implements RecordDraftService {
     private static final ZoneId RECORD_ZONE = ZoneId.of("Asia/Shanghai");
     private final AiGrpcClient aiGrpcClient;
     private final SettingsService settingsService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
 
     @Override
     public RecordDraftDTO prepare(UUID userId, RecordDraftDTO input) {
@@ -64,6 +66,20 @@ public class RecordDraftServiceImpl implements RecordDraftService {
             String resolved = TimeSubstitutionApplier.apply(raw, item.getTimeSubstitutionsList());
             draft.setFinalContent(resolved);
             draft.setSegments(List.of(segment(item, resolved)));
+            if (item.hasRefersToTodo() && todoRegistryService != null) {
+                try {
+                    var reference = item.getRefersToTodo();
+                    var todo = todoRegistryService.ownedActive(userId, reference.getTodoId());
+                    String status = reference.getSuggestedStatus().toLowerCase(java.util.Locale.ROOT);
+                    if (List.of("not_started", "in_progress", "completed").contains(status)) {
+                        draft.setTodoSuggestions(List.of(java.util.Map.of("todoId", todo.getId(), "title", todo.getTitle(),
+                                "currentStatus", todo.getCurrentStatus(), "suggestedStatus", status)));
+                        draft.getSegments().get(0).setTodoEnabled(false);
+                    }
+                } catch (org.xianshen.mumirrorb.common.exception.BusinessException ignored) {
+                    // Deleted or unowned model references never become proposed links.
+                }
+            }
             draft.setAxesVersion(Math.toIntExact(aiGrpcClient.growthAxesVersion(userId)));
             var allowedAxes = aiGrpcClient.growthAxisIds(userId);
             draft.setGrowthSuggestions(response.getGrowthSuggestionsList().stream().filter(s -> allowedAxes.contains(s.getDimensionId())).map(s -> {
@@ -104,6 +120,7 @@ public class RecordDraftServiceImpl implements RecordDraftService {
         segment.setTaskStatus(ClassifyItemConverter.convertTaskStatus(item.getStatus()));
         // 用户选择 AI 整理即视为同意这段内容进入 Mirror 记忆；后续可在记忆管理中停止。
         segment.setMemoryEnabled(true);
+        segment.setTodoEnabled("todo".equals(segment.getContentType()));
         return segment;
     }
 }
