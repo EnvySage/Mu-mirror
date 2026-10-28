@@ -404,6 +404,57 @@ class RecordAiAuthorizationDatabaseTest {
         return userId;
     }
 
+    @Test
+    void todoAndLegacyPlanFiltersFindBothCategoriesBeforeAndAfterMigration() throws Exception {
+        UUID userId = createUser();
+        Record record = createDoneRecord(userId);
+        createChunk(userId, record.getId(), "old plan", Map.of("contentType", "plan"));
+        createChunk(userId, record.getId(), "new todo", Map.of("contentType", "todo"));
+        jdbcTemplate.update("UPDATE records SET memory_state = 'READY' WHERE id = ?", record.getId());
+        jdbcTemplate.update("UPDATE chunks SET ai_memory_approved = TRUE, embedding_status = 'ready', embedding = ?::vector WHERE record_id = ?",
+                vectorLiteral(), record.getId());
+        for (boolean migrated : List.of(false, true)) {
+            if (migrated) jdbcTemplate.execute(new org.springframework.core.io.ClassPathResource("db/migration-v13-plan-to-todo.sql")
+                    .getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+            for (String type : List.of("todo", "plan")) {
+                assertEquals(2, chatSearchMapper.searchStructured(userId, type, null, null, null, null, 10).size());
+                assertEquals(2, chunkMapper.searchBySimilarityWithFilter(userId, vectorLiteral(), type, 10).size());
+                assertEquals(2, chatSearchMapper.searchHybrid(userId, vectorLiteral(), type, null, null,
+                        null, null, false, 30.0, null, 10).size());
+            }
+        }
+    }
+
+    @Test
+    void planMigrationPreservesRecordContentsMetadataAndTodoRelationshipsAndCanRepeat() throws Exception {
+        UUID userId = createUser();
+        Record record = createDoneRecord(userId);
+        Map<String, Object> metadata = Map.of("contentType", "plan", "title", "旧计划标题",
+                "taskStatus", "in_progress", "userTags", List.of("开发"));
+        Chunk oldPlan = createChunk(userId, record.getId(), "旧计划正文", metadata);
+        Chunk other = createChunk(userId, record.getId(), "学习正文", Map.of("contentType", "learning"));
+        Record vaultRecord = createDoneRecord(userId);
+        jdbcTemplate.update("UPDATE records SET source = 'vault' WHERE id = ?", vaultRecord.getId());
+        Chunk vault = createChunk(userId, vaultRecord.getId(), "文件计划正文", Map.of("contentType", "plan"));
+        jdbcTemplate.update("INSERT INTO todo_registry(user_id, title, current_status, source_chunk_id) VALUES (?, ?, 'in_progress', ?)",
+                userId, "已登记的旧计划", oldPlan.getId());
+        String beforeChunk = jdbcTemplate.queryForObject("SELECT (to_jsonb(c) - 'metadata')::text FROM chunks c WHERE id = ?", String.class, oldPlan.getId());
+        String beforeTodo = jdbcTemplate.queryForObject("SELECT to_jsonb(t)::text FROM todo_registry t WHERE source_chunk_id = ?", String.class, oldPlan.getId());
+        var resource = new org.springframework.core.io.ClassPathResource("db/migration-v13-plan-to-todo.sql");
+        assertTrue(resource.exists(), "A deployable migration must accompany the category change");
+        String migration = resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        jdbcTemplate.execute(migration);
+        jdbcTemplate.execute(migration);
+        Map<String, Object> expectedMetadata = new java.util.HashMap<>(metadata);
+        expectedMetadata.put("contentType", "todo");
+        assertEquals(expectedMetadata, chunkMapper.selectById(oldPlan.getId()).getMetadata());
+        assertEquals(beforeChunk, jdbcTemplate.queryForObject("SELECT (to_jsonb(c) - 'metadata')::text FROM chunks c WHERE id = ?", String.class, oldPlan.getId()));
+        assertEquals(beforeTodo, jdbcTemplate.queryForObject("SELECT to_jsonb(t)::text FROM todo_registry t WHERE source_chunk_id = ?", String.class, oldPlan.getId()));
+        assertEquals("learning", chunkMapper.selectById(other.getId()).getMetadata().get("contentType"));
+        assertEquals("plan", chunkMapper.selectById(vault.getId()).getMetadata().get("contentType"));
+        assertEquals(record.getContent(), recordMapper.selectById(record.getId()).getContent());
+    }
+
     private Record createReviewingRecord(UUID userId) {
         Record record = Record.builder()
                 .userId(userId)

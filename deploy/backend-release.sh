@@ -18,6 +18,7 @@ HEALTH_RETRIES="${HEALTH_RETRIES:-30}"      # 30 × 2s = 最长等 60s
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 KEEP_BACKUPS="${KEEP_BACKUPS:-10}"
 MIGRATION="${MIGRATION:-src/main/resources/db/migration-v2.sql}"
+RECORD_CATEGORY_MIGRATION="${RECORD_CATEGORY_MIGRATION:-src/main/resources/db/migration-v13-plan-to-todo.sql}"
 ENV_FILE="$MIRROR_HOME/shared/backend.env"
 
 log() { printf '\n\033[1;34m[%s]\033[0m %s\n' "$(date '+%F %T')" "$*"; }
@@ -27,6 +28,7 @@ die() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || die "缺 $ENV_FILE —— 先跑 deploy/init-server.sh 并填密钥"
 JAR="$(ls -1 target/*.jar 2>/dev/null | grep -v '\.original$' | head -n1 || true)"
 [[ -n "$JAR" ]] || die "target/ 下没有可执行 jar，先执行 ./mvnw -B package"
+[[ -f "$RECORD_CATEGORY_MIGRATION" ]] || die "缺少记录分类迁移 $RECORD_CATEGORY_MIGRATION，不能发布不完整版本"
 
 RELEASE_DIR="$MIRROR_HOME/backend/releases/$(date '+%Y%m%d-%H%M%S')"
 CURRENT="$MIRROR_HOME/backend/current"
@@ -40,7 +42,7 @@ chown -R mirror:mirror "$RELEASE_DIR" 2>/dev/null || true
 log "产物就位：$RELEASE_DIR/app.jar（$(du -h "$RELEASE_DIR/app.jar" | cut -f1)）"
 
 # ---------- 2. 备份 + 迁移 ----------
-if [[ -f "$MIGRATION" ]]; then
+if [[ -f "$MIGRATION" || -f "$RECORD_CATEGORY_MIGRATION" ]]; then
   # 只取需要的变量，避免 source 整个文件时被特殊字符坑到
   DB_URL_V="$(grep -E '^DB_URL='          "$ENV_FILE" | head -n1 | cut -d= -f2-)"
   DB_USER_V="$(grep -E '^DB_USERNAME='    "$ENV_FILE" | head -n1 | cut -d= -f2-)"
@@ -55,9 +57,14 @@ if [[ -f "$MIGRATION" ]]; then
     || die "数据库备份失败 —— 已中止发布（绝不在没有备份的情况下迁移）"
   log "数据库已备份：$(basename "$BACKUP")"
 
-  psql "$PG_URI" -U "$DB_USER_V" -v ON_ERROR_STOP=1 -q -f "$MIGRATION" >/dev/null \
-    || die "迁移执行失败 —— 已中止发布，代码未切换、服务未重启"
-  log "迁移已重放：$MIGRATION（幂等脚本，重放无害）"
+  if [[ -f "$MIGRATION" ]]; then
+    psql "$PG_URI" -U "$DB_USER_V" -v ON_ERROR_STOP=1 -q -f "$MIGRATION" >/dev/null \
+      || die "迁移执行失败 —— 已中止发布，代码未切换、服务未重启"
+    log "迁移已重放：$MIGRATION（幂等脚本，重放无害）"
+  fi
+  psql "$PG_URI" -U "$DB_USER_V" -v ON_ERROR_STOP=1 -q -f "$RECORD_CATEGORY_MIGRATION" >/dev/null \
+    || die "计划→待办迁移失败 —— 已中止发布，代码未切换、服务未重启"
+  log "记录分类已同步：$RECORD_CATEGORY_MIGRATION"
 else
   log "跳过迁移（未找到 $MIGRATION）"
 fi

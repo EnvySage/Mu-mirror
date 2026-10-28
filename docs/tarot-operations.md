@@ -4,6 +4,8 @@
 
 ## 部署顺序
 
+本轮记录流程发布还必须同步执行 [记录分类迁移](record-category-migration.md) 中的 `migration-v13-plan-to-todo.sql`，并发布新增的 `GET /assistant/actions/records` 接口与前端。数据库迁移不能遗漏；本地执行记录不代表正式库已执行。
+
 1. 备份业务库，应用 `src/main/resources/db/migration-v12-tarot.sql`。这是新增表/索引的幂等迁移；新安装使用包含相同结构的 `db/schema.sql`。不要在真实库运行测试脚本。
 2. 部署新版 Python：tarot.proto 生成产物、services/tarot_service.py、mirror_core/tarot_reading.py、prompts/tarot.txt；RPC 注册在现有 legacy 端口。先运行 `scripts/sync_upload.py --check`。
 3. 部署 Java：沿用用户模型配置，不新增供应商或系统模型密钥。

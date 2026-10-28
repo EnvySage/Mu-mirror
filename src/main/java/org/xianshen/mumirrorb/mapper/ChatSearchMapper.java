@@ -65,7 +65,8 @@ public interface ChatSearchMapper {
                    AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.classified_segment IS NOT NULL
-              <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
+              <if test="contentType != null">AND (c.metadata->>'contentType' = #{contentType}
+                OR (#{contentType} IN ('todo', 'plan') AND c.metadata->>'contentType' IN ('todo', 'plan')))</if>
               <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
@@ -247,7 +248,8 @@ public interface ChatSearchMapper {
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
               AND c.classified_segment IS NOT NULL
-              <if test="contentType != null">AND c.metadata->>'contentType' = #{contentType}</if>
+              <if test="contentType != null">AND (c.metadata->>'contentType' = #{contentType}
+                OR (#{contentType} IN ('todo', 'plan') AND c.metadata->>'contentType' IN ('todo', 'plan')))</if>
               <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>

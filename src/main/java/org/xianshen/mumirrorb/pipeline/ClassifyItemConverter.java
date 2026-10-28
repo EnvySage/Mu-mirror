@@ -51,6 +51,7 @@ public final class ClassifyItemConverter {
         if (protoType == CommonProto.ContentType.CONTENT_UNKNOWN) {
             return null;
         }
+        if (protoType == CommonProto.ContentType.PLAN) return "todo";
         return protoType.name().toLowerCase();
     }
 
