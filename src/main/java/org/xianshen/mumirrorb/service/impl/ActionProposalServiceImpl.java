@@ -181,6 +181,12 @@ public class ActionProposalServiceImpl implements ActionProposalService {
     public ActionProposalVO get(UUID userId, UUID actionId) { return ActionProposalVO.from(owned(userId, actionId, false)); }
 
     @Override
+    public List<ActionProposalVO> listRecordWorkflows(UUID userId) {
+        user(userId);
+        return mapper.listRecordWorkflows(userId).stream().map(ActionProposalVO::from).toList();
+    }
+
+    @Override
     public List<ActionProposalVO> listForSession(UUID userId, UUID sessionId) {
         user(userId);
         if (sessionId == null) throw invalid("缺少 sessionId");

@@ -98,12 +98,14 @@ class ChunkEditInvalidationTest {
     void metadataOnlyEditDoesNotInvalidateTextVectorOrConsent() {
         ChunkDTO edit = new ChunkDTO();
         edit.setMood(List.of("happy"));
+        edit.setContentType("plan");
 
         var result = service.update(CHUNK_ID, edit, USER_ID);
 
         assertTrue(chunk.getAiMemoryApproved());
         assertEquals(List.of(0.25f, 0.75f), chunk.getEmbedding());
         assertEquals("原始片段", chunk.getClassifiedSegment());
+        assertEquals("todo", chunk.getMetadata().get("contentType"));
         assertTrue(result.getHasEmbedding());
         verify(chunkMapper, never()).clearEmbedding(anyLong(), any());
         verify(snapshotLineageService, never()).invalidateSource(any(), anyString(), anyLong(), anyString());

@@ -176,6 +176,7 @@ public class RecordActionHandler implements ActionHandler {
         if ("AI_ASSISTED".equals(draft.getMode()) && !draft.getGrowthSuggestions().isEmpty() && growthService != null
                 && growthService.axesVersion(action.getUserId()) != draft.getAxesVersion())
             throw new BusinessException(409, "成长维度已变化，请重新准备审核卡");
+        normalizeSingleFinalContent(draft);
         Long sourceId = "record.organize".equals(action.getKind()) ? draft.getSourceRecordId() : null;
         Long correctionOfId = payload.path("correctionOfRecordId").isIntegralNumber()
                 ? payload.path("correctionOfRecordId").asLong() : null;
@@ -386,6 +387,11 @@ public class RecordActionHandler implements ActionHandler {
     }
 
     private void normalizeSingleFinalContent(RecordDraftDTO draft) {
+        if (draft.getSegments() != null) {
+            for (RecordDraftDTO.Segment segment : draft.getSegments()) {
+                if ("plan".equals(segment.getContentType())) segment.setContentType("todo");
+            }
+        }
         if (draft.getSegments() != null && draft.getSegments().size() == 1) {
             // A single segment is the reviewed body. Keep its persisted text in sync with finalContent.
             draft.getSegments().get(0).setText(draft.getFinalContent());

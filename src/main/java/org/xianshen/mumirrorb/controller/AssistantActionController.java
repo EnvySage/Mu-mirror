@@ -45,6 +45,9 @@ public class AssistantActionController {
     @GetMapping
     public R<List<ActionProposalVO>> list(@RequestParam UUID sessionId) { return R.ok(service.listForSession(owner(), sessionId)); }
 
+    @GetMapping("/records")
+    public R<List<ActionProposalVO>> records() { return R.ok(service.listRecordWorkflows(owner())); }
+
     @ExceptionHandler(ActionConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public R<ActionProposalVO> conflict(ActionConflictException error) {

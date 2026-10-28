@@ -215,3 +215,11 @@ $env:MIRROR_TEST_DB_USERNAME = "postgres"
 - `docs/coordination/` — 三仓协作与协议登记
   - `chat-loop-design.md` / `chat-loop-integration.md` — 对话循环设计与联调手册
   - `lexicon-design.md` / `rolling-mirror-design.md` / `toolcalling-vault-design.md` / `todo-status-removal-design.md`
+
+### 塔罗首版
+
+新增 `/tarot` API、每日抽牌与收藏、可恢复的 AI 解读和轻量聊天上下文。部署迁移、恢复与回退见 [塔罗运维说明](docs/tarot-operations.md)。
+
+### 记录分类合并
+
+新记录统一使用「待办」`todo`，兼容旧 `plan` 的输入和查询；已有记录的数据迁移、验证与回退见 [记录分类迁移](docs/record-category-migration.md)。已有库使用 `db/migration-v13-plan-to-todo.sql` 回填，保留原文、元数据和待办关联。

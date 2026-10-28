@@ -157,7 +157,8 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
               AND c.segment IS NOT NULL AND c.segment <> ''
               AND c.vault_item_id IS NULL
               AND c.embedding IS NOT NULL
-              AND (#{contentType} IS NULL OR c.metadata->>'contentType' = #{contentType})
+              AND (#{contentType} IS NULL OR c.metadata->>'contentType' = #{contentType}
+                OR (#{contentType} IN ('todo', 'plan') AND c.metadata->>'contentType' IN ('todo', 'plan')))
             ORDER BY c.embedding <=> #{queryVector}::vector
             LIMIT #{limit}
             """)

@@ -61,6 +61,8 @@ public class AgentRunService {
     private final ConversationHistoryMapper historyMapper;
     private final ChatService chatService;
     private final AssistantContextService assistantContextService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.service.TarotChatContextService tarotChatContext;
     private final DailyChatSessionResolver dailySessionResolver;
     private final AgentGrpcClient agentGrpcClient;
     private final AgentLifecycleService lifecycle;
@@ -168,6 +170,7 @@ public class AgentRunService {
         run.setUserMessageId(userMessage.getId());
         org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext assistantContext =
                 assistantContextService.build(userId, session.getId(), question);
+        if (tarotChatContext != null) assistantContext = tarotChatContext.attach(userId, session.getId(), runId, question, assistantContext, false);
         ChatInvocation invocation = new ChatInvocation(userId, session.getId(), runId,
                 requestId, userMessage.getId(), question, engine, assistantContext,
                 contextSourceMessageIds(assistantContext));
@@ -448,7 +451,7 @@ public class AgentRunService {
                 .lastEventSeq(0L).glossaryHitsApplied(false).metricsJson("{}").build();
         ChatInvocation invocation = new ChatInvocation(parentInvocation.userId(), parentInvocation.sessionId(),
                 shadowRunId, shadowRequestId, parentInvocation.userMessageId(), parentInvocation.question(),
-                "graph_v2", parentInvocation.assistantContext(), parentInvocation.contextSourceMessageIds());
+                "graph_v2", parentInvocation.assistantContext().toBuilder().clearDivination().build(), parentInvocation.contextSourceMessageIds());
 
         AtomicReference<AgentGrpcClient.CancellableCall> callRef = new AtomicReference<>();
         AtomicBoolean cancelPending = new AtomicBoolean(false);

@@ -15,6 +15,7 @@ public interface ActionProposalService {
     ActionProposalVO cancel(UUID userId, UUID actionId, int expectedVersion);
     ActionProposalVO get(UUID userId, UUID actionId);
     List<ActionProposalVO> listForSession(UUID userId, UUID sessionId);
+    List<ActionProposalVO> listRecordWorkflows(UUID userId);
     /** Internal worker callback, never exposed as an HTTP endpoint or model tool. */
     void completeAsync(UUID actionId, int executionVersion, JsonNode result);
     /** Internal preparation callback; stale/cancelled generations are discarded. */

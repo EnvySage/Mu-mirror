@@ -88,7 +88,7 @@ public class ChunkServiceImpl implements ChunkService {
             metadataChanged = true;
         }
         if (dto.getContentType() != null) {
-            metadata.put("contentType", dto.getContentType());
+            metadata.put("contentType", "plan".equals(dto.getContentType()) ? "todo" : dto.getContentType());
             metadataChanged = true;
         }
         if (dto.getMood() != null) {

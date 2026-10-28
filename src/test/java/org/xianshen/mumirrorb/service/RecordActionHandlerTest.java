@@ -68,6 +68,7 @@ class RecordActionHandlerTest {
         draft.setPreparationStatus("READY");
         var segment = new RecordDraftDTO.Segment();
         segment.setText("原始文字");
+        segment.setContentType("plan");
         draft.setSegments(java.util.List.of(segment));
         var payload = json.createObjectNode().put("rawContent", "原始文字");
         payload.set("recordDraft", json.valueToTree(draft));
@@ -76,6 +77,7 @@ class RecordActionHandlerTest {
 
         assertEquals("原始文字", preview.path("recordDraft").path("rawContent").asText());
         assertEquals("审核后的文字", preview.path("recordDraft").path("segments").get(0).path("text").asText());
+        assertEquals("todo", preview.path("recordDraft").path("segments").get(0).path("contentType").asText());
     }
 
     @Test

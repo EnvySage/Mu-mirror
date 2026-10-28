@@ -44,6 +44,17 @@ public interface ActionProposalMapper {
     @ResultMap("actionProposal")
     List<ActionProposal> listForSession(@Param("userId") UUID userId, @Param("sessionId") UUID sessionId);
 
+    @Select("""
+            SELECT * FROM assistant_actions
+            WHERE user_id = #{userId}::uuid AND kind IN ('record.create', 'record.organize')
+              AND (state IN ('PENDING', 'EXECUTING', 'FAILED', 'STALE')
+                OR (state = 'SUCCEEDED' AND updated_at > NOW() - INTERVAL '1 day'))
+            ORDER BY CASE WHEN state IN ('PENDING', 'EXECUTING') THEN 0 ELSE 1 END, created_at DESC, id
+            LIMIT 200
+            """)
+    @ResultMap("actionProposal")
+    List<ActionProposal> listRecordWorkflows(@Param("userId") UUID userId);
+
     @Select("SELECT EXISTS(SELECT 1 FROM chat_sessions WHERE id = #{sessionId}::uuid AND user_id = #{userId}::uuid)")
     boolean sessionOwned(@Param("userId") UUID userId, @Param("sessionId") UUID sessionId);
 
