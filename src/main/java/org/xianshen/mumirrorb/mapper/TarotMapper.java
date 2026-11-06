@@ -13,15 +13,15 @@ import static org.xianshen.mumirrorb.tarot.TarotTypes.*;
 public class TarotMapper {
     private final JdbcTemplate db;
     public TarotMapper(JdbcTemplate db, ObjectMapper json) { this.db=db; }
-    private static final RowMapper<DailyDraw> DRAW=(r,n)->new DailyDraw(r.getObject("id",UUID.class),r.getObject("draw_date",LocalDate.class),r.getString("card_id"),r.getString("catalog_version"),r.getObject("created_at",OffsetDateTime.class));
-    private static final RowMapper<ReadingView> READING=(r,n)->new ReadingView(r.getObject("id",UUID.class),r.getString("card_id"),r.getString("catalog_version"),r.getObject("created_at",OffsetDateTime.class),r.getObject("latest_analysis_id",UUID.class));
+    private static final RowMapper<DailyDraw> DRAW=(r,n)->new DailyDraw(r.getObject("id",UUID.class),r.getObject("draw_date",LocalDate.class),r.getString("card_id"),r.getString("catalog_version"),r.getObject("created_at",OffsetDateTime.class).atZoneSameInstant(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(),r.getString("orientation"));
+    private static final RowMapper<ReadingView> READING=(r,n)->new ReadingView(r.getObject("id",UUID.class),r.getString("card_id"),r.getString("catalog_version"),r.getObject("created_at",OffsetDateTime.class).atZoneSameInstant(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(),r.getObject("latest_analysis_id",UUID.class),r.getString("orientation"));
     public void lock(UUID user,String key) { db.query("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",(r,n)->0,user+":"+key); }
     public DailyDraw daily(UUID user,LocalDate day) { return first(db.query("SELECT * FROM tarot_daily_draw WHERE user_id=? AND draw_date=?",DRAW,user,day)); }
     public DailyDraw request(UUID user,UUID request) {
         return first(db.query("SELECT d.* FROM tarot_daily_draw d JOIN tarot_daily_request q ON q.user_id=d.user_id AND q.draw_id=d.id WHERE q.user_id=? AND q.client_request_id=?",DRAW,user,request));
     }
     public boolean insertDraw(UUID user,UUID request,DailyDraw draw) {
-        return db.update("INSERT INTO tarot_daily_draw(id,user_id,draw_date,card_id,catalog_version,client_request_id,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,draw_date) DO NOTHING",draw.id(),user,draw.drawDate(),draw.cardId(),draw.catalogVersion(),request,draw.createdAt())==1;
+        return db.update("INSERT INTO tarot_daily_draw(id,user_id,draw_date,card_id,catalog_version,client_request_id,created_at,orientation) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,draw_date) DO NOTHING",draw.id(),user,draw.drawDate(),draw.cardId(),draw.catalogVersion(),request,draw.createdAt(),draw.orientation())==1;
     }
     public void alias(UUID user,UUID request,UUID draw) { db.update("INSERT INTO tarot_daily_request(user_id,client_request_id,draw_id) VALUES(?,?,?)",user,request,draw); }
     public boolean collect(UUID user,DailyDraw draw) {
@@ -36,7 +36,16 @@ public class TarotMapper {
     public ReadingView readingRequest(UUID user,UUID request) { return first(db.query("SELECT * FROM tarot_reading WHERE user_id=? AND client_request_id=?",READING,user,request)); }
     public ReadingView latest(UUID user) { return first(db.query("SELECT * FROM tarot_reading WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 1",READING,user)); }
     public void insertReading(UUID user,UUID request,ReadingView reading) {
-        db.update("INSERT INTO tarot_reading(id,user_id,card_id,catalog_version,client_request_id,created_at) VALUES(?,?,?,?,?,?)",reading.readingId(),user,reading.cardId(),reading.catalogVersion(),request,reading.createdAt());
+        db.update("INSERT INTO tarot_reading(id,user_id,card_id,catalog_version,client_request_id,created_at,orientation) VALUES(?,?,?,?,?,?,?)",reading.readingId(),user,reading.cardId(),reading.catalogVersion(),request,reading.createdAt(),reading.orientation());
+    }
+    public HistoryView history(UUID user,int limit,int offset) {
+        // The count and page share one statement snapshot, including empty pages after the end.
+        String events="SELECT id,'daily'::text kind,card_id,catalog_version,orientation,draw_date,created_at,NULL::uuid latest_analysis_id FROM tarot_daily_draw WHERE user_id=? UNION ALL SELECT id,'question'::text kind,card_id,catalog_version,orientation,(created_at AT TIME ZONE 'Asia/Shanghai')::date draw_date,created_at,latest_analysis_id FROM tarot_reading WHERE user_id=?";
+        return db.query("WITH events AS ("+events+"), page AS (SELECT * FROM events ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?) SELECT totals.total,p.* FROM (SELECT count(*) total FROM events) totals LEFT JOIN page p ON true ORDER BY p.created_at DESC,p.id DESC", r->{
+            var items=new ArrayList<HistoryEntry>();long total=0;
+            while(r.next()){total=r.getLong("total");if(r.getObject("id")!=null)items.add(new HistoryEntry(r.getObject("id",UUID.class),r.getString("kind"),r.getString("card_id"),r.getString("catalog_version"),r.getString("orientation"),r.getObject("draw_date",LocalDate.class),r.getObject("created_at",OffsetDateTime.class).atZoneSameInstant(ZoneId.of("Asia/Shanghai")).toOffsetDateTime(),r.getObject("latest_analysis_id",UUID.class)));}
+            return new HistoryView(items,total,limit,offset,(long)offset+items.size()<total);
+        },user,user,limit,offset);
     }
     public Preferences preferences(UUID user) {
         db.update("INSERT INTO tarot_preferences(user_id) VALUES(?) ON CONFLICT DO NOTHING",user);

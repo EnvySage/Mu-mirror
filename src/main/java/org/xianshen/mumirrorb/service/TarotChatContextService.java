@@ -39,7 +39,7 @@ public class TarotChatContextService {
             var context=CommonProto.DivinationContext.newBuilder().setDrawId(draw.id().toString())
                     .setDrawnAt(draw.createdAt().toString()).setDrawDate(draw.drawDate().toString())
                     .setEntertainmentOnly(true).setMentionMode(mode==TarotMentionPolicy.Mode.EXPLICIT?"explicit":"casual")
-                    .addCards(CommonProto.DivinationCard.newBuilder().setCardName(card.name()).setOrientation("upright").setInterpretation(card.meaning()));
+                    .addCards(CommonProto.DivinationCard.newBuilder().setCardName(card.name()).setOrientation(draw.orientation()).setInterpretation(card.meaningFor(draw.orientation())));
             return clean.toBuilder().setDivination(context).build();
         });
     }

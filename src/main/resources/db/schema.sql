@@ -888,13 +888,15 @@ CREATE INDEX IF NOT EXISTS idx_agent_command_receipts_run
     ON agent_command_receipts(run_id, created_at);
 
 
--- Additive, repeatable tarot migration. Apply before deploying the tarot API.
+-- Tarot v2 fresh-install schema. Existing installations use migration-v12 and migration-v14.
 CREATE TABLE IF NOT EXISTS tarot_daily_draw (
  id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  draw_date DATE NOT NULL, card_id TEXT NOT NULL, catalog_version TEXT NOT NULL,
  client_request_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL,
+ orientation TEXT NOT NULL DEFAULT 'upright' CHECK (orientation IN ('upright','reversed')),
  UNIQUE(user_id,draw_date), UNIQUE(user_id,client_request_id), UNIQUE(user_id,id)
 );
+CREATE INDEX IF NOT EXISTS tarot_daily_history ON tarot_daily_draw(user_id,created_at DESC,id DESC);
 CREATE TABLE IF NOT EXISTS tarot_daily_request (
  user_id UUID NOT NULL, client_request_id UUID NOT NULL, draw_id UUID NOT NULL,
  PRIMARY KEY(user_id,client_request_id),
@@ -915,6 +917,7 @@ CREATE TABLE IF NOT EXISTS tarot_reading (
  id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  card_id TEXT NOT NULL, catalog_version TEXT NOT NULL, client_request_id UUID NOT NULL,
  created_at TIMESTAMPTZ NOT NULL, latest_analysis_id UUID,
+ orientation TEXT NOT NULL DEFAULT 'upright' CHECK (orientation IN ('upright','reversed')),
  UNIQUE(user_id,client_request_id), UNIQUE(user_id,id)
 );
 CREATE INDEX IF NOT EXISTS tarot_reading_latest ON tarot_reading(user_id,created_at DESC,id DESC);
@@ -928,9 +931,36 @@ CREATE TABLE IF NOT EXISTS tarot_analysis (
  FOREIGN KEY(user_id,reading_id) REFERENCES tarot_reading(user_id,id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS tarot_analysis_one_running ON tarot_analysis(reading_id) WHERE status IN('pending','running');
+CREATE INDEX IF NOT EXISTS tarot_analysis_versions ON tarot_analysis(user_id,reading_id,created_at DESC,id DESC);
 CREATE TABLE IF NOT EXISTS tarot_chat_state (
  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
  suppressed BOOLEAN NOT NULL DEFAULT FALSE, last_offered_date DATE, last_offered_run_id UUID,
  PRIMARY KEY(user_id,session_id)
 );
+
+-- Model connection profiles (v15 fresh-install schema)
+-- Persist named LLM connections while retaining user_settings as the effective runtime config.
+-- Apply after v14. Existing settings are lazily imported without changing any effective LLM fields.
+CREATE TABLE IF NOT EXISTS user_model_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(80) NOT NULL,
+    ai_provider VARCHAR(50) NOT NULL,
+    ai_protocol VARCHAR(20) NOT NULL CHECK (ai_protocol IN ('openai', 'anthropic')),
+    ai_base_url TEXT,
+    ai_model VARCHAR(100) NOT NULL,
+    ai_api_key TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_model_profiles_user_id ON user_model_profiles(user_id);
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS active_model_profile_id UUID;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_settings_active_model_profile_fk'
+        AND conrelid = 'user_settings'::regclass) THEN
+        ALTER TABLE user_settings ADD CONSTRAINT user_settings_active_model_profile_fk
+            FOREIGN KEY (user_id, active_model_profile_id) REFERENCES user_model_profiles(user_id, id);
+    END IF;
+END $$;

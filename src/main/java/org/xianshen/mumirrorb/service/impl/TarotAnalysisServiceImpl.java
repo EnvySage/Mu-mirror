@@ -35,6 +35,11 @@ public class TarotAnalysisServiceImpl implements TarotAnalysisService {
     private record Job(UUID id,UUID user,UUID reading,String payloadHash,String question,ReferenceOptions options,String status,
             String text,List<Source> refs,List<String> notices,String error) {}
     private record Accepted(UUID id,boolean created) {}
+    public List<AnalysisVersion> versions(UUID user,UUID reading){
+        tarot.getReading(user,reading);
+        expire(user,reading);
+        return db.query("SELECT id,reading_id,status,question,created_at,completed_at FROM tarot_analysis WHERE user_id=? AND reading_id=? ORDER BY created_at DESC,id DESC",(r,n)->new AnalysisVersion(r.getObject("id",UUID.class),r.getObject("reading_id",UUID.class),r.getString("status"),r.getString("question"),r.getObject("created_at",OffsetDateTime.class).atZoneSameInstant(TarotServiceImpl.ZONE).toOffsetDateTime(),r.getObject("completed_at",OffsetDateTime.class)==null?null:r.getObject("completed_at",OffsetDateTime.class).atZoneSameInstant(TarotServiceImpl.ZONE).toOffsetDateTime()),user,reading);
+    }
     public AnalysisView submit(UUID user,UUID reading,AnalyzeInput input){
         if(input==null||input.clientRequestId()==null||input.options()==null||!input.options().valid())throw new BusinessException(400,"请检查问题与参考设置");
         String question=input.question()==null?"":input.question().trim();
@@ -80,11 +85,11 @@ public class TarotAnalysisServiceImpl implements TarotAnalysisService {
             var job=load(user,id);var reading=tarot.getReading(user,job.reading());var card=catalog.byId(reading.cardId());
             var bundle=context.build(user,job.question(),job.options(),Instant.now());
             String text;List<String> used;var notices=new ArrayList<>(bundle.notices());
-            if(job.question().isBlank()){text=card.meaning()+"\n"+card.action();used=List.of();notices.add("通用牌义，未调用 AI。");}
+            if(job.question().isBlank()){text=card.meaningFor(reading.orientation())+"\n"+card.actionFor(reading.orientation());used=List.of();notices.add("通用牌义，未调用 AI。");}
             else{
                 var request=TarotProto.TarotAnalyzeRequest.newBuilder().setReadingId(reading.readingId().toString()).setAnalysisId(id.toString())
                     .setQuestion(job.question()).setReferenceDate(LocalDate.now(TarotServiceImpl.ZONE).toString()).setTimezone(TarotServiceImpl.ZONE.getId())
-                    .setCard(TarotProto.TarotCard.newBuilder().setId(card.id()).setName(card.name()).setMeaning(card.meaning()).setAction(card.action()));
+                    .setCard(TarotProto.TarotCard.newBuilder().setId(card.id()).setName(card.name()).setMeaning(card.meaningFor(reading.orientation())).setAction(card.actionFor(reading.orientation())).setOrientation(reading.orientation()).setCategory(card.category()));
                 for(var s:bundle.materials())request.addMaterials(TarotProto.TarotMaterial.newBuilder().setRef(s.ref()).setKind(s.kind()).setSourceId(s.sourceId()).setTitle(s.title()).setDate(s.date()).setExcerpt(s.excerpt()).setVersion(s.version()));
                 var answer=model.analyze(user,request.build());text=answer.getText();used=answer.getUsedRefsList();
                 validateAnswer(text,used,bundle.materials());

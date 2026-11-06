@@ -53,6 +53,10 @@ public class UserSettings {
     @Schema(description = "关联用户ID", example = "550e8400-e29b-41d4-a716-446655440000")
     private UUID userId;
 
+    /** Applied profile marker; LLM consumers continue reading the fields below. */
+    @TableField(typeHandler = UuidTypeHandler.class)
+    private UUID activeModelProfileId;
+
     /**
      * AI 提供商
      *

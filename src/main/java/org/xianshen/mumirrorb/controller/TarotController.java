@@ -16,6 +16,8 @@ public class TarotController {
     private final TarotAnalysisService analyses;
     private UUID user(){return UUID.fromString((String)SecurityContextHolder.getContext().getAuthentication().getPrincipal());}
     @GetMapping("/cards") public R<CatalogView> cards(){return R.ok("查询成功",catalog.view());}
+    @GetMapping("/history") public R<HistoryView> history(@RequestParam(defaultValue="20") int limit,@RequestParam(defaultValue="0") int offset){return R.ok("查询成功",tarot.history(user(),limit,offset));}
+    @GetMapping("/readings/{readingId}/analyses") public R<java.util.List<AnalysisVersion>> versions(@PathVariable UUID readingId){return R.ok("查询成功",analyses.versions(user(),readingId));}
     @GetMapping("/daily") public R<DailyView> daily(){return R.ok("查询成功",tarot.daily(user()));}
     @PostMapping("/daily/draw") public R<DailyView> draw(@RequestBody DrawInput input){return R.ok("抽取成功",tarot.drawDaily(user(),input.clientRequestId()));}
     @GetMapping("/daily/requests/{requestId}") public R<DailyDraw> request(@PathVariable UUID requestId){return R.ok("查询成功",tarot.findDailyRequest(user(),requestId));}

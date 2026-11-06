@@ -42,7 +42,7 @@ class TarotExperienceDatabaseTest {
         // Minimal existing-table fixtures; the feature migration itself is executed unmodified.
         db.execute("CREATE TABLE IF NOT EXISTS users(id UUID PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL)");
         db.execute("CREATE TABLE IF NOT EXISTS chat_sessions(id UUID PRIMARY KEY,user_id UUID REFERENCES users(id) ON DELETE CASCADE)");
-        new ResourceDatabasePopulator(new ClassPathResource("db/migration-v12-tarot.sql")).execute(ds);
+        new ResourceDatabasePopulator(new ClassPathResource("db/migration-v12-tarot.sql"),new ClassPathResource("db/migration-v14-tarot-v2.sql")).execute(ds);
         repository = new TarotMapper(db, new ObjectMapper().findAndRegisterModules());
         catalog = new TarotCatalog(new ObjectMapper());
         transactions = new TransactionTemplate(new DataSourceTransactionManager(ds));
@@ -74,6 +74,19 @@ class TarotExperienceDatabaseTest {
             assertEquals(2,db.queryForObject("SELECT count(*) FROM tarot_daily_draw WHERE user_id=?",Integer.class,user));
         } finally { pool.shutdownNow(); }
     }
+    @Test void nanosecondClockCreatesTheSameFullDrawAndReadingOnDatabaseReplay() {
+        var service=at("2026-10-26T15:59:59.123456789Z");
+        var expected=OffsetDateTime.parse("2026-10-26T23:59:59.123456+08:00");
+        var dailyRequest=UUID.randomUUID();var daily=service.drawDaily(user,dailyRequest).draw();
+        assertEquals(expected,daily.createdAt());
+        assertEquals(daily,service.drawDaily(user,dailyRequest).draw());
+        assertEquals(daily,service.findDailyRequest(user,dailyRequest));
+        assertEquals(daily,service.daily(user).draw());
+        var readingRequest=UUID.randomUUID();var reading=service.createReading(user,readingRequest);
+        assertEquals(expected,reading.createdAt());
+        assertEquals(reading,service.createReading(user,readingRequest));
+        assertEquals(reading,service.getReading(user,reading.readingId()));
+    }
     @Test void questionDrawsNeverUnlockAndOtherAccountsCannotReadThem() {
         var service=at("2026-10-26T04:00:00Z"); var request=UUID.randomUUID();
         var reading=service.createReading(user,request);
@@ -82,6 +95,43 @@ class TarotExperienceDatabaseTest {
         assertEquals(0,service.collection(user).unlockedCount()); assertNull(service.daily(user).draw());
         var denied=assertThrows(BusinessException.class,()->service.getReading(UUID.randomUUID(),reading.readingId()));
         assertEquals(404,denied.getCode());
+    }
+    @Test void fullDeckContainsFiveFamiliesAndDistinctDirections() {
+        assertEquals("v2",catalog.version());assertEquals(78,catalog.activeCards().size());
+        var groups=catalog.activeCards().stream().collect(java.util.stream.Collectors.groupingBy(CardDefinition::category,java.util.stream.Collectors.counting()));
+        assertEquals(Map.of("major",22L,"wands",14L,"cups",14L,"swords",14L,"pentacles",14L),groups);
+        for(var card:catalog.activeCards()) {
+            assertFalse(card.meaning().isBlank());assertFalse(card.reversedMeaning().isBlank());
+            assertFalse(card.reversedAction().isBlank());assertFalse(card.reversedKeyword().isBlank());
+            assertNotEquals(card.meaning(),card.reversedMeaning());
+        }
+        assertEquals("愚者",catalog.byId("00-fool").name());
+    }
+    @Test void savedDirectionAndHistorySurviveRetryAndShanghaiMidnight() {
+        var service=at("2026-10-26T15:59:59Z");var request=UUID.randomUUID();
+        var reading=service.createReading(user,request);var dailyRequest=UUID.randomUUID();var daily=service.drawDaily(user,dailyRequest).draw();
+        var tomorrow=at("2026-10-26T16:00:01Z");var newer=tomorrow.createReading(user,UUID.randomUUID());
+        assertEquals(reading, tomorrow.createReading(user,request));assertEquals(daily, tomorrow.drawDaily(user,dailyRequest).draw());
+        assertTrue(Set.of("upright","reversed").contains(reading.orientation()));
+        assertEquals(reading.orientation(),repository.reading(user,reading.readingId()).orientation());
+        var page=service.history(user,1,0);assertEquals(3,page.total());assertTrue(page.hasMore());assertEquals(newer.readingId(),page.items().get(0).id());
+        assertEquals(LocalDate.of(2026,10,27),page.items().get(0).drawDate());assertEquals(ZoneOffset.ofHours(8),page.items().get(0).createdAt().getOffset());
+        var rest=service.history(user,2,1);assertFalse(rest.hasMore());assertEquals(2,rest.items().size());
+        assertEquals(Set.of("daily","question"),rest.items().stream().map(HistoryEntry::kind).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(rest.items().stream().allMatch(e->e.drawDate().equals(LocalDate.of(2026,10,26))));
+        var empty=service.history(user,10,99);assertEquals(3,empty.total());assertTrue(empty.items().isEmpty());assertFalse(empty.hasMore());
+        assertEquals(0,service.history(UUID.randomUUID(),20,0).total());
+        assertEquals(400,assertThrows(BusinessException.class,()->service.history(user,101,0)).getCode());
+        assertEquals(1,service.collection(user).unlockedCount());
+    }
+    @Test void migrationDefaultsLegacyRowsToUprightAndIsRepeatable() {
+        var id=UUID.randomUUID();
+        db.execute("ALTER TABLE tarot_reading DROP COLUMN orientation");
+        db.execute("ALTER TABLE tarot_daily_draw DROP COLUMN orientation");
+        db.update("INSERT INTO tarot_reading(id,user_id,card_id,catalog_version,client_request_id,created_at) VALUES(?,?,?,'v1',?,now())",id,user,"00-fool",UUID.randomUUID());
+        new ResourceDatabasePopulator(new ClassPathResource("db/migration-v14-tarot-v2.sql")).execute(db.getDataSource());
+        assertEquals("upright",repository.reading(user,id).orientation());
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->db.update("UPDATE tarot_reading SET orientation='sideways' WHERE id=?",id));
     }
     @Test void preferencesPersistAndStaleDeviceDoesNotOverwriteThem() {
         var service=at("2026-10-26T04:00:00Z"); var defaults=service.preferences(user);
@@ -93,6 +143,7 @@ class TarotExperienceDatabaseTest {
     }
     @Test void chatKeepsTasksClearAndOffersDailyCardOnlyOnce() throws Exception {
         var service=at("2026-10-26T04:00:00Z"); service.drawDaily(user,UUID.randomUUID());
+        db.update("UPDATE tarot_daily_draw SET orientation='reversed' WHERE user_id=?",user);
         var session=UUID.randomUUID();db.update("INSERT INTO chat_sessions(id,user_id) VALUES(?,?)",session,user);
         var chat=new org.xianshen.mumirrorb.service.TarotChatContextService(db,service,catalog,transactions.getTransactionManager());
         var base=org.xianshen.mumirrorb.grpc.gen.CommonProto.AssistantContext.newBuilder().setCurrentDate("2026-10-26").build();
@@ -105,7 +156,10 @@ class TarotExperienceDatabaseTest {
                 (Callable<Boolean>)()->chat.attach(user,session,UUID.randomUUID(),"想尝试画画但怕不会",base,false).hasDivination()));
             assertEquals(1,(results.get(0).get()?1:0)+(results.get(1).get()?1:0));
         } finally {pool.shutdownNow();}
-        assertTrue(chat.attach(user,session,UUID.randomUUID(),"今天抽到什么牌",base,false).hasDivination());
+        var explicit=chat.attach(user,session,UUID.randomUUID(),"今天抽到什么牌",base,false);
+        assertTrue(explicit.hasDivination());
+        assertEquals("reversed",explicit.getDivination().getCards(0).getOrientation());
+        assertEquals(catalog.byId(service.daily(user).draw().cardId()).reversedMeaning(),explicit.getDivination().getCards(0).getInterpretation());
         assertFalse(chat.attach(user,session,UUID.randomUUID(),"今天抽到什么牌",base,true).hasDivination());
         chat.attach(user,session,UUID.randomUUID(),"不要提塔罗",base,false);
         db.update("UPDATE tarot_chat_state SET last_offered_date=NULL WHERE session_id=?",session);

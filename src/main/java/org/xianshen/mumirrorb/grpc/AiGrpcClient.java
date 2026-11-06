@@ -272,16 +272,21 @@ public class AiGrpcClient {
      * 与 Embedding 的 GetModelInfo 分开，连接测试不会把测试内容写入数据库。
      */
     public RecordProcessorProto.ClassifyResponse testLlmConnection(UUID userId) {
+        return testLlmConnection(userId, buildLlmConfig(userId));
+    }
+
+    /** Tests an explicit draft without reading or changing the user's active model. */
+    public RecordProcessorProto.ClassifyResponse testLlmConnection(UUID userId, CommonProto.LlmConfig config) {
         RecordProcessorProto.ClassifyRequest request = RecordProcessorProto.ClassifyRequest.newBuilder()
                 .setContent("今天完成了一次 AI 模型连接测试。")
                 .setProcessingAuthorized(true)
-                .setLlmConfig(buildLlmConfig(userId))
+                .setLlmConfig(config)
                 .setSingle(true)
                 .build();
         try {
             return recordStub.withDeadlineAfter(180, TimeUnit.SECONDS).classify(request);
         } catch (StatusRuntimeException e) {
-            log.error("gRPC LLM 连接测试失败，用户: {}, status={}", userId, e.getStatus(), e);
+            log.error("gRPC LLM 连接测试失败，用户: {}, status={}", userId, e.getStatus().getCode());
             throw e;
         }
     }

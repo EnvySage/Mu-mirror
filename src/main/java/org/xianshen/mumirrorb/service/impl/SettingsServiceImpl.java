@@ -1,6 +1,7 @@
 package org.xianshen.mumirrorb.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,7 +43,8 @@ public class SettingsServiceImpl implements SettingsService {
     @Override
     @Transactional
     public SettingsVO updateSettings(SettingsDTO dto, UUID userId) {
-        UserSettings settings = getOrCreateSettings(userId);
+        settingsMapper.ensureExists(userId);
+        UserSettings settings = settingsMapper.selectForUpdate(userId);
 
         // 只更新非 null 的字段（部分更新）
         if (dto.getAiProvider() != null) {
@@ -51,7 +53,7 @@ public class SettingsServiceImpl implements SettingsService {
         if (dto.getAiProtocol() != null) {
             settings.setAiProtocol(dto.getAiProtocol());
         }
-        if (dto.getAiApiKey() != null) {
+        if (dto.getAiApiKey() != null && !dto.getAiApiKey().isBlank()) {
             settings.setAiApiKey(CryptoUtils.encrypt(dto.getAiApiKey()));
         }
         if (dto.getAiBaseUrl() != null) {
@@ -102,6 +104,13 @@ public class SettingsServiceImpl implements SettingsService {
 
         settings.setUpdatedAt(OffsetDateTime.now());
         settingsMapper.updateById(settings);
+        // Legacy settings clients may still directly edit the effective model.
+        // Clear its profile marker in the same serialized transaction.
+        if (dto.getAiProvider() != null || dto.getAiProtocol() != null || dto.getAiBaseUrl() != null
+                || dto.getAiModel() != null || (dto.getAiApiKey() != null && !dto.getAiApiKey().isBlank())) {
+            settingsMapper.update(null, new LambdaUpdateWrapper<UserSettings>().eq(UserSettings::getUserId, userId)
+                    .set(UserSettings::getActiveModelProfileId, null));
+        }
         log.info("用户配置已更新，用户: {}", userId);
 
         return toVO(settings);

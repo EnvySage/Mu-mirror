@@ -2,6 +2,7 @@ package org.xianshen.mumirrorb.service;
 import java.util.UUID;
 import static org.xianshen.mumirrorb.tarot.TarotTypes.*;
 public interface TarotService {
+    HistoryView history(UUID user,int limit,int offset);
     DailyView daily(UUID user);
     DailyView drawDaily(UUID user,UUID request);
     DailyDraw findDailyRequest(UUID user,UUID request);

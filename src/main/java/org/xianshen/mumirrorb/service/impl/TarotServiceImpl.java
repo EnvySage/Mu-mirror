@@ -9,6 +9,7 @@ import org.xianshen.mumirrorb.mapper.TarotMapper;
 import org.xianshen.mumirrorb.service.TarotService;
 import org.xianshen.mumirrorb.tarot.TarotCatalog;
 import java.time.*;
+import java.time.temporal.ChronoUnit;
 import java.security.SecureRandom;
 import java.util.UUID;
 import java.util.random.RandomGenerator;
@@ -26,11 +27,16 @@ public class TarotServiceImpl implements TarotService {
         this.repo=repo;this.catalog=catalog;this.tx=tx;this.clock=clock;this.random=random;
     }
     private LocalDate today(){return LocalDate.now(clock.withZone(ZONE));}
-    private OffsetDateTime now(){return OffsetDateTime.ofInstant(clock.instant(),ZONE);}
+    private OffsetDateTime now(){return OffsetDateTime.ofInstant(clock.instant(),ZONE).truncatedTo(ChronoUnit.MICROS);}
     private DailyView view(DailyDraw draw,boolean added,boolean collected) {
         var day=today();return new DailyView(day,ZONE.getId(),day.plusDays(1).atStartOfDay(ZONE).toOffsetDateTime(),draw,added,collected);
     }
     private String pick(){var cards=catalog.activeCards();return cards.get(random.nextInt(cards.size())).id();}
+    private String orientation(){return random.nextBoolean()?"upright":"reversed";}
+    public HistoryView history(UUID user,int limit,int offset){
+        if(limit<1||limit>100||offset<0)throw new BusinessException(400,"历史记录分页范围无效");
+        return repo.history(user,limit,offset);
+    }
     public DailyView daily(UUID user){return view(repo.daily(user,today()),false,false);}
     public DailyView drawDaily(UUID user,UUID request) {
         requireRequest(request);
@@ -40,7 +46,7 @@ public class TarotServiceImpl implements TarotService {
             if(prior!=null)return view(prior,false,false);
             var day=today(); var draw=repo.daily(user,day); boolean added=false,collected=false;
             if(draw==null){
-                var candidate=new DailyDraw(UUID.randomUUID(),day,pick(),catalog.version(),now());
+                var candidate=new DailyDraw(UUID.randomUUID(),day,pick(),catalog.version(),now(),orientation());
                 added=repo.insertDraw(user,request,candidate);
                 draw=added?candidate:repo.daily(user,day);
                 if(added)collected=repo.collect(user,draw);
@@ -53,7 +59,7 @@ public class TarotServiceImpl implements TarotService {
     public ReadingView createReading(UUID user,UUID request) {
         requireRequest(request);
         return tx.execute(status->{repo.lock(user,"reading:"+request);var prior=repo.readingRequest(user,request);if(prior!=null)return prior;
-            var reading=new ReadingView(UUID.randomUUID(),pick(),catalog.version(),now(),null);repo.insertReading(user,request,reading);return reading;});
+            var reading=new ReadingView(UUID.randomUUID(),pick(),catalog.version(),now(),null,orientation());repo.insertReading(user,request,reading);return reading;});
     }
     public ReadingView getReading(UUID user,UUID reading){var result=repo.reading(user,reading);if(result==null)throw missing();return result;}
     public ReadingView latestReading(UUID user){return repo.latest(user);}
