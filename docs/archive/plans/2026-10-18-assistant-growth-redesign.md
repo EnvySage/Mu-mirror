@@ -8,7 +8,7 @@
 
 **Tech Stack:** Vue 3 / Pinia / Vue Router / Vite；Java 17 / Spring Boot 3.5 / MyBatis-Plus / PostgreSQL + pgvector；Python / gRPC / 现有模型适配器。
 
-**Spec:** [需求与交互设计](../../superpowers/specs/2026-10-18-assistant-growth-redesign-design.md)。执行前完整阅读；本计划不能替代需求中的隐私和失败语义。
+**Spec:** [需求与交互设计](../specs/2026-10-18-assistant-growth-redesign-design.md)。执行前完整阅读；本计划不能替代需求中的隐私和失败语义。
 
 ## Global Constraints
 

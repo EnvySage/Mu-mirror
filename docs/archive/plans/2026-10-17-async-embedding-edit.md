@@ -8,7 +8,7 @@
 
 **技术栈：** Vue 3 / Pinia / Axios；Java 17 / Spring Boot 3 / MyBatis-Plus / PostgreSQL + pgvector / Spring Scheduling；JUnit 5 + Mockito；Node 内置 `node:test`。
 
-**设计依据：** [2026-10-17-async-embedding-edit-design.md](../../superpowers/specs/2026-10-17-async-embedding-edit-design.md)
+**设计依据：** [2026-10-17-async-embedding-edit-design.md](../specs/2026-10-17-async-embedding-edit-design.md)
 
 ## 全局约束
 

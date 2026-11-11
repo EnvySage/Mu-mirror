@@ -9,7 +9,7 @@
 --   3. migration-v3-record-ai-authorization.sql ← 授权字段迁移；空库执行为无害空操作
 --   4. migration-v4-mirror-archive-lineage.sql ← 镜子归档/依赖迁移；空库执行为无害空操作
 --   5. chunks.sql        ← 已并入本文件，仅存占位说明，无 DDL
--- 对应设计文档：Mu-mirror-B/docs/2026-09-03-system-design-v2.md 第三章、3.4、裁决 #2/#6/#8/#9/#14/#17/#18/#20
+-- 对应设计文档：Mu-mirror-B/docs/archive/2026-09-03-system-design-v2.md 第三章、3.4、裁决 #2/#6/#8/#9/#14/#17/#18/#20
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS vector;

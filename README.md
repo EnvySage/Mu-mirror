@@ -37,15 +37,15 @@ Vue 3 前端 ──HTTP(/api, JWT)──> 本仓 ──SQL──> PostgreSQL + p
 
 ```
 src/main/java/org/xianshen/mumirrorb/
-├── controller/     11 个 REST 控制器
+├── controller/     REST 控制器
 ├── service/        业务实现（Mirror / Chat / Record / Chunk / Vault / Glossary / Todo…）
-├── mapper/         17 个 MyBatis mapper（全部注解式 @Select）
+├── mapper/         MyBatis mapper（全部注解式 SQL）
 ├── pipeline/       事件驱动的记录处理管道
 │   ├── CleanProcessor      (@Order 1) 文本清洗
 │   ├── ClassifyProcessor   (@Order 2) gRPC 分类（拆分 + 打标签一次调用）
 │   └── TimeSubstitutionApplier  相对时间消解执行器
 ├── grpc/           AiGrpcClient（唯一的 gRPC 调用点）+ 生成的 stub
-├── tools/          工具调用框架 + 9 个工具实现
+├── tools/          工具调用框架与工具实现
 ├── vault/          资产存储（PG BYTEA）、文件类型嗅探、内容抽取
 ├── pojo/           R 统一响应 + DO/DTO/VO
 ├── common/         枚举、异常、类型处理器、JWT 过滤器、加解密工具
@@ -76,7 +76,7 @@ Swagger UI 在 `/api/doc.html`。
 
 ## 数据库
 
-PostgreSQL + pgvector，基础结构 14 张表。DDL 见 `src/main/resources/db/schema.sql`（幂等，唯一权威基线，需 `CREATE EXTENSION vector`）；v4 迁移增加镜子版本、来源依赖和历史断点状态，`snapshot_inputs` 只记录来源 ID，不保存正文。
+PostgreSQL + pgvector，完整结构以 `src/main/resources/db/schema.sql` 为唯一基线（幂等，需 `CREATE EXTENSION vector`）；存量库按 `migration-v2` 至 `migration-v16` 顺序升级，`snapshot_inputs` 只记录来源 ID，不保存正文。
 
 新环境按顺序执行 `schema.sql`、`migration-v3-record-ai-authorization.sql` 和 `migration-v4-mirror-archive-lineage.sql`。已有 v3 本地库只需应用 v4：
 
@@ -131,7 +131,7 @@ POST /mirror/chat
 
 **架构裁决**：LLM 决策在 Python，工具执行在 Java，循环状态（步数、累积结果、预算）在 Java，Python 严格无状态。任何失败/超时/解析错误都降级到已收集结果，再降级到纯 RAG——"零回归"。
 
-9 个工具：`search_records` / `get_stats` / `get_profile` / `get_glossary` / `compare_snapshots` / `save_item` / `find_item` / `recall_item` / `get_coverage`。注册表在 `ToolRegistry`（自动收集所有 `ToolExecutor` bean），快照随请求发给 Python。
+工具注册表包含 `search_records` / `get_stats` / `get_profile` / `get_glossary` / `compare_snapshots` / `save_item` / `find_item` / `recall_item` / `get_coverage` / `list_todos` 及记录、待办、记忆、成长的操作卡准备工具。注册表在 `ToolRegistry`（自动收集所有 `ToolExecutor` bean），快照随请求发给 Python。
 
 ### 其他模块
 
@@ -214,12 +214,12 @@ $env:MIRROR_TEST_DB_USERNAME = "postgres"
 
 ## 文档
 
-- [三端项目进度](docs/PROGRESS.md) — 当前状态、待跟踪事项与历史进度摘要
-- `docs/2026-09-03-system-design-v2.md` — v2.3 设计快照（历史；早于 Agent v2、塔罗、成长与成就）
-- `HANDOVER.md` — 交接文档
-- `docs/coordination/` — 三仓协作与协议登记
-  - `chat-loop-design.md` / `chat-loop-integration.md` — 对话循环设计与联调手册
-  - `lexicon-design.md` / `rolling-mirror-design.md` / `toolcalling-vault-design.md` / `todo-status-removal-design.md`
+- [文档索引](docs/README.md) — 当前文档、模块运维、归档入口与维护规则
+- [当前现状](docs/PROGRESS.md) — 模块状态、对话链路、数据模型与已知风险
+- [参考手册](docs/REFERENCE.md) — REST API、关键配置、测试地图
+- [接手路线](docs/ONBOARDING.md) — 从对话链路开始读懂系统
+- [协议登记](docs/shared-protocol.md) — 改 proto 必须在此登记
+- `docs/archive/` — 历史设计、一次性记录与已完成计划，仅作追溯
 
 ### 塔罗首版
 

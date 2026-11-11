@@ -31,6 +31,6 @@
 
 ## 验证
 
-`TarotExperienceDatabaseTest`、`TarotReferencesDatabaseTest`、`TarotAnalysisExperienceTest` 使用显式 `MIRROR_TEST_DB_URL/USERNAME/PASSWORD`，只接受命名的独立测试库并使用隔离 schema。浏览器及全链路测试见前端 `docs/tarot-verification.md` 与本仓 `scripts/tarot_e2e.py`。不得以 skipped 当数据库测试通过。
+`TarotExperienceDatabaseTest`、`TarotReferencesDatabaseTest`、`TarotAnalysisExperienceTest` 使用显式 `MIRROR_TEST_DB_URL/USERNAME/PASSWORD`，只接受命名的独立测试库并使用隔离 schema。浏览器及全链路测试见前端 `Mu-mirror-F/docs/archive/tarot-verification.md` 与本仓 `scripts/tarot_e2e.py`。不得以 skipped 当数据库测试通过。
 
 开发分支全量检查的 9 个 ChatRetrievalTest/ToolsTest 断言失败已在原始 abe7ea2 复现，未混入本功能修改；完整结果见前端验收记录。

@@ -3,7 +3,7 @@
 > **最后核对：2026-11-11**
 > 核对方式：逐项对照 `src/main/java`、`src/main/resources`、`src/test/java` 与当前工作树，**不沿用旧进度文档的结论**。
 > 维护约定：项目只维护这一份"当前真相"。其他文档要么是专题说明，要么是历史决策记录；与代码冲突时，以代码为准，并回来更新本文件。
-> 旧 `PROGRESS.md`（停留在 2026-08-13）与 `HANDOVER.md`（2026-09-06）不再作为进度依据。
+> 旧进度文档与 `docs/archive/HANDOVER-2026-09-06.md`不再作为进度依据。
 
 ---
 
@@ -84,45 +84,17 @@ Vue 3 前端（Mu-mirror-F）
 | 待办 Todo | ✅ | `TodoController`；registry 物化索引 + chunk.metadata 真源双写；建议需用户确认 |
 | 五维成长 | ✅ | `GrowthController`；成长账本、维度锁定、手动贡献、来源追溯 |
 | 塔罗 | ✅ | `TarotController`；78 张牌 v2 目录、每日抽牌、问题牌、分析版本、收藏、偏好 |
-| 成就 | 🚧 第一批已进代码，未提交 | `achievement/`、`AchievementController`、`catalog.json`（**56 枚**：原 34 + 第一批 22），V16 迁移；第二至四批按 `docs/achievement-implementation-plan.md` 待实现 |
+| 成就 | ✅ 第一批已提交（`7dc5024`） | `achievement/`、`AchievementController`、`catalog.json`（**56 枚**：原 34 + 第一批 22），V16 迁移；第二至四批按 `docs/achievement-implementation-plan.md` 待实现 |
 | 前端 | 独立仓 | `Mu-mirror-F`（Vue 3） |
 | 部署 | ✅ | `Jenkinsfile`、`deploy/backend-release.sh`、systemd、nginx 配置 |
 
-**当前工作树特殊状态（2026-11-11）**：成就系统整体尚未提交（`git status` 中为 `??`）；`README.md`、`ChatServiceImpl`、`GlossaryServiceImpl`、`ModelProfileService`、`ExportController`、`schema.sql` 和两个测试有未提交修改。做任何发布前先确认这批改动是否完整、是否应拆成独立提交。
+**当前工作树状态（2026-11-11）**：`ai` 分支工作树干净；成就第一批已随 `7dc5024` 提交，随后文档清理已单独提交。发布前仍应按 `docs/archive/` 的迁移顺序核对数据库。
 
 ---
 
-## 4. REST API 清单（19 个控制器）
+## 4. 对话功能：真实链路（重点）
 
-统一响应 `R<T>`：`{code, message, data, timestamp}`，`code == 200` 为成功。以下只列路径与用途，详细 DTO 以 Controller 注解和 `/api/doc.html` 为准。
-
-| 控制器 | 基础路径 | 端点 |
-|---|---|---|
-| `AuthController` | `/auth` | `GET /status`、`POST /register`、`POST /login`、`GET /me` |
-| `RecordController` | `/records` | `POST /`、`POST /{id}/organize`、`PUT /{id}/content`、`GET /`、`GET /{id}`、`PUT /{id}/confirm`、`GET /{id}/suggestions`、`POST /{id}/retry`、`DELETE /{id}`、`GET /calendar`、`POST /{id}/chunks` |
-| `ChunkController` | `/chunks` | `PUT /{id}`、`POST /{id}/embedding/retry`、`DELETE /{id}` |
-| `MirrorController` | `/mirror` | `GET /`、`POST /generate`、`POST /generate-monthly`、`GET /stats`、`GET /snapshots`、`GET /snapshot-months`、`GET /snapshots/{id}`、**`POST /chat`（SSE）**、`GET /sessions`、`GET /sessions/today`、`POST /sessions/today`、`POST /sessions/{id}/summary/retry`、`GET /sessions/{id}`、`DELETE /sessions/{id}` |
-| `AgentRunController` | `/mirror/runs` | `GET /{runId}`（断线重连/幂等恢复读取） |
-| `SettingsController` | `/settings` | `GET /`、`PUT /`、`POST /test-ai`、`POST /test-embedding`、`POST /test-db` |
-| `ModelProfileController` | `/settings` | `GET/POST /model-profiles`、`PUT/DELETE /model-profiles/{id}`、`POST /model-profiles/{id}/activate`、`POST /test-ai/draft` |
-| `SummaryController` | `/summaries` | `GET /`、`GET /missing`、`POST /backfill`、`POST /regenerate` |
-| `InspirationController` | `/inspiration` | `POST /` |
-| `ExportController` | `/export` | `GET /json`、`GET /markdown` |
-| `VaultController` | `/vault` | `POST /upload`、`GET /`、`GET /{id}/download`、`GET /{id}/preview`、`DELETE /{id}`、`POST /{id}/confirm`、`PUT /{id}`、`GET /search` |
-| `GlossaryController` | `/glossary` | `GET /`、`POST /`、`PUT /{id}`、`DELETE /{id}`、`POST /{id}/confirm`、`POST /{id}/dismiss`、`POST /extract` |
-| `TodoController` | `/todos` | `POST /`、`PATCH /{id}`、`GET /pending-suggestions`、`POST /suggestions/{id}/resolve`、`GET /`、`GET /open-chain`、`DELETE /{id}` |
-| `AssistantActionController` | `/assistant/actions` | `POST /prepare`、`PATCH /{id}`、`POST /{id}/confirm`、`POST /{id}/cancel`、`GET /{id}`、`GET /?sessionId=`、`GET /records` |
-| `ChatMemoryController` | `/chat-memories` | `GET /`、`GET /{id}`（遗忘不直连 HTTP，走操作卡） |
-| `GrowthController` | `/growth` | `GET /`、`GET /axes`、`PUT /axes`、`GET /entries`、`POST /manual` |
-| `TarotController` | `/tarot` | `GET /cards`、`GET /history`、`GET /daily`、`POST /daily/draw`、`GET /daily/requests/{id}`、`POST /readings`、`GET /readings/latest`、`GET /readings/{id}`、`POST /readings/{id}/analyses`、`GET /analyses/{id}`、`GET /readings/{id}/analyses`、`GET /collection`、`GET/PUT /preferences` |
-| `AchievementController` | `/achievements` | `GET /`、`GET /pending`、`POST /acknowledge`、`GET/PUT /showcase`、`POST /activity` |
-| `AgentCommandController` | `/internal/agent/commands` | `POST /create-record`、`GET /receipts/{callId}`（内部服务令牌 + HMAC，不是普通 JWT 接口） |
-
----
-
-## 5. 对话功能：真实链路（重点）
-
-### 5.1 入口与请求
+### 4.1 入口与请求
 
 `POST /api/mirror/chat`，`SseEmitter`，超时取 `mirror.sse-timeout-ms`（默认 600000 ms）。
 
@@ -145,7 +117,7 @@ Vue 3 前端（Mu-mirror-F）
 | `done` | 结束：sessionId、runId、requestId、engine、status、outcome、route、fallback、created_records、stop_reason、error_code |
 | `error` | 失败：code、partial、message |
 
-### 5.2 请求接纳（两个引擎共用）
+### 4.2 请求接纳（两个引擎共用）
 
 `AgentRunService.startOrFindRun()` 在一个事务里完成：
 
@@ -157,7 +129,7 @@ Vue 3 前端（Mu-mirror-F）
 
 随后 `dispatch()` 异步执行。控制器在 SSE 关闭/超时/报错时会请求取消，避免孤儿 run。断线后可用 `GET /mirror/runs/{runId}` 读取已落库状态。
 
-### 5.3 引擎选择
+### 4.3 引擎选择
 
 `chat.engine` 决定本轮走哪条路：
 
@@ -169,7 +141,7 @@ Vue 3 前端（Mu-mirror-F）
 
 `chat.create-record-enabled` 默认 `false`，控制 graph_v2 是否能通过内部命令创建记录。
 
-### 5.4 legacy 引擎
+### 4.4 legacy 引擎
 
 `ChatServiceImpl.runLegacy()` 内有两条子路径，由 `vault.chat-loop-enabled` 切换：
 
@@ -201,7 +173,7 @@ Vue 3 前端（Mu-mirror-F）
 
 先 `ExtractIntent` 路由 → 四路检索 → `PlanTools` 单次规划（最多 2 步）→ 回答。行为与改造前一致，用于一键回滚。
 
-### 5.5 graph_v2 引擎
+### 4.5 graph_v2 引擎
 
 ```
 Java AgentRunService
@@ -228,7 +200,7 @@ Java AgentRunService
 - 内部命令入口 `/internal/agent/commands/*` 需要内部令牌 + HMAC 授权，不是普通用户接口。
 - 只要 graph 路径失败，**不会自动重跑 legacy**；本轮按失败/部分结果收尾。
 
-### 5.6 工具注册表（14 只）
+### 4.6 工具注册表（14 只）
 
 `ToolRegistry` 自动收集所有 `ToolExecutor` Bean，启动时校验名称唯一、effect 声明一致。
 
@@ -238,7 +210,7 @@ Java AgentRunService
 
 graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWriteProtoSpecs()`）；legacy 循环暴露完整注册表。
 
-### 5.7 会话、每日总结与记忆
+### 4.7 会话、每日总结与记忆
 
 - **按日会话**：`chat_sessions.day_key` + `timezone`，同一用户同一天唯一。`GET /mirror/sessions/today` 只读；`POST` 幂等创建。`today()` 建的标题是"今日对话"占位，首条真实问题到达后替换一次。
 - **每日总结**：`chat_day_summaries` 按结束日生成；失败可 `POST /mirror/sessions/{id}/summary/retry`。总结不阻塞当天聊天。
@@ -246,13 +218,13 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 - **遗忘**：不提供直接删除 HTTP 端点；由 `MemoryActionHandler` 执行操作卡，写入 `chat_source_exclusions` 墓碑。被遗忘消息的**原始历史仍可查看**，但不会进入后续模型上下文；墓碑只存来源 ID，不复制正文。
 - **来源 lineage**：assistant 消息保存 `context_source_message_ids`；镜像快照有 `chat_lineage_known`，迁移来的旧快照在未重建前视为 lineage 不完整。
 
-### 5.8 统一落库出口
+### 4.8 统一落库出口
 
 无论哪个引擎，assistant 消息、来源、工具轨迹、文件引用、创建记录、run 终态、会话更新时间都由 `AgentRunService.finish()` 在一个事务里提交。这样"模型输出"和"持久化事实"不会各写一套。
 
 ---
 
-## 6. 数据模型
+## 5. 数据模型
 
 `schema.sql` 当前有 **39 张表 + 8 个只读视图**。按用途分组：
 
@@ -278,142 +250,22 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 
 ---
 
-## 7. 关键配置开关
+## 6. 文档索引
 
-| 配置 | 默认 | 作用 |
-|---|---|---|
-| `chat.engine` | `legacy` | 对话引擎：legacy / graph_v2 / shadow |
-| `chat.graph-enabled-user-ids` | 空 | graph_v2 用户白名单，`*` 为全量 |
-| `chat.shadow-sample-rate` | `0.0` | 影子采样率 |
-| `chat.create-record-enabled` | `false` | graph_v2 是否可创建记录 |
-| `agent.grpc-address` | `localhost:10004` | Agent v2 gRPC |
-| `agent.internal-token` / `command-hmac-key` | 空 | 内部命令鉴权，生产必须注入 |
-| `agent.total-budget-ms` | `480000` | graph 单轮总预算 |
-| `agent.loop-budget-ms` | `180000` | graph 循环预算 |
-| `agent.max-plan-rounds` | `4` | graph 规划轮数 |
-| `agent.lease-seconds` / `heartbeat-seconds` | `30` / `10` | run 租约与心跳 |
-| `vault.chat-loop-enabled` | `true` | legacy 内循环开关；false 回滚到单次 PlanTools |
-| `vault.max-loop-steps` | `4` | legacy 循环步数上限 |
-| `vault.loop-budget-ms` | `180000` | legacy 循环累计预算 |
-| `vault.plan-tools-timeout-ms` | `120000` | 单步规划超时，必须小于 SSE 超时 |
-| `vault.plan-history-rounds` | `6` | 规划器历史窗口 |
-| `mirror.sse-timeout-ms` | `600000` | SSE 连接超时 |
-| `mirror.rag-max-cosine-distance` | `0.35` | 语义检索阈值（有意保守） |
-| `mirror.lookback-*` / `per-chunk-max-chars` | 600 / 150000 / 2000 | 镜子四道防洪闸 |
-| `review.auto-enabled` | `false` | 自动审核模式 |
-| `mirror.achievements.worker-delay-ms` | `2000` | 成就事件消费间隔 |
+当前文档、模块运维说明、归档与维护规则见 [docs/README.md](README.md)。本文件只保留当前状态，历史设计与一次性记录在 `docs/archive/`。
+
+## 7. 已知风险与未验证项（2026-11-11）
+
+1. **graph_v2 未完成小流量验证**：`docs/agent-v2-rollout.md` 明确写着尚无小流量灰度、延迟样本和配对答案评分；默认值仍是 `legacy`。
+2. **前端浏览器验收缺口**：助手成长改造验收报告把 R5 双端呈现标为"部分通过"，真实浏览器全流程未完成。
+3. **文档入口已收口**：当前文档地图见 `docs/README.md`；历史设计与一次性记录在 `docs/archive/`，不再放入 `docs/` 根目录。
+4. **测试依赖环境**：`MuMirrorBApplicationTests` 需要可达的 PostgreSQL；数据库测试未配置环境变量时会跳过，跳过不等于通过。
+5. **成就后续批次未实现**：第一批 56 枚已提交；第二至四批（探索、组合、镀层）仍待实现，计划见 `docs/achievement-implementation-plan.md`。
+6. **双引擎并存成本**：legacy 循环、legacy 单次规划、graph_v2、shadow 四套路径同时存在，任何对话行为变更都要确认影响面。
 
 ---
 
-## 8. 测试地图
-
-| 范围 | 代表测试 |
-|---|---|
-| 对话主链路 | `ChatRetrievalTest`、`ChatLoopTest`、`ChatSessionDeletionTest`、`ChatInvocationTest` |
-| Agent v2 | `AgentRunServiceTest`、`AgentEventAdapterTest`、`AgentCommandAuthTest`、`AgentCommandServiceTest`、`AgentLifecycleTest`、`AgentGrpcClientContextTest`、`AgentShadowRequestTest` |
-| 工具 | `ToolOrchestratorTest`、`ToolsTest`、`PrepareWriteToolRegistryTest`、`PreparedActionReplyTest`、`SearchRecordsToolRoutingTest` |
-| 会话/记忆 | `DailyChatSessionTest`、`DailyChatSessionDatabaseTest`、`ChatMemoryServiceTest`、`ChatMemoryForgetTest`、`MemoryCandidateCapTest` |
-| 画像/归档 | `MirrorStatsTest`、`MirrorLineageReplayDatabaseTest`、`MirrorArchiveControllerTest` |
-| 记录/审核 | `ConfirmReviewTest`、`RecordAuthorizationGateTest`、`RecordAiAuthorizationDatabaseTest`、`ChunkEditInvalidationTest` |
-| 资产/词典 | `VaultServiceTest`、`DigestServiceTest`、`VaultRefsParseTest`、`GlossaryServiceTest` |
-| 成长/塔罗/成就 | `GrowthServiceTest`、`GrowthLedgerDatabaseTest`、`Tarot*DatabaseTest`、`AchievementDatabaseTest` |
-| 模型配置 | `ModelProfileServiceTest`、`ModelProfileDatabaseTest`、`SettingsServiceImplTest` |
-
----
-
-## 9. 文档地图（本文件之外，均非当前进度依据）
-
-**仍可用的专题/运维文档**
-
-- `README.md`：项目概览与快速开始。注意其中的控制器数、工具数、表数、迁移描述已过时，**以本文件为准**。
-- `docs/agent-v2-rollout.md`：Agent v2 的数据库准备、灰度顺序、回滚闸。
-- `docs/tarot-operations.md`、`docs/model-profiles.md`、`docs/achievements-operations.md`、`docs/decisions-achievements.md`：各自模块的发布与维护说明。
-- `docs/achievement-implementation-plan.md`：成就四批计划（代码已进第一批，文档状态需要随本文件更新）。
-- `docs/superpowers/specs/` 与 `reports/`：2026-10 的设计与验收记录，属于决策证据，不是当前状态。
-
-**历史参考（不要据此判断现状）**
-
-- `HANDOVER.md`（2026-09-06）：Java 版本、profile、AI 端口、工具数、表数、目录结构均已过时。
-- `docs/2026-09-03-system-design-v2.md`（v2.3，2026-09-06）：v2.3 基线的权威设计，但早于 Agent v2、塔罗、成长、模型档案、成就、聊天记忆。
-- `docs/coordination/*`（2026-09）：多 Agent sprint 文档，其中 `PROGRESS-BOARD.md` 停留在 2026-09-06。
-- `docs/archive/*`：更早的设计稿，已明确归档。
-
----
-
-## 10. 夺回掌控路线（从对话功能开始）
-
-### 阶段 0：止血与建立基线（半天）
-
-1. 确认当前工作树：成就系统未提交；先把这批改动单独提交或至少建分支/备份，避免后续修改把它冲掉。
-2. 跑一次 `.\mvnw.cmd -DskipTests compile`；有数据库时再跑 `.\mvnw.cmd test`，把失败分成"代码问题 / 环境缺失 / 已知跳过"三类记录在本文件。
-3. 从今天起只维护本文件；每完成一次代码改动，当天更新"模块状态"和"对话链路"两节。
-
-### 阶段 1：读懂对话，不写代码（2–3 天）
-
-按这个顺序读，每读完一个文件，用自己的话写 3 行摘要到本文件或笔记：
-
-1. `MirrorController.chat()` → `AgentRunService.startOrFindRun()` / `dispatch()`：请求如何被接纳、幂等、租约、会话如何确定。
-2. `AgentRunService.runGraph()` + `AgentEventAdapter`：graph 事件如何校验、转发、落库。
-3. `ChatServiceImpl.runLegacy()` + `streamAnswer()`：legacy 两条子路径、兜底分档、sources/vault_refs 如何产生。
-4. `ToolOrchestrator.loopAndExecute()`：循环终止条件、审计、自动补读。
-5. `ToolRegistry` + `tools/impl/*`：14 只工具各自读/写什么（先读 `ToolDefinition`，再读执行体）。
-6. `DailyChatSessionResolver` + `ChatMemoryServiceImpl` + `ChatService`：每日会话、结束日总结、记忆注入与遗忘。
-
-产出：一张自己画的时序图（前端 → Controller → AgentRunService → 引擎 → Python → 落库 → SSE），以及一张"分支矩阵"（legacy 循环 / legacy 单次 / graph_v2 / shadow 各自何时触发、失败怎么办）。
-
-### 阶段 2：亲手跑通，建立验证肌肉（3–5 天）
-
-准备：本地 PostgreSQL（含 vector 扩展）、Python legacy AI（10003）；graph_v2 需要 Agent 服务（10004）和只读 DSN。
-
-按顺序验证并记录看哪些表/日志：
-
-1. 新用户第一问：零记录时的回答与兜底分档。
-2. 普通记录查询：`meta` 的 `tools_used`、`tool_calls` 行、`conversation_history` 的 assistant 行。
-3. 语义查询：`chunks.embedding` 命中、`sources` 事件。
-4. 文件查询：`find_item` → `recall_item`、`vault_refs` 文件卡。
-5. 操作卡：`action_proposal` → 确认 → `assistant_actions` 状态变化。
-6. 幂等/断线：同 `requestId` 重复请求、`GET /mirror/runs/{runId}` 恢复。
-
-每跑通一个场景，在本文件第 5 节补一句"我实际观察到的现象"。**跑不通的不要标通过**。
-
-### 阶段 3：接管规则（长期）
-
-- 一次只改一个可解释的改动；每个 AI 生成的 diff 必须能用一句话说清"为什么这样改"。
-- 每个改动必须同时有：测试（或明确说明为什么不能测）、回滚方式、对应文档更新。
-- 在对话链路稳定前，不新增模块、不扩大 Agent 权限、不默认开启 graph_v2。
-- 每周做一次"未知清单"复盘：还有哪些分支、配置、表、外部依赖说不清；只挑一个消灭。
-
-### 阶段 4：做一次明确的架构裁决（对话稳定后）
-
-三选一，不要悬着：
-
-1. **继续灰度 graph_v2**：补齐 `docs/agent-v2-rollout.md` 要求的权限、幂等、延迟和答案质量测量，再决定默认值。
-2. **长期保持 legacy 默认**：把 graph_v2 标为实验分支，明确维护成本，避免两套逻辑同时演进。
-3. **移除 graph_v2**：在确认 legacy 满足需求后，删代码、删视图、删配置，减少认知负担。
-
-### 验收标准（做到这些才算"拿回来"）
-
-- 不看代码能白板画出对话主链路，并说清四个分支的触发条件与失败策略。
-- 任意一轮对话出问题，能从 SSE 事件、`agent_runs`、`conversation_history`、`tool_calls`、`chunks` 定位到具体阶段。
-- 能独立复现并验证第 5 节的 6 个场景，不依赖"AI 说它好了"。
-- 每个模块都有一份"已知 / 未知 / 待验证"清单，且本文件是最新的。
-- 任何新改动都能由你解释、测试、回滚。
-
----
-
-## 11. 已知风险与未验证项（2026-11-11）
-
-1. **工作树未提交**：成就系统整包、V16 迁移、目录 JSON、测试和若干修改仍在工作树中；发布前必须整理成可回滚的提交。
-2. **graph_v2 未完成小流量验证**：`docs/agent-v2-rollout.md` 明确写着尚无小流量灰度、延迟样本和配对答案评分；默认值仍是 `legacy`。
-3. **前端浏览器验收缺口**：助手成长改造验收报告把 R5 双端呈现标为"部分通过"，真实浏览器全流程未完成。
-4. **旧文档持续漂移**：README 仍写着 11 个控制器、9 个工具、14 张表；系统设计 v2.3 停在 2026-09-06。除本文件外不要拿它们判断现状。
-5. **测试依赖环境**：`MuMirrorBApplicationTests` 需要可达的 PostgreSQL；数据库测试未配置环境变量时会跳过，跳过不等于通过。
-6. **成就计划文档状态滞后**：计划文档写"第一批实施中"，但 `catalog.json` 已有 56 枚定义；需要核对第一批测试、迁移和发布是否真的完成。
-7. **双引擎并存成本**：legacy 循环、legacy 单次规划、graph_v2、shadow 四套路径同时存在，任何对话行为变更都要确认影响面。
-
----
-
-## 12. 变更记录
+## 8. 变更记录
 
 | 日期 | 事项 |
 |---|---|
