@@ -65,3 +65,7 @@ application-dev.yml
 .codebuddy/
 # 召回评测脚本：本地测试用，含密钥/账号等敏感配置
 tests/rag-eval/
+
+# 本机开发覆盖（每台机器一份，不入库）
+src/main/resources/application-local.yml
+config/application-local.yml

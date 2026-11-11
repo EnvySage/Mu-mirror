@@ -9,6 +9,7 @@
 | [README](../README.md) | 快速开始、架构、部署 |
 | [PROGRESS](PROGRESS.md) | 当前模块状态、对话链路、数据模型、已知风险 |
 | [REFERENCE](REFERENCE.md) | REST API、关键配置、测试地图 |
+| [LOCAL-ENV](LOCAL-ENV.md) | 两台机器的端口、数据库、本地覆盖与同步流程 |
 | [ONBOARDING](ONBOARDING.md) | 接手路线：从对话链路开始读懂系统 |
 | [shared-protocol](shared-protocol.md) | gRPC 契约变更登记，改 proto 必须更新 |
 | [agent-v2-rollout](agent-v2-rollout.md) | graph_v2 灰度、回滚与验收门槛 |

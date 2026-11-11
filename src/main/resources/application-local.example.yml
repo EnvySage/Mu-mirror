@@ -1,0 +1,19 @@
+# 本机开发覆盖示例。复制为 application-local.yml 后按机器修改；该文件不入库。
+# 启动时使用 dev,local 两个 profile：dev 提供共享开发默认值，local 覆盖本机差异。
+
+spring:
+  datasource:
+    # 数据库名、端口、账号按本机修改
+    url: jdbc:postgresql://localhost:5432/mu_mirror?options=-c%20timezone=Asia/Shanghai
+    username: postgres
+    password: postgres
+
+server:
+  # 本机 9050 被占用时改这里
+  port: 9050
+
+grpc:
+  client:
+    ai-service:
+      # 本机 Python AI 的 legacy 端口
+      address: 127.0.0.1:10003

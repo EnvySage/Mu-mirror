@@ -156,13 +156,15 @@ POST /mirror/chat
 psql -U postgres -c "CREATE DATABASE mu_mirror;"
 psql -U postgres -d mu_mirror -f src/main/resources/db/schema.sql
 
-# 启动（必须 dev profile：仓库没有 application-prod.yml 的完整配置，
-# 默认 profile 是 prod，会因 jwt.secret 解析不到而启动失败）
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev     # Git Bash
-mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev   # Windows
+# 本机覆盖（首次）：复制示例并按机器改数据库/端口/AI 地址
+cp src/main/resources/application-local.example.yml src/main/resources/application-local.yml
+
+# 启动（dev 提供共享开发默认值，local 覆盖本机差异）
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev,local     # Git Bash
+mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev,local   # Windows
 ```
 
-服务监听 **9050**（prod profile 下为 10002），基础地址 `http://localhost:9050/api`。
+服务监听 **9050**（prod profile 下为 10002），基础地址 `http://localhost:9050/api`。端口、数据库、AI 地址的机器差异只改 `application-local.yml`，不要改 `application-dev.yml`；该文件已被 gitignore。完整双机开发约定见 [LOCAL-ENV](docs/LOCAL-ENV.md)。
 
 ### 配置
 

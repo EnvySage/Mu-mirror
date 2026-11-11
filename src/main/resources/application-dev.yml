@@ -1,4 +1,5 @@
 # ==================== 开发环境配置 ====================
+# 共享默认值；本机差异写到 application-local.yml（gitignore），启动 profile 用 dev,local。
 # 开发环境打印 SQL，方便本地调试。
 # 注意：会把查询结果的每一行都打出来，仅限本地，切勿用于生产。
 mybatis-plus:
