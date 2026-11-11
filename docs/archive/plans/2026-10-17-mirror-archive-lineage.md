@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 17、Spring Boot 3.5、MyBatis-Plus、PostgreSQL/pgvector；Vue 3、Pinia、Vite。
 
-**Spec:** [`docs/superpowers/specs/2026-10-17-mirror-archive-lineage-design.md`](../specs/2026-10-17-mirror-archive-lineage-design.md)
+**Spec:** [`docs/superpowers/specs/2026-10-17-mirror-archive-lineage-design.md`](../../superpowers/specs/2026-10-17-mirror-archive-lineage-design.md)
 
 ## Global Constraints
 
