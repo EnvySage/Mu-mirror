@@ -30,6 +30,8 @@ import java.util.UUID;
 @RequestMapping("/export")
 @RequiredArgsConstructor
 public class ExportController {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private org.xianshen.mumirrorb.achievement.AchievementActivity achievementActivity;
 
     private static final DateTimeFormatter FILE_TS = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
@@ -63,6 +65,7 @@ public class ExportController {
         new com.fasterxml.jackson.databind.ObjectMapper()
                 .writerWithDefaultPrettyPrinter()
                 .writeValue(response.getWriter(), data);
+        if (achievementActivity != null) achievementActivity.exportGenerated(userId);
     }
 
     /**
@@ -85,6 +88,7 @@ public class ExportController {
         response.setContentType("text/markdown;charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
         response.getOutputStream().write(markdown.getBytes(StandardCharsets.UTF_8));
+        if (achievementActivity != null) achievementActivity.exportGenerated(userId);
     }
 
     /**

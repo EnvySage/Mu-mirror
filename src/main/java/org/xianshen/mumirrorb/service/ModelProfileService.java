@@ -30,6 +30,8 @@ public class ModelProfileService {
     private final ModelProfileMapper profiles;
     private final SettingsMapper settings;
     private final AiGrpcClient ai;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private org.xianshen.mumirrorb.achievement.AchievementActivity achievementActivity;
 
     @Transactional
     public List<ModelProfileVO> list(UUID userId) {
@@ -93,7 +95,7 @@ public class ModelProfileService {
         return view(profile, current);
     }
 
-    /** Reads only. Never saves a draft, imports a profile, or changes effective settings. */
+    /** Never saves a draft or changes effective settings. Records proof for a matching saved revision. */
     @Transactional(readOnly = true)
     public String testDraft(UUID userId, ModelConnectionTestDTO dto) {
         validateConnection(dto.getAiProvider(), dto.getAiProtocol(), dto.getAiModel(), dto.getAiBaseUrl());
@@ -123,6 +125,14 @@ public class ModelProfileService {
         }
         if (result == null || result.getSkip() || result.getItemsCount() == 0)
             throw new BusinessException(ResultCode.INTERNAL_ERROR, "大模型已响应，但未返回有效的连接测试结果");
+        if (achievementActivity != null && profile != null
+                && Objects.equals(profile.getAiProvider(), dto.getAiProvider().trim())
+                && Objects.equals(profile.getAiProtocol(), dto.getAiProtocol())
+                && Objects.equals(profile.getAiModel(), dto.getAiModel().trim())
+                && Objects.equals(normalizeUrl(profile.getAiBaseUrl()), normalizeUrl(dto.getAiBaseUrl()))
+                && Objects.equals(decryptKey(profile.getAiApiKey()), key.trim())) {
+            achievementActivity.verifiedModel(userId, profile.getId(), profile.getUpdatedAt());
+        }
         return "大模型连接正常，草稿配置未保存或应用";
     }
 

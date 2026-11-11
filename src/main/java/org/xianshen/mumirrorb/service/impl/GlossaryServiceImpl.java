@@ -57,6 +57,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 @RequiredArgsConstructor
 public class GlossaryServiceImpl implements GlossaryService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private org.xianshen.mumirrorb.achievement.AchievementActivity achievementActivity;
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     /** 注入上限（lexicon-design.md 参数表：prompt 膨胀防线） */
@@ -266,6 +268,7 @@ public class GlossaryServiceImpl implements GlossaryService {
             }
         }
         if (!matched.isEmpty()) {
+            if (achievementActivity != null) achievementActivity.glossaryMatched(userId, query);
             invalidateCache(userId); // hit_count 变了，缓存里的排序过期
             log.debug("ExtractIntent query 侧命中 {} 个词条，用户: {}", matched.size(), userId);
         }

@@ -1,0 +1,1411 @@
+[
+  {
+    "code": "M-01",
+    "english": "MIRROR LINK",
+    "name": "镜面通电",
+    "condition": "成功测试、保存并启用第一份对话模型配置。",
+    "motif": "signal",
+    "group": {
+      "id": "M",
+      "label": "模型",
+      "ink": "#65e8f6",
+      "accent": "#ff947d",
+      "frame": "gear"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": "/art/achievements/m-01.webp",
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "model.verified_active",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "M-02",
+    "english": "MEMORY CORE",
+    "name": "记忆引擎",
+    "condition": "启用记忆检索配置，并成功处理第一条获准进入记忆的内容。",
+    "motif": "core",
+    "group": {
+      "id": "M",
+      "label": "模型",
+      "ink": "#65e8f6",
+      "accent": "#ff947d",
+      "frame": "gear"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "memory.ready",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "M-03",
+    "english": "DUAL SIGNAL",
+    "name": "双面回声",
+    "condition": "使用两份不同的已保存模型配置，各成功完成至少一轮对话。",
+    "motif": "dual",
+    "group": {
+      "id": "M",
+      "label": "模型",
+      "ink": "#65e8f6",
+      "accent": "#ff947d",
+      "frame": "gear"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "chat.models",
+      "operator": "gte",
+      "value": 2
+    }
+  },
+  {
+    "code": "R-01",
+    "english": "FIRST TRACE",
+    "name": "此刻入档",
+    "condition": "成功保存第一条记录。仅保存的记录也计入。",
+    "motif": "notebook",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": "/art/achievements/r-01.webp",
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "R-02",
+    "english": "SEVEN MARKS",
+    "name": "七日有迹",
+    "condition": "在 7 个不同日期各保存至少一条记录。",
+    "motif": "dates",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.days",
+      "operator": "gte",
+      "value": 7
+    }
+  },
+  {
+    "code": "R-03",
+    "english": "LONG RECORD",
+    "name": "长页显影",
+    "condition": "累计保存 30 条记录。",
+    "motif": "pages",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.count",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "R-04",
+    "english": "THREE TRACES",
+    "name": "一日三记",
+    "condition": "在同一天保存 3 条记录。",
+    "motif": "notebook",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.daily_max",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  {
+    "code": "R-06",
+    "english": "THIRTY DAYS",
+    "name": "月历有光",
+    "condition": "在 30 个不同日期留下记录。",
+    "motif": "notebook",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.days",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "R-07",
+    "english": "LIVING VOLUME",
+    "name": "日子成册",
+    "condition": "在 3 个不同月份留下记录。",
+    "motif": "notebook",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.months",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  {
+    "code": "R-08",
+    "english": "FOUR SEASONS",
+    "name": "四季来信",
+    "condition": "在一年中的四个季度都留下属于自己的记录。",
+    "motif": "notebook",
+    "group": {
+      "id": "R",
+      "label": "记录",
+      "ink": "#ffd17a",
+      "accent": "#fa7764",
+      "frame": "kite"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.year_quarters",
+      "operator": "gte",
+      "value": 4
+    }
+  },
+  {
+    "code": "D-01",
+    "english": "FIRST CONTACT",
+    "name": "第一声回响",
+    "condition": "获得第一次完整的 AI 回复。",
+    "motif": "dialogue",
+    "group": {
+      "id": "D",
+      "label": "对话",
+      "ink": "#6cf2ef",
+      "accent": "#ff82ca",
+      "frame": "cut"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": "/art/achievements/d-01.webp",
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "chat.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "D-02",
+    "english": "DAILY SIGNAL",
+    "name": "日常对谈",
+    "condition": "累计完成 20 轮成功对话，且分布在至少 5 个不同日期。",
+    "motif": "wave",
+    "group": {
+      "id": "D",
+      "label": "对话",
+      "ink": "#6cf2ef",
+      "accent": "#ff82ca",
+      "frame": "cut"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "all": [
+        {
+          "metric": "chat.count",
+          "operator": "gte",
+          "value": 20
+        },
+        {
+          "metric": "chat.days",
+          "operator": "gte",
+          "value": 5
+        }
+      ]
+    }
+  },
+  {
+    "code": "D-03",
+    "english": "ECHO RETURN",
+    "name": "旧日回声",
+    "condition": "首次打开并载入一段至少含一轮对话的历史会话。",
+    "motif": "rewind",
+    "group": {
+      "id": "D",
+      "label": "对话",
+      "ink": "#6cf2ef",
+      "accent": "#ff82ca",
+      "frame": "cut"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.session.opened",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "D-06",
+    "english": "WORDS TO ACTION",
+    "name": "说到做到",
+    "condition": "从对话中确认一项行动提案，并成功执行。",
+    "motif": "dialogue",
+    "group": {
+      "id": "D",
+      "label": "对话",
+      "ink": "#6cf2ef",
+      "accent": "#ff82ca",
+      "frame": "cut"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "action.succeeded",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "D-07",
+    "english": "RETURNING VOICE",
+    "name": "持续有声",
+    "condition": "在 30 个不同日期完成有效对话。",
+    "motif": "dialogue",
+    "group": {
+      "id": "D",
+      "label": "对话",
+      "ink": "#6cf2ef",
+      "accent": "#ff82ca",
+      "frame": "cut"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "chat.days",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "K-01",
+    "english": "MEMORY TRACE",
+    "name": "记忆显影",
+    "condition": "首次确认至少一个记录片段进入长期记忆，并完成索引。",
+    "motif": "memory",
+    "group": {
+      "id": "K",
+      "label": "记忆与词典",
+      "ink": "#a5deff",
+      "accent": "#a5a7ff",
+      "frame": "vault"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "memory.ready",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "K-02",
+    "english": "WORD ARCHIVE",
+    "name": "教会镜子一个词",
+    "condition": "手动添加或确认第一个个人词条。",
+    "motif": "lexicon",
+    "group": {
+      "id": "K",
+      "label": "记忆与词典",
+      "ink": "#a5deff",
+      "accent": "#a5a7ff",
+      "frame": "vault"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "glossary.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "K-03",
+    "english": "ECHO MATCH",
+    "name": "词语共鸣",
+    "condition": "一条已确认的个人词条首次进入对话上下文，且该轮回复成功。",
+    "motif": "resonance",
+    "group": {
+      "id": "K",
+      "label": "记忆与词典",
+      "ink": "#a5deff",
+      "accent": "#a5a7ff",
+      "frame": "vault"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": true,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "glossary.hits",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "K-04",
+    "english": "FIVE WORDS",
+    "name": "词语标本",
+    "condition": "确认 5 个不同的个人词典项。",
+    "motif": "memory",
+    "group": {
+      "id": "K",
+      "label": "记忆与词典",
+      "ink": "#a5deff",
+      "accent": "#a5a7ff",
+      "frame": "vault"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "glossary.count",
+      "operator": "gte",
+      "value": 5
+    }
+  },
+  {
+    "code": "K-08",
+    "english": "PERSONAL LIBRARY",
+    "name": "私人记忆库",
+    "condition": "让 100 条本人确认的记录片段进入长期记忆并就绪。",
+    "motif": "memory",
+    "group": {
+      "id": "K",
+      "label": "记忆与词典",
+      "ink": "#a5deff",
+      "accent": "#a5a7ff",
+      "frame": "vault"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "memory.approved_chunks",
+      "operator": "gte",
+      "value": 100
+    }
+  },
+  {
+    "code": "P-01",
+    "english": "FIRST PLAN",
+    "name": "念头成形",
+    "condition": "首次登记一条待办，可手动创建或确认 AI 建议。",
+    "motif": "plan",
+    "group": {
+      "id": "P",
+      "label": "待办与行动",
+      "ink": "#e6f79c",
+      "accent": "#6ed9ad",
+      "frame": "shield"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "todo.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "P-02",
+    "english": "TASK COMPLETE",
+    "name": "三件落地",
+    "condition": "完成 3 条不同的待办。",
+    "motif": "checks",
+    "group": {
+      "id": "P",
+      "label": "待办与行动",
+      "ink": "#e6f79c",
+      "accent": "#6ed9ad",
+      "frame": "shield"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.todo.completed",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  {
+    "code": "P-03",
+    "english": "ACTION APPROVED",
+    "name": "建议有了回音",
+    "condition": "确认一条 AI 行动提案，且提案执行成功。",
+    "motif": "launch",
+    "group": {
+      "id": "P",
+      "label": "待办与行动",
+      "ink": "#e6f79c",
+      "accent": "#6ed9ad",
+      "frame": "shield"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "action.succeeded",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "P-07",
+    "english": "THIRTY DONE",
+    "name": "行动成列",
+    "condition": "完成 30 条不同的待办。",
+    "motif": "plan",
+    "group": {
+      "id": "P",
+      "label": "待办与行动",
+      "ink": "#e6f79c",
+      "accent": "#6ed9ad",
+      "frame": "shield"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.todo.completed",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "P-08",
+    "english": "STEADY PROGRESS",
+    "name": "稳步向前",
+    "condition": "在 12 个不同自然周中完成待办。",
+    "motif": "plan",
+    "group": {
+      "id": "P",
+      "label": "待办与行动",
+      "ink": "#e6f79c",
+      "accent": "#6ed9ad",
+      "frame": "shield"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "todo.completed_weeks",
+      "operator": "gte",
+      "value": 12
+    }
+  },
+  {
+    "code": "C-01",
+    "english": "DAILY ECHO",
+    "name": "昨日回声",
+    "condition": "首次展开一篇已生成的每日总结全文。",
+    "motif": "daily",
+    "group": {
+      "id": "C",
+      "label": "总结与日历",
+      "ink": "#ffc6ab",
+      "accent": "#8ddbf5",
+      "frame": "kite"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.summary.opened",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "C-02",
+    "english": "WEEKLY REVIEW",
+    "name": "七日回望",
+    "condition": "展开 7 个不同日期的每日总结全文。",
+    "motif": "week",
+    "group": {
+      "id": "C",
+      "label": "总结与日历",
+      "ink": "#ffc6ab",
+      "accent": "#8ddbf5",
+      "frame": "kite"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.summary.opened",
+      "operator": "gte",
+      "value": 7
+    }
+  },
+  {
+    "code": "C-03",
+    "english": "OLD DATE",
+    "name": "重逢旧日",
+    "condition": "从时间日历打开一条距今至少 30 天的记录。",
+    "motif": "hourglass",
+    "group": {
+      "id": "C",
+      "label": "总结与日历",
+      "ink": "#ffc6ab",
+      "accent": "#8ddbf5",
+      "frame": "kite"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.calendar.opened",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "C-07",
+    "english": "THIRTY ECHOES",
+    "name": "三十封回信",
+    "condition": "展开 30 个不同日期的每日总结全文。",
+    "motif": "daily",
+    "group": {
+      "id": "C",
+      "label": "总结与日历",
+      "ink": "#ffc6ab",
+      "accent": "#8ddbf5",
+      "frame": "kite"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.summary.opened",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "REF-01",
+    "english": "FIRST REFLECTION",
+    "name": "此刻的画像",
+    "condition": "成功生成第一份个人画像。",
+    "motif": "portrait",
+    "group": {
+      "id": "REF",
+      "label": "我的镜子",
+      "ink": "#b3e6ff",
+      "accent": "#fe94cf",
+      "frame": "vault"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "profile.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "REF-02",
+    "english": "MONTHLY LAYERS",
+    "name": "月痕留档",
+    "condition": "为 3 个不同月份成功生成月度画像。",
+    "motif": "layers",
+    "group": {
+      "id": "REF",
+      "label": "我的镜子",
+      "ink": "#b3e6ff",
+      "accent": "#fe94cf",
+      "frame": "vault"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "profile.months",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  {
+    "code": "REF-03",
+    "english": "DOUBLE EXPOSURE",
+    "name": "两面之间",
+    "condition": "成功查看两份不同画像快照的对比结果。",
+    "motif": "exposure",
+    "group": {
+      "id": "REF",
+      "label": "我的镜子",
+      "ink": "#b3e6ff",
+      "accent": "#fe94cf",
+      "frame": "vault"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.snapshot.compared",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "REF-07",
+    "english": "HALF YEAR",
+    "name": "半年的轮廓",
+    "condition": "为 6 个不同月份成功生成月度画像。",
+    "motif": "portrait",
+    "group": {
+      "id": "REF",
+      "label": "我的镜子",
+      "ink": "#b3e6ff",
+      "accent": "#fe94cf",
+      "frame": "vault"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "profile.months",
+      "operator": "gte",
+      "value": 6
+    }
+  },
+  {
+    "code": "REF-08",
+    "english": "YEAR IN MIRROR",
+    "name": "自己的年轮",
+    "condition": "为 12 个不同月份成功生成月度画像。",
+    "motif": "portrait",
+    "group": {
+      "id": "REF",
+      "label": "我的镜子",
+      "ink": "#b3e6ff",
+      "accent": "#fe94cf",
+      "frame": "vault"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "profile.months",
+      "operator": "gte",
+      "value": 12
+    }
+  },
+  {
+    "code": "T-01",
+    "english": "ARCANA DRAW",
+    "name": "偶然相逢",
+    "condition": "完成第一次每日抽牌。",
+    "motif": "moon",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": "/art/achievements/t-01.webp",
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.days",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "T-02",
+    "english": "STAR PATH",
+    "name": "星轨留痕",
+    "condition": "在 7 个不同日期完成每日抽牌。",
+    "motif": "orbit",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.days",
+      "operator": "gte",
+      "value": 7
+    }
+  },
+  {
+    "code": "T-03",
+    "english": "MAJOR ARCANA",
+    "name": "大阿卡那同行",
+    "condition": "通过每日抽牌收藏全部 22 张不同的大阿卡那牌。",
+    "motif": "deck",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.major",
+      "operator": "gte",
+      "value": 22
+    }
+  },
+  {
+    "code": "T-05",
+    "english": "CARD REUNION",
+    "name": "重逢的星",
+    "condition": "在每日抽牌中再次遇见一张已经收藏的牌。",
+    "motif": "moon",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.repeat_max",
+      "operator": "gte",
+      "value": 2
+    }
+  },
+  {
+    "code": "T-06",
+    "english": "MOON CYCLE",
+    "name": "月下三十回",
+    "condition": "在 30 个不同日期完成每日抽牌。",
+    "motif": "moon",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.days",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "T-07",
+    "english": "CONSTELLATION",
+    "name": "星图渐满",
+    "condition": "通过每日抽牌收藏 40 张不同的塔罗牌。",
+    "motif": "moon",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.cards",
+      "operator": "gte",
+      "value": 40
+    }
+  },
+  {
+    "code": "T-08",
+    "english": "ARCANA WORLD",
+    "name": "世界的回响",
+    "condition": "通过每日抽牌收藏完整的 78 张塔罗牌。",
+    "motif": "moon",
+    "group": {
+      "id": "T",
+      "label": "塔罗",
+      "ink": "#ffdb8a",
+      "accent": "#b88cff",
+      "frame": "star"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "tarot.cards",
+      "operator": "gte",
+      "value": 78
+    }
+  },
+  {
+    "code": "V-01",
+    "english": "FIRST ARCHIVE",
+    "name": "收藏第一束光",
+    "condition": "确认归档第一份记忆资产。",
+    "motif": "archive",
+    "group": {
+      "id": "V",
+      "label": "记忆资产",
+      "ink": "#b9ebd8",
+      "accent": "#f2bb72",
+      "frame": "cut"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "vault.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "V-02",
+    "english": "TEN RELICS",
+    "name": "个人典藏",
+    "condition": "累计确认归档 10 份不同的记忆资产。",
+    "motif": "relics",
+    "group": {
+      "id": "V",
+      "label": "记忆资产",
+      "ink": "#b9ebd8",
+      "accent": "#f2bb72",
+      "frame": "cut"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "vault.count",
+      "operator": "gte",
+      "value": 10
+    }
+  },
+  {
+    "code": "V-03",
+    "english": "FOUND AGAIN",
+    "name": "线索归位",
+    "condition": "首次通过资产搜索找到并打开一份已归档的资产。",
+    "motif": "search",
+    "group": {
+      "id": "V",
+      "label": "记忆资产",
+      "ink": "#b9ebd8",
+      "accent": "#f2bb72",
+      "frame": "cut"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": true,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.vault.search_opened",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "V-07",
+    "english": "THIRTY RELICS",
+    "name": "档案成列",
+    "condition": "累计确认归档 30 份不同的记忆资产。",
+    "motif": "archive",
+    "group": {
+      "id": "V",
+      "label": "记忆资产",
+      "ink": "#b9ebd8",
+      "accent": "#f2bb72",
+      "frame": "cut"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "vault.count",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "G-01",
+    "english": "FIRST GROWTH",
+    "name": "成长有据",
+    "condition": "首次在五维成长账本记下一笔已确认的成长记录。",
+    "motif": "sprout",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 1,
+    "starter": true,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "growth.count",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "G-02",
+    "english": "THREE AXES",
+    "name": "三维显影",
+    "condition": "至少 3 个不同成长维度各有一笔已确认的成长记录。",
+    "motif": "axes",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "growth.axes",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  {
+    "code": "G-03",
+    "english": "PERSONAL SCALE",
+    "name": "按自己的刻度",
+    "condition": "首次记成长分前，自定义并保存至少一个成长维度。",
+    "motif": "ruler",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.growth.customized",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "G-05",
+    "english": "NEXT STEP",
+    "name": "再向前一步",
+    "condition": "在同一个成长维度的 3 个不同日期留下记录。",
+    "motif": "sprout",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "growth.axis_days",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  {
+    "code": "G-06",
+    "english": "FIVE DIRECTIONS",
+    "name": "五向生长",
+    "condition": "在 5 个不同成长维度各留下一条已确认记录。",
+    "motif": "sprout",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "growth.axes",
+      "operator": "gte",
+      "value": 5
+    }
+  },
+  {
+    "code": "G-07",
+    "english": "THIRTY STEPS",
+    "name": "三十个脚印",
+    "condition": "累计确认 30 条不同的成长记录。",
+    "motif": "sprout",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "growth.count",
+      "operator": "gte",
+      "value": 30
+    }
+  },
+  {
+    "code": "G-08",
+    "english": "OWN HORIZON",
+    "name": "长成自己的样子",
+    "condition": "在 6 个不同月份留下成长记录。",
+    "motif": "sprout",
+    "group": {
+      "id": "G",
+      "label": "五维成长",
+      "ink": "#daf997",
+      "accent": "#f297b5",
+      "frame": "star"
+    },
+    "difficulty": 3,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "growth.months",
+      "operator": "gte",
+      "value": 6
+    }
+  },
+  {
+    "code": "S-01",
+    "english": "MOOD SPECTRUM",
+    "name": "情绪光谱",
+    "condition": "在已确认记录中留下 5 种不同的情绪。",
+    "motif": "prism",
+    "group": {
+      "id": "S",
+      "label": "生活信号",
+      "ink": "#ffc4e2",
+      "accent": "#9adff9",
+      "frame": "shield"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.moods",
+      "operator": "gte",
+      "value": 5
+    }
+  },
+  {
+    "code": "S-02",
+    "english": "MANY FACETS",
+    "name": "生活有几面",
+    "condition": "在已保存记录中使用至少 4 种不同的记录类型。",
+    "motif": "facets",
+    "group": {
+      "id": "S",
+      "label": "生活信号",
+      "ink": "#ffc4e2",
+      "accent": "#9adff9",
+      "frame": "shield"
+    },
+    "difficulty": 2,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "record.types",
+      "operator": "gte",
+      "value": 4
+    }
+  },
+  {
+    "code": "S-03",
+    "english": "BACKUP LOG",
+    "name": "留一份副本",
+    "condition": "成功导出一次 JSON 或 Markdown 数据。",
+    "motif": "backup",
+    "group": {
+      "id": "S",
+      "label": "生活信号",
+      "ink": "#ffc4e2",
+      "accent": "#9adff9",
+      "frame": "shield"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.export.generated",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  {
+    "code": "SYS-01",
+    "english": "HOME BASE",
+    "name": "入口由我",
+    "condition": "首次更改并保存默认首页。",
+    "motif": "home",
+    "group": {
+      "id": "SYS",
+      "label": "个人设置",
+      "ink": "#d4dfff",
+      "accent": "#94aaff",
+      "frame": "gear"
+    },
+    "difficulty": 1,
+    "starter": false,
+    "hidden": false,
+    "image": null,
+    "ruleVersion": 1,
+    "enabled": true,
+    "rule": {
+      "metric": "activity.home.changed",
+      "operator": "gte",
+      "value": 1
+    }
+  }
+]

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.xianshen.mumirrorb.common.exception.BusinessException;
@@ -116,7 +117,7 @@ public class ChatServiceImpl implements ChatService {
     private final org.xianshen.mumirrorb.mapper.ProfileStatsMapper statsMapper;
     private final org.xianshen.mumirrorb.service.ChatMemoryService chatMemoryService;
     private final DailyChatSessionResolver dailySessionResolver;
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     private org.xianshen.mumirrorb.service.ActionProposalService actionProposalService;
     @Override
     public org.xianshen.mumirrorb.agent.ChatFinalResult runLegacy(
