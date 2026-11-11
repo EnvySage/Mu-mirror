@@ -244,7 +244,7 @@ class ChatRetrievalTest {
         invoke(ChatRequestDTO.builder().question("最近学了什么").sessionId(SESSION_ID).build(), new SseEmitter());
 
         verify(searchMapper).searchSemantic(eq(USER_ID), anyString(), eq(true), eq(30.0), any(), anyInt());
-        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt());
+        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
     }
 
     @Test
@@ -321,14 +321,14 @@ class ChatRetrievalTest {
         // 无条件时新逻辑会回退 HYBRID（见 structuredWithoutMetaFilter_fallsBackToHybrid）
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我的待办"), any()))
                 .thenReturn(intent("structured", "").toBuilder().setContentType("todo").build());
-        when(searchMapper.searchStructured(eq(USER_ID), any(), any(), any(), any(), any(), anyInt()))
+        when(searchMapper.searchStructured(eq(USER_ID), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
 
         invoke(ChatRequestDTO.builder().question("我的待办").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(searchMapper).searchStructured(eq(USER_ID), any(), any(), any(), any(), any(), anyInt());
+        verify(searchMapper).searchStructured(eq(USER_ID), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
         verify(aiGrpcClient, never()).embed(any(), anyString());
         verify(searchMapper, never()).searchSemantic(any(), anyString(), anyBoolean(), anyDouble(), any(), anyInt());
     }
@@ -461,7 +461,7 @@ class ChatRetrievalTest {
 
         verify(searchMapper).searchHybrid(eq(USER_ID), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), anyDouble(), any(), anyInt());
-        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt());
+        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
     }
 
     @Test
@@ -469,7 +469,7 @@ class ChatRetrievalTest {
     void structuredWithMetaFilter_usesSql() {
         when(aiGrpcClient.extractIntent(eq(USER_ID), eq("我有哪些待办"), any()))
                 .thenReturn(intent("structured", "").toBuilder().setContentType("todo").build());
-        when(searchMapper.searchStructured(eq(USER_ID), eq("todo"), any(), any(), any(), any(), anyInt()))
+        when(searchMapper.searchStructured(eq(USER_ID), eq("todo"), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(hit());
         when(aiGrpcClient.chatStream(eq(USER_ID), any()))
                 .thenReturn(List.of(answerChunk()).iterator());
@@ -477,7 +477,7 @@ class ChatRetrievalTest {
         invoke(ChatRequestDTO.builder()
                 .question("我有哪些待办").sessionId(SESSION_ID).build(), new SseEmitter());
 
-        verify(searchMapper).searchStructured(eq(USER_ID), eq("todo"), any(), any(), any(), any(), anyInt());
+        verify(searchMapper).searchStructured(eq(USER_ID), eq("todo"), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
         verify(searchMapper, never()).searchHybrid(any(), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), anyDouble(), any(), anyInt());
     }
@@ -652,7 +652,7 @@ class ChatRetrievalTest {
         verify(toolOrchestrator).loopAndExecute(eq(USER_ID), eq(SESSION_ID), any(), eq("最近学了什么"),
                 any(), isNull(), any());
         verify(aiGrpcClient, never()).extractIntent(any(), anyString(), any());
-        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt());
+        verify(searchMapper, never()).searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
         verify(searchMapper, never()).searchSemantic(any(), anyString(), anyBoolean(), anyDouble(), any(), anyInt());
         verify(searchMapper, never()).searchHybrid(any(), anyString(), any(), any(), any(), any(), any(),
                 anyBoolean(), anyDouble(), any(), anyInt());
