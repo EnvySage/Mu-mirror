@@ -110,7 +110,7 @@
 | 2026-09-03 | B Agent 对账：T-B-0 大部分基线已有（Tag 删除/AES 密钥外置/@EnableScheduling/软删除过滤均已就位）；剩 retry 端点、confirm 补分类、真连接测试、GetModelInfo 维度校验 |
 | 2026-09-04 | F Agent 完成 T-F-0~3：审核片段卡片全链路（轮询+ChunkCard+ReviewPanel）、R 包装判错修复、ChunkDTO 扁平化修复、rag_half_life 滑块。commit f9026ee。T-F-4~6 等 B 接口 |
 | 2026-09-04 | B Agent 完成 T-B-0~3（限流中断一次，已恢复）：confirm 补分类/新端点/retry/auto 审核/画像快照+漂移检测+定时。11/11 测试过。T-B-4 对话、T-B-5 未做 |
-| 2026-09-04 | **用户裁决：前端大改**——现有 UI 拉胯，按 docs/prototype/mirror-prototype-v2.html 重做（深蓝黑玻璃拟态设计语言）。F 任务书重写为 T-F-R1~R7，保留 api/stores/轮询等工程资产 |
+| 2026-09-04 | **用户裁决：前端大改**——现有 UI 拉胯，按 Mu-mirror-F/docs/archive/prototype/mirror-prototype-v2.html 重做（深蓝黑玻璃拟态设计语言）。F 任务书重写为 T-F-R1~R7，保留 api/stores/轮询等工程资产 |
 | 2026-09-04 | 第二轮派发：B 做 T-B-4 对话 + T-B-5 收尾 + fail_reason 透出 + GetModelInfo 加字段；F 按 v2 原型重做全部 UI |
 | 2026-09-04 | F 第二轮完成（网络证书错误中断一次已恢复）：v2 原型 UI 全量重做、10 标志元素全移植、镜子页接真接口、死代码清理 22→13 组件、build 零警告 |
 | 2026-09-04 | B 第二轮完成（网络证书错误中断一次已恢复）：T-B-4 对话 SSE 四路检索、T-B-5 总结/灵感/导出、fail_reason 落库（@agent-DB 1 条 DDL）、ModelInfoRequest 加 embedding_config（@agent-AI 同步）。18/18 测试过 |

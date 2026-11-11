@@ -214,7 +214,8 @@ $env:MIRROR_TEST_DB_USERNAME = "postgres"
 
 ## 文档
 
-- `docs/2026-09-03-system-design-v2.md` — **系统唯一权威设计文档**（v2.3，15 章 + 裁决清单）
+- [三端项目进度](docs/PROGRESS.md) — 当前状态、待跟踪事项与历史进度摘要
+- `docs/2026-09-03-system-design-v2.md` — v2.3 设计快照（历史；早于 Agent v2、塔罗、成长与成就）
 - `HANDOVER.md` — 交接文档
 - `docs/coordination/` — 三仓协作与协议登记
   - `chat-loop-design.md` / `chat-loop-integration.md` — 对话循环设计与联调手册
