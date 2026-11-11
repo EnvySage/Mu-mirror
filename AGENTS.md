@@ -7,4 +7,5 @@ Java 后端负责 REST API、业务规则、用户授权和 PostgreSQL 数据。
 - pre-commit 钩子会拒绝超过约 20KB 的文本文件；提交被拒时按报错拆分，不要绕过钩子。
 - 新克隆后运行 `git config core.hooksPath .githooks` 启用钩子。
 - 数据库变更同时核对 [基线 DDL](src/main/resources/db/schema.sql) 和已有库的迁移路径。发布或回退按对应专题文档执行。
+- 表结构变更必须同时更新 `schema.sql` 并新增下一编号迁移；两台开发机都执行同一迁移，连接差异只放 `application-local.yml`。
 - 改 gRPC 契约时先对齐 AI 仓的源定义，再同步 [Java proto](src/main/proto/) 并更新 [协议登记](docs/shared-protocol.md)。
