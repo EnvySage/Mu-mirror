@@ -1,698 +1,420 @@
-# AI 日记镜子系统 - 开发进度
+# Mu-mirror-B 当前现状（唯一维护文档）
 
-> 本文档用于跨对话快速跟踪项目进度，避免重复理解项目结构。
-> 最后更新：2026-08-13（TypeHandler 全局注册问题修复）
-
----
-
-## 一、项目概览
-
-- **项目名称**：Mu-mirror-B（AI 日记镜子系统）
-- **项目性质**：毕业设计 / 论文项目
-- **核心理念**：零负担记录 → AI 自动整理 → 生成用户画像（"镜子"）
-- **技术栈**：Spring Boot 3.5 + MyBatis-Plus + PostgreSQL + Redis + JWT + Python gRPC AI 服务
-- **端口**：9005，上下文路径 `/api`
-- **开发时间线**：2026-08 ~ 2027-04（论文答辩）
+> **最后核对：2026-11-11**
+> 核对方式：逐项对照 `src/main/java`、`src/main/resources`、`src/test/java` 与当前工作树，**不沿用旧进度文档的结论**。
+> 维护约定：项目只维护这一份"当前真相"。其他文档要么是专题说明，要么是历史决策记录；与代码冲突时，以代码为准，并回来更新本文件。
+> 旧 `PROGRESS.md`（停留在 2026-08-13）与 `HANDOVER.md`（2026-09-06）不再作为进度依据。
 
 ---
 
-## 二、模块开发状态
+## 1. 项目定位与系统边界
 
-| 优先级 | 模块 | 状态 | 说明 |
-|--------|------|------|------|
-| P0 | 用户认证 (Auth) | ✅ 完成 | 注册、登录、JWT、/auth/me |
-| P0 | 记录管理 (Records) | ✅ 完成 | CRUD + 软删除 + 人工审查 + API文档注解 |
-| P0 | 镜子/画像 (Mirror) | ⬜ 未开始 | 依赖 Records + AI 服务 |
-| P0 | 对话 (Chat) | ⬜ 未开始 | 依赖 Records + AI 服务 |
-| P0 | 用户设置 (Settings) | ✅ 完成 | AI 模型配置 CRUD + AES 加密 + 注册自动创建 |
-| P1 | 日历导航 (Calendar) | ✅ 完成 | 按月查询每天记录数，用于日历标记 |
-| P1 | 每日摘要 (Daily Summary) | ⬜ 未开始 | 依赖 Records |
-| P1 | 写作灵感 (Inspiration) | ⬜ 未开始 | 依赖 AI 服务 |
-| P2 | 活动统计 (Activity) | ⬜ 未开始 | 依赖 Records |
-| - | AI 服务 (Python gRPC) | 🔧 进行中 | 分类层已接入，配置传递已通，Proto 已同步，Embedding 向量落库完成，拆分功能已实现 |
-| - | 前端 (Vue 3) | ⬜ 未开始 | |
-
----
-
-## 三、已完成的代码结构
+「AI 日记镜子」：用户随手写记录，AI 拆分、分类、打标签；用户审核确认后，片段进入 pgvector 检索与画像；对话时由 Agent 按需调用只读工具，再用有证据的材料回答。
 
 ```
-src/main/java/org/xianshen/mumirrorb/
-├── MuMirrorBApplication.java
-├── common/
-│   ├── enums/
-│   │   ├── ResultCode.java              # 统一错误码
-│   │   ├── ContentType.java             # 内容类型枚举
-│   │   ├── MoodType.java                # 情绪类型枚举
-│   │   └── RecordStatus.java            # 记录状态枚举（processing/reviewing/done/failed）
-│   ├── exception/
-│   │   ├── BusinessException.java
-│   │   ├── AuthenticationException.java
-│   │   └── GlobalExceptionHandler.java
-│   ├── handler/
-│   │   ├── JsonbTypeHandler.java        # JSONB 类型处理器（List<String>）
-│   │   ├── UuidTypeHandler.java         # UUID 类型处理器
-│   │   ├── VectorTypeHandler.java       # pgvector 向量类型处理器
-│   │   └── jsonb/
-│   │       └── JsonbMapTypeHandler.java # JSONB 类型处理器（Map<String, Object>）
-│   ├── security/
-│   │   ├── JwtAuthenticationFilter.java # JWT 过滤器
-│   │   └── UserDetailsServiceImpl.java
-│   └── utils/
-│       ├── JwtUtils.java
-│       └── CryptoUtils.java             # AES-GCM 加密工具
-├── config/
-│   ├── SecurityConfig.java              # 路由权限配置
-│   ├── Knife4jConfig.java               # API 文档
-│   ├── WebMvcConfig.java                # CORS
-│   └── GrpcClientConfig.java            # gRPC channel 管理
-├── controller/
-│   ├── AuthController.java              # 认证端点（4个）
-│   ├── RecordController.java            # 记录端点（6个）
-│   └── SettingsController.java          # 配置端点（4个）
-├── mapper/
-│   ├── UserMapper.java
-│   ├── RecordMapper.java
-│   ├── TagMapper.java
-│   ├── ChunkMapper.java                 # 向量块 Mapper（含相似度检索）
-│   └── SettingsMapper.java
-├── pojo/
-│   ├── R.java                           # 统一响应 {code, message, data, timestamp}
-│   ├── DO/
-│   │   ├── User.java                    # UUID id, username, passwordHash, createdAt
-│   │   ├── Record.java                  # 记录实体（UUID userId）
-│   │   ├── Tag.java                     # 标签实体
-│   │   ├── Chunk.java                   # 向量块实体（pgvector embedding）
-│   │   └── UserSettings.java            # 用户配置实体（LLM/Embedding 配置）
-│   ├── DTO/
-│   │   ├── UserLoginDTO.java
-│   │   ├── UserRegisterDTO.java
-│   │   ├── RecordDTO.java               # 记录创建/更新 DTO
-│   │   ├── RecordQueryDTO.java          # 记录查询 DTO（日期范围）
-│   │   └── SettingsDTO.java             # 配置更新 DTO
-│   └── VO/
-│       ├── LoginVO.java
-│       ├── UserVO.java
-│       ├── RecordVO.java                # 记录视图对象
-│       ├── CalendarDayVO.java           # 日历日期统计（date + cnt）
-│       └── SettingsVO.java              # 配置视图对象（API Key 脱敏）
-├── service/
-│   ├── AuthService.java
-│   ├── RecordService.java               # 记录服务接口
-│   ├── SettingsService.java             # 配置服务接口
-│   └── impl/
-│       ├── AuthServiceImpl.java
-│       ├── RecordServiceImpl.java       # 记录服务实现
-│       └── SettingsServiceImpl.java     # 配置服务实现
-├── grpc/
-│   └── AiGrpcClient.java               # AI gRPC 客户端封装
-└── pipeline/                            # 数据管道框架
-    ├── RecordProcessor.java             # 管道处理器接口
-    ├── RecordPipeline.java              # 管道编排器
-    ├── CleanProcessor.java              # 第1层：文本清洗
-    ├── ClassifyProcessor.java           # 第2层：AI 分类
-    └── event/
-        ├── RecordCreatedEvent.java
-        └── RecordEventListener.java     # 事件监听器（触发管道）
-```
-
----
-
-## 四、数据库状态
-
-### 已创建的表
-
-```sql
--- users 表
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX idx_users_username ON users(username);
-
--- records 表（已实现）
-CREATE TABLE records (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
-    content TEXT NOT NULL,
-    title VARCHAR(200),
-    summary VARCHAR(500),
-    content_type VARCHAR(20),
-    mood JSONB DEFAULT '[]',
-    status VARCHAR(20) DEFAULT 'processing',
-    user_reviewed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ  -- 软删除字段
-);
-CREATE INDEX idx_records_user_id ON records(user_id);
-CREATE INDEX idx_records_created_at ON records(created_at);
-CREATE INDEX idx_records_deleted_at ON records(deleted_at);
-
--- tags 表（已实现）
-CREATE TABLE tags (
-    id BIGSERIAL PRIMARY KEY,
-    record_id BIGINT NOT NULL REFERENCES records(id),
-    keyword VARCHAR(50) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX idx_tags_record_id ON tags(record_id);
-```
-
-### 已创建的表（新增）
-
-```sql
--- user_settings 表（用户配置）
-CREATE TABLE IF NOT EXISTS user_settings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID UNIQUE NOT NULL REFERENCES users(id),
-    ai_provider VARCHAR(50),         -- AI 提供商：openai/zhipu/qwen
-    ai_api_key TEXT,                 -- API Key（加密存储）
-    ai_base_url TEXT,                -- API 地址
-    ai_model VARCHAR(100),           -- 模型名称
-    embedding_source VARCHAR(20) DEFAULT 'local', -- local / api
-    embedding_api_key TEXT,          -- Embedding API Key（加密）
-    embedding_model VARCHAR(100),    -- Embedding 模型名
-    review_mode VARCHAR(20) DEFAULT 'manual', -- manual / auto
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
-```
-
-### 已创建的表（新增 - pgvector）
-
-```sql
--- chunks 表（向量存储，用于 RAG 检索）
-CREATE TABLE IF NOT EXISTS chunks (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
-    record_id BIGINT NOT NULL REFERENCES records(id),
-    content TEXT NOT NULL,
-    metadata JSONB,
-    embedding vector(1024),              -- BGE-m3 默认 1024 维
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_record_id ON chunks(record_id);
-```
-
-### 待创建的表（设计文档中已定义）
-
-- ~~`chunks` — pgvector 向量存储（embedding + metadata）~~ ✅ 已完成
-- `daily_summaries` — 每日摘要
-- `mirror_profiles` — AI 生成的用户画像（JSONB）
-- `conversation_history` — 对话历史
-- `chat_sessions` — 对话会话
-
----
-
-## 五、已有 API 端点
-
-### 认证模块
-
-| 方法 | 路径 | 认证 | 说明 |
-|------|------|------|------|
-| GET | `/api/auth/status` | 公开 | 健康检查 |
-| POST | `/api/auth/register` | 公开 | 用户注册 |
-| POST | `/api/auth/login` | 公开 | 用户登录，返回 JWT |
-| GET | `/api/auth/me` | JWT | 获取当前用户信息 |
-
-### 记录模块
-
-| 方法 | 路径 | 认证 | 说明 |
-|------|------|------|------|
-| POST | `/api/records` | JWT | 创建记录（提交内容，触发AI处理） |
-| GET | `/api/records` | JWT | 查询记录列表（支持日期范围筛选，默认查今天） |
-| GET | `/api/records/{id}` | JWT | 获取单条记录详情 |
-| PUT | `/api/records/{id}` | JWT | 更新记录（仅REVIEWING状态允许） |
-| PUT | `/api/records/{id}/confirm` | JWT | 确认审查完成（REVIEWING → DONE） |
-| DELETE | `/api/records/{id}` | JWT | 软删除记录（仅REVIEWING/FAILED状态允许） |
-| GET | `/api/records/calendar` | JWT | 日历标记（返回指定月份每天有效记录数） |
-
-### 配置模块
-
-| 方法 | 路径 | 认证 | 说明 |
-|------|------|------|------|
-| GET | `/api/settings` | JWT | 获取当前用户配置（API Key 脱敏） |
-| PUT | `/api/settings` | JWT | 更新配置（部分更新，API Key 加密存储） |
-| POST | `/api/settings/test-ai` | JWT | 测试 AI 连接 |
-| POST | `/api/settings/test-db` | JWT | 测试数据库连接 |
-
-### 记录状态流转
-
-```
-PROCESSING → REVIEWING → DONE
-    ↓
-  FAILED
-```
-
-- **PROCESSING**：AI 正在处理（前端显示转圈动画）
-- **REVIEWING**：人工审查中（用户可修改标签）
-- **DONE**：已完成（用户已确认）
-- **FAILED**：处理失败
-
----
-
-## 六、关键设计文档索引
-
-| 文件 | 内容 |
-|------|------|
-| `2026-09-03-system-design-v2.md` | **总设计文档 v2.1（唯一权威文档）**：Chunk 业务单元模型、segment 手动调整、画像快照、对话、测试设计、开发路线图 |
-| `archive/2026-07-23-ai-diary-mirror-design.md` | 旧主设计 v1.4（已归档，不再维护） |
-| `archive/2026-07-23-mirror-implementation.md` | 旧实现文档 v0.6（已归档） |
-| `archive/2026-08-04-ai-service-design.md` | 旧 AI 服务设计 v0.5（已归档） |
-| `archive/2026-08-18-optimization-design.md` | 旧优化设计 v0.3（已归档，增量已并入 v2.1 第六章） |
-
----
-
-## 七、下一步计划
-
-**当前目标：对接 AI 服务**
-
-1. ~~搭建 gRPC 基础设施~~ ✅ 已完成
-2. ~~分类层接入 gRPC~~ ✅ 已完成
-3. ~~Python 端实现真实的 Classify（接 LLM，支持拆分+分类，返回 repeated ClassifyItem）~~ ✅ Java 端已实现
-4. ~~实现 Chunk 实体 + ChunkMapper + chunks 表（pgvector）~~ ✅ 已完成
-5. ~~confirmReview() 中 Embedding 存储向量~~ ✅ 已完成
-6. 实现镜子/画像模块（用户画像生成）
-
-**后续目标：**
-
-7. 对话模块（基于 RAG 的 AI 对话）
-8. 每日摘要生成
-9. 前端开发（Vue 3）
-
----
-
-## 八、开发约定
-
-- **实体命名**：DO 类用数据库表名对应，DTO 用于输入，VO 用于输出
-- **响应格式**：统一使用 `R<T>` 包装
-- **主键**：
-  - users 表：UUID，由数据库 `gen_random_uuid()` 生成
-  - records/tags 表：BIGSERIAL 自增
-- **UUID 映射**：全局注册 `type-handlers-package`，所有 UUID 字段自动使用 UuidTypeHandler
-- **时间**：使用 `TIMESTAMPTZ`，应用层用 `OffsetDateTime`
-- **密码**：BCrypt 哈希存储
-- **JWT**：24 小时过期，Bearer Token 放 Authorization 头
-- **软删除**：使用 `deleted_at` 字段，查询时自动过滤
-- **API 文档**：Knife4j，地址 `/api/doc.html`，所有接口有详细注解
-
----
-
-## 九、更新记录（2026-08-13 — 拆分功能）
-
-### 拆分关联优化
-
-1. **新增 `originalRecordId` 字段**
-   - Record 实体类新增 `originalRecordId` 字段
-   - RecordVO 新增 `originalRecordId` 字段
-   - 拆分后的记录指向原记录 ID，非拆分记录为 NULL
-
-2. **ClassifyProcessor 设置关联**
-   - 第一条记录：`originalRecordId = null`（原记录）
-   - 后续记录：`originalRecordId = 原记录ID`（拆分生成）
-
-3. **数据库字段**
-   - `records` 表新增 `original_record_id` 字段
-   - 添加索引 `idx_records_original_record_id`
-
-4. **前端使用**
-   - 判断是否拆分：`record.originalRecordId !== null`
-   - 获取拆分组：`records.filter(r => r.originalRecordId === record.originalRecordId || r.id === record.originalRecordId)`
-
-### 拆分功能实现
-
-1. **修改 Proto 定义**
-   - `ClassifyResponse` 改为支持拆分：`repeated ClassifyItem items = 3`
-   - 新增 `ClassifyItem` 消息：title, summary, content_type, moods, status, keywords
-   - 一次 LLM 调用可返回多条分类结果
-
-2. **修改 RecordProcessor 接口**
-   - 接口改为 `List<Record> process(List<Record> records)`
-   - 支持一条记录变成多条（拆分场景）
-
-3. **修改 CleanProcessor**
-   - 适配新接口，对每条记录做清洗（1:1 映射）
-
-4. **修改 ClassifyProcessor（核心）**
-   - 处理多条拆分结果
-   - 遍历 `response.getItemsList()`，为每条 ClassifyItem 创建 Record
-   - 第一条复用原记录 ID（更新原记录），后续插入新记录
-
-5. **修改 RecordPipeline**
-   - 输入单条记录，输出可能多条
-   - 将单条记录包装成 List，依次传递给处理器
-
-6. **修改 RecordEventListener（核心）**
-   - 处理拆分后的多条记录
-   - 无拆分：更新原记录
-   - 有拆分：第一条更新原记录，后续插入新记录
-   - 每条记录的关键词标签独立保存
-
-7. **重新编译 Proto**
-   - `mvn protobuf:compile protobuf:compile-custom`
-   - 3 个 proto 文件编译成功
-
-### 拆分流程
-
-```
-用户输入: "今天上午学了 Spring Boot，下午去健身"
-    │
-    ▼
-RecordCreatedEvent → RecordEventListener
-    │
-    ▼
-RecordPipeline.execute()
-    ├─ CleanProcessor: 文本清洗
-    └─ ClassifyProcessor: gRPC 调用 Python
-        │
+Vue 3 前端（Mu-mirror-F）
+        │ HTTP /api，JWT
         ▼
-    Python LLM: 判断有两件事 → 拆分
-        │
-        ├─ ClassifyItem 1: { title: "学Spring Boot", type: "learning", ... }
-        └─ ClassifyItem 2: { title: "下午健身", type: "health", ... }
-        │
-        ▼
-    Java: 创建 2 条 record (status=reviewing)
+本仓 Mu-mirror-B（Spring Boot，端口 9050）
+        │ SQL
+        ├──────────────► PostgreSQL + pgvector
+        │ gRPC
+        ├── 10003 ────► Mu-mirror-AI legacy 推理（分类/Embedding/Chat/画像）
+        └── 10004 ────► Mu-mirror-AI Agent v2（graph_v2 实验路径，默认关闭）
 ```
 
-### TypeHandler 全局注册问题修复
-
-1. **Chunk.metadata 类型转换错误**
-   - 问题：`JsonbTypeHandler` 只支持 `List<String>`，Chunk.metadata 是 `Map<String, Object>`
-   - 修复：新增 `JsonbMapTypeHandler`，支持 Map 与 JSONB 的映射
-
-2. **JsonbMapTypeHandler 全局注册干扰**
-   - 问题：`type-handlers-package` 全局扫描所有子包，`JsonbMapTypeHandler` 的 `@MappedTypes(Map.class)` 干扰所有 Map 返回值
-   - 现象：日历接口 `countByDay` 返回的 `Map<String, Object>` 中 date 字段被错误地用 JSONB 解析
-   - 修复：将 `JsonbMapTypeHandler` 移到 `handler.jsonb` 子包（但无效，因为子包也会被扫描）
-
-3. **日历接口改用 CalendarDayVO**
-   - 问题：全局 TypeHandler 扫描无法避免对 Map 返回值的干扰
-   - 修复：新增 `CalendarDayVO` 类，`countByDay` 返回 `List<CalendarDayVO>` 替代 `List<Map>`
-   - 彻底避免 TypeHandler 对通用类型 Map 的干扰
-
-4. **经验教训**
-   - `type-handlers-package` 会扫描指定包及其所有子包
-   - `@MappedTypes(Map.class)` 这样的通用类型注解会影响所有 Map 返回值
-   - 自定义 TypeHandler 应该使用具体的 Java 类型（如 `List<String>`），而不是通用类型（如 `Map`）
-   - Mapper 返回值尽量用 DTO/VO 类，避免用 `Map<String, Object>`
+**分工原则**：Java 管数据、权限、业务状态与工具执行；Python 管纯推理，不连业务库。用户自己的 LLM / Embedding 配置存在 `user_settings`，随每次 gRPC 请求下发。
 
 ---
 
-## 九、更新记录（2026-08-12 — Embedding 向量落库）
+## 2. 技术栈与运行
 
-### Embedding 向量落库功能
+| 层 | 事实 |
+|---|---|
+| Java | **17**（`pom.xml`） |
+| 框架 | Spring Boot **3.5.16**、Spring Security、Spring Web |
+| 持久层 | MyBatis-Plus **3.5.5**（注解式 Mapper，无 XML 业务 SQL）、Druid 1.2.25 |
+| 数据库 | PostgreSQL + pgvector 0.1.6（向量 1024 维，HNSW cosine） |
+| gRPC | 1.68.0（netty-shaded）、protobuf 3.25.5 |
+| 认证 | JWT（jjwt 0.12.3），24 小时 |
+| 文档 | springdoc-openapi 2.9.0 + Knife4j 4.4.0，`/api/doc.html` |
+| 文件解析 | PDFBox 2.0.29、POI 4.1.2 |
+| Redis | **未使用**，旧配置里的 Redis 段落是历史残留 |
 
-1. **添加 pgvector Java 依赖**
-   - pom.xml 新增 `com.pgvector:pgvector:0.1.6`
+**运行事实**
 
-2. **新建 VectorTypeHandler**
-   - 文件：`src/main/java/org/xianshen/mumirrorb/common/handler/VectorTypeHandler.java`
-   - 功能：PostgreSQL vector 类型与 Java List<Float> 的双向映射
-   - 参考 JsonbTypeHandler 模式实现
+- 端口 `9050`，上下文路径 `/api`。
+- 默认 profile 是 `prod`；仓库没有完整的 `application-prod.yml`，本地必须用：
+  `mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev`
+- dev 数据源：`jdbc:postgresql://localhost:5432/mu_mirror`，时区 `Asia/Shanghai`。
+- 旧 AI 服务默认 `127.0.0.1:10003`；Agent v2 默认 `localhost:10004`。
+- 新库执行 `src/main/resources/db/schema.sql`（已包含 V16 最终结构）。
+- 已有库按 `migration-v2.sql` → `v3` → … → `v16` 顺序升级；`schema.sql` 不能替代存量迁移。
 
-3. **新建 Chunk 实体类**
-   - 文件：`src/main/java/org/xianshen/mumirrorb/pojo/DO/Chunk.java`
-   - 字段：id, userId, recordId, content, metadata(JSONB), embedding(vector), createdAt
-   - metadata 存储 contentType、mood、title、createdAt 等元数据
+**测试**
 
-4. **新建 ChunkMapper**
-   - 文件：`src/main/java/org/xianshen/mumirrorb/mapper/ChunkMapper.java`
-   - 方法：searchBySimilarity（余弦相似度检索）、searchBySimilarityWithFilter（带过滤）
+```powershell
+.\mvnw.cmd test                       # 大多数是 Mockito 单测
+.\mvnw.cmd -DskipTests compile        # 只编译
+```
 
-5. **新建 chunks 表 SQL**
-   - 文件：`src/main/resources/db/chunks.sql`
-   - 表结构：id, user_id, record_id, content, metadata, embedding(vector(1024)), created_at
-   - 索引：user_id、record_id
-
-6. **修改 RecordServiceImpl.confirmReview()**
-   - 注入 ChunkMapper
-   - 取消 Embedding 存储注释，完成向量落库逻辑
-   - 构建 metadata（contentType、mood、title、createdAt）
-   - Embedding 失败不影响确认流程
-
----
-
-## 九、更新记录（2026-08-12 — 设计修正）
-
-### 设计修正（文档 + 代码）
-
-1. **拆分从输入层移至分类层**
-   - 原设计：输入层做多事件拆分 → 分类层做标签
-   - 新设计：分类层一次 LLM 调用同时完成拆分 + 分类
-   - Proto：`ClassifyResponse` 改为 `repeated ClassifyItem items`（支持返回多条）
-   - 理由：拆分是 AI 任务，与分类在一次调用中完成效率最高（1 次 vs N+1 次），用户只需审核一次
-
-2. **Embedding 从管道移出**
-   - 原设计：EmbedProcessor 在管道中 @Order(3)，但实际是桩代码从未执行
-   - 新设计：Embedding 在 `confirmReview()` 中触发（用户确认后才执行）
-   - 删除 `EmbedProcessor.java`（死代码）
-   - `RecordServiceImpl.confirmReview()` 新增 Embedding 调用
-
-3. **时区策略**
-   - 确认使用 UTC + 8（东八区）统一标准（待后续代码对齐）
-
-4. **超时设置**
-   - Classify 超时从 30s 调整为 180s（LLM 含拆分+分类，耗时长）
-
-5. **Embedding 失败策略**
-   - Embedding 失败不影响确认流程，记录仍变为 DONE
-   - 向量未写入但记录已锁定，后续可补录
-
-6. **文档全面更新**
-   - 主设计文档 v1.4、AI 服务设计 v0.5、实现文档 v0.6
-   - 管道图、状态流转图、数据流图、代码示例全部同步修正
-
-7. **Embedding 配置补全：新增 `embedding_base_url` 字段**
-   - 原设计：Embedding 缺少 `base_url`，无法自定义 API 地址
-   - 新增字段：`user_settings.embedding_base_url`
-   - 涉及文件：`UserSettings.java`、`SettingsDTO.java`、`SettingsVO.java`、`AiGrpcClient.java`、`SettingsServiceImpl.java`、`common.proto`、`schema.sql`
-   - Proto：`EmbeddingConfig` 新增 `base_url` 字段
-   - Python 端需同步：重新编译 proto + 更新 `ApiEmbedder` 使用 `base_url`
-
-8. **日历接口 Druid SQL 兼容修复**
-   - 问题：Druid SQL 防火墙不认 `AT TIME ZONE` 语法，报 `ParserException`
-   - 修复：去掉 SQL 中的 `AT TIME ZONE 'Asia/Shanghai'`，改用 `TO_CHAR(created_at, 'YYYY-MM-DD')`
-   - 时区保障：`application-dev.yml` 数据库连接加 `options=-c timezone=Asia/Shanghai`，确保会话时区为北京时间
-   - 涉及文件：`RecordMapper.java`、`application-dev.yml`
+需要真实 PostgreSQL 的测试会读 `MIRROR_TEST_DB_URL` / `MIRROR_TEST_DB_USERNAME` / `MIRROR_TEST_DB_PASSWORD`。未配置时部分测试会跳过；**跳过不能当作通过**。成就测试还要求库名匹配 `codex_assistant_growth_test_*` 并在随机 schema 中执行。
 
 ---
 
-## 九、更新记录（2026-08-12 — 日历导航）
+## 3. 模块状态（以代码为准）
 
-### 日历导航接口
+| 模块 | 状态 | 代码入口 / 说明 |
+|---|---|---|
+| 认证 | ✅ | `AuthController`，注册/登录/JWT/`me` |
+| 记录与片段 Chunk | ✅ | `RecordController`；事件管道 `pipeline/`；审核、拆分、重试、日历、片段编辑、异步向量化 |
+| 用户设置 | ✅ | `SettingsController`；`user_settings`；API Key AES-256-GCM 加密、脱敏；`test-ai` / `test-embedding` / `test-db` |
+| 模型连接档案 | ✅ | `ModelProfileController`（同 `/settings` 前缀）；`user_model_profiles`；保存与"应用"分离 |
+| 镜子 / 画像 | ✅ | `MirrorController`、`MirrorServiceImpl`；累计画像、月度快照、漂移、来源 lineage、归档分页 |
+| 对话 / Agent | ✅（双引擎） | `MirrorController` `/chat`、`AgentRunService`、`ChatServiceImpl`、`ToolOrchestrator`；`legacy` 默认，`graph_v2` 按用户灰度，`shadow` 影子采样 |
+| 会话与每日总结 | ✅ | `chat_sessions`、`chat_day_summaries`；按日会话、结束日总结、失败重试 |
+| 聊天记忆与遗忘 | ✅ | `chat_memories`、`chat_source_exclusions`；最多注入 5 条相关记忆；遗忘通过操作卡执行，历史原文仍可查但不再进入后续上下文 |
+| 操作卡 / 助手动作 | ✅ | `AssistantActionController`；`assistant_actions`；准备→编辑→确认/取消，幂等与版本冲突 |
+| 每日总结 | ✅ | `SummaryController`；01:00 Asia/Shanghai 定时，分页、缺失、回填、重生成 |
+| 写作灵感 | ✅ | `InspirationController` |
+| 日历导航 | ✅ | `GET /records/calendar`，按上海时区统计 |
+| 数据导出 | ✅ | `ExportController`；JSON / Markdown，只导出不导入，排除向量 |
+| 资产 Vault | ✅ | `VaultController`、`VaultService`、`DigestService`；PG BYTEA、magic bytes 白名单、配额、五态机、确认后才进入检索 |
+| 个人词典 | ✅ | `GlossaryController`；候选/确认/忽略/抽取；仅 confirmed 词条注入 |
+| 待办 Todo | ✅ | `TodoController`；registry 物化索引 + chunk.metadata 真源双写；建议需用户确认 |
+| 五维成长 | ✅ | `GrowthController`；成长账本、维度锁定、手动贡献、来源追溯 |
+| 塔罗 | ✅ | `TarotController`；78 张牌 v2 目录、每日抽牌、问题牌、分析版本、收藏、偏好 |
+| 成就 | 🚧 第一批已进代码，未提交 | `achievement/`、`AchievementController`、`catalog.json`（**56 枚**：原 34 + 第一批 22），V16 迁移；第二至四批按 `docs/achievement-implementation-plan.md` 待实现 |
+| 前端 | 独立仓 | `Mu-mirror-F`（Vue 3） |
+| 部署 | ✅ | `Jenkinsfile`、`deploy/backend-release.sh`、systemd、nginx 配置 |
 
-1. **新增 `GET /api/records/calendar` 接口**
-   - 参数：`month`（格式 `2026-08`）
-   - 返回：`Map<String, Integer>`（日期 → 有效记录数）
-   - 只统计未删除且非 failed 的记录
-   - 时区按 `Asia/Shanghai` 转换
-   - 涉及文件：`RecordMapper.java`（SQL）、`RecordService.java`（接口）、`RecordServiceImpl.java`（实现）、`RecordController.java`（端点）
-
-2. **软删除权限调整**
-   - 之前：只有 REVIEWING 状态才能删除
-   - 现在：REVIEWING 和 FAILED 状态都允许删除
-
-3. **gRPC Classify 超时调整**
-   - 从 30 秒改为 180 秒（3 分钟），适应 LLM 处理耗时
-
-### 文档与代码对齐
-
-1. **三份设计文档全面修正**
-   - 修正数据库表结构（users/records/tags/user_settings）与实际 schema 一致
-   - 认证系统从"简单密码保护"改为 JWT 注册/登录
-   - API 端点与实际 Controller 一致
-   - 记录状态值统一：`pending_review` → `reviewing`，移除 `rejected`
-   - 模块结构更新：包名 `com/mirror` → `org/xianshen/mumirrorb`
-   - Proto 定义同步：`LlmConfig` 新增 `AiProtocol protocol` 字段
-   - 移除未实现的 RPC：`Split`、`EmbedBatch`
-   - LLM 工厂函数更新：按 `protocol` 路由（openai/anthropic）
-   - AiGrpcClient 代码示例更新（UUID userId, SettingsMapper, CryptoUtils）
-
-2. **发现并记录 Proto 同步问题**
-   - Python 端 `common_pb2.py` 过时，字段定义与 Java 端不一致
-   - 导致 gRPC 传输时字段错位（api_key/base_url/model 全部串位）
-   - 修复方法：在 Python 项目执行 `python generate_proto.py` 重新编译
-   - 同时 `record_processor.py` 中 `llm_config.ai_protocol` 需改为 `llm_config.protocol`
+**当前工作树特殊状态（2026-11-11）**：成就系统整体尚未提交（`git status` 中为 `??`）；`README.md`、`ChatServiceImpl`、`GlossaryServiceImpl`、`ModelProfileService`、`ExportController`、`schema.sql` 和两个测试有未提交修改。做任何发布前先确认这批改动是否完整、是否应拆成独立提交。
 
 ---
 
-## 十、更新记录（2026-08-11）
+## 4. REST API 清单（19 个控制器）
 
-### 分类层接入 gRPC + 配置传递
+统一响应 `R<T>`：`{code, message, data, timestamp}`，`code == 200` 为成功。以下只列路径与用途，详细 DTO 以 Controller 注解和 `/api/doc.html` 为准。
 
-1. **删除测试代码**
-   - 删除 `GrpcTestController.java`（临时测试端点）
-   - 清理 `SecurityConfig.java` 中的测试端点公开访问
-
-2. **ClassifyProcessor 接入真实 gRPC**
-   - 从桩实现改为调用 `aiGrpcClient.classify(userId, content)`
-   - 将 AI 返回的 title/summary/contentType/mood/keywords 写入 record
-   - AI 判定无意义内容（skip=true）时抛异常，管道中断
-
-3. **AiGrpcClient 改造**
-   - classify/embed 方法新增 userId 参数
-   - 从 `user_settings` 表读取用户配置，构建 `LlmConfig`/`EmbeddingConfig` 传给 Python
-   - 注入 `SettingsMapper` 读取配置
-   - API Key 解密后传给 Python
-
-4. **Proto 更新**
-   - `common.proto` 新增 `AiProtocol` 枚举（OPENAI/ANTHROPIC）+ `LlmConfig` + `EmbeddingConfig` 消息
-   - `record_processor.proto` 的 `ClassifyRequest` 新增 `llm_config` 字段
-   - `embedding.proto` 的 `EmbedRequest` 新增 `embedding_config` 字段
-   - `embedding.proto` 补充 `import "common.proto"`
-
-5. **用户配置新增 aiProtocol 字段**
-   - `UserSettings.java`、`SettingsDTO.java`、`SettingsVO.java` 新增 `aiProtocol`
-   - `SettingsServiceImpl.java` 更新逻辑 + 默认值 `"anthropic"`
-   - 数据库：`ALTER TABLE user_settings ADD COLUMN ai_protocol VARCHAR(20) DEFAULT 'anthropic'`
-
-6. **事件机制修复**
-   - `RecordCreatedEvent` userId 从 String 改为 UUID
-   - `RecordServiceImpl` 启用事件发布（之前被注释）
-   - `RecordEventListener` 管道完成后状态改为 REVIEWING（等用户审核）
-
-7. **踩坑记录**
-   - **protobuf 消息类是内部类**：`ClassifyResponse` 要用 `RecordProcessorProto.ClassifyResponse`
-   - **枚举在 common.proto**：`ContentType`/`MoodType`/`TaskStatus` 在 `CommonProto` 里，不在 `RecordProcessorProto`
-   - **Spring Boot 3 + gRPC javax 注解**：需手动加 `javax.annotation-api` 依赖
-   - **proto import 缺失**：`embedding.proto` 使用 `EmbeddingConfig` 但没 import `common.proto`
-   - **Python proto 需同步重新编译**：Java 端加了新消息后 Python 必须重新生成 pb2 文件，否则字段读串
+| 控制器 | 基础路径 | 端点 |
+|---|---|---|
+| `AuthController` | `/auth` | `GET /status`、`POST /register`、`POST /login`、`GET /me` |
+| `RecordController` | `/records` | `POST /`、`POST /{id}/organize`、`PUT /{id}/content`、`GET /`、`GET /{id}`、`PUT /{id}/confirm`、`GET /{id}/suggestions`、`POST /{id}/retry`、`DELETE /{id}`、`GET /calendar`、`POST /{id}/chunks` |
+| `ChunkController` | `/chunks` | `PUT /{id}`、`POST /{id}/embedding/retry`、`DELETE /{id}` |
+| `MirrorController` | `/mirror` | `GET /`、`POST /generate`、`POST /generate-monthly`、`GET /stats`、`GET /snapshots`、`GET /snapshot-months`、`GET /snapshots/{id}`、**`POST /chat`（SSE）**、`GET /sessions`、`GET /sessions/today`、`POST /sessions/today`、`POST /sessions/{id}/summary/retry`、`GET /sessions/{id}`、`DELETE /sessions/{id}` |
+| `AgentRunController` | `/mirror/runs` | `GET /{runId}`（断线重连/幂等恢复读取） |
+| `SettingsController` | `/settings` | `GET /`、`PUT /`、`POST /test-ai`、`POST /test-embedding`、`POST /test-db` |
+| `ModelProfileController` | `/settings` | `GET/POST /model-profiles`、`PUT/DELETE /model-profiles/{id}`、`POST /model-profiles/{id}/activate`、`POST /test-ai/draft` |
+| `SummaryController` | `/summaries` | `GET /`、`GET /missing`、`POST /backfill`、`POST /regenerate` |
+| `InspirationController` | `/inspiration` | `POST /` |
+| `ExportController` | `/export` | `GET /json`、`GET /markdown` |
+| `VaultController` | `/vault` | `POST /upload`、`GET /`、`GET /{id}/download`、`GET /{id}/preview`、`DELETE /{id}`、`POST /{id}/confirm`、`PUT /{id}`、`GET /search` |
+| `GlossaryController` | `/glossary` | `GET /`、`POST /`、`PUT /{id}`、`DELETE /{id}`、`POST /{id}/confirm`、`POST /{id}/dismiss`、`POST /extract` |
+| `TodoController` | `/todos` | `POST /`、`PATCH /{id}`、`GET /pending-suggestions`、`POST /suggestions/{id}/resolve`、`GET /`、`GET /open-chain`、`DELETE /{id}` |
+| `AssistantActionController` | `/assistant/actions` | `POST /prepare`、`PATCH /{id}`、`POST /{id}/confirm`、`POST /{id}/cancel`、`GET /{id}`、`GET /?sessionId=`、`GET /records` |
+| `ChatMemoryController` | `/chat-memories` | `GET /`、`GET /{id}`（遗忘不直连 HTTP，走操作卡） |
+| `GrowthController` | `/growth` | `GET /`、`GET /axes`、`PUT /axes`、`GET /entries`、`POST /manual` |
+| `TarotController` | `/tarot` | `GET /cards`、`GET /history`、`GET /daily`、`POST /daily/draw`、`GET /daily/requests/{id}`、`POST /readings`、`GET /readings/latest`、`GET /readings/{id}`、`POST /readings/{id}/analyses`、`GET /analyses/{id}`、`GET /readings/{id}/analyses`、`GET /collection`、`GET/PUT /preferences` |
+| `AchievementController` | `/achievements` | `GET /`、`GET /pending`、`POST /acknowledge`、`GET/PUT /showcase`、`POST /activity` |
+| `AgentCommandController` | `/internal/agent/commands` | `POST /create-record`、`GET /receipts/{callId}`（内部服务令牌 + HMAC，不是普通 JWT 接口） |
 
 ---
 
-## 十、历史更新记录（2026-08-10）
+## 5. 对话功能：真实链路（重点）
 
-### gRPC 链路测试
+### 5.1 入口与请求
 
-1. **完成 gRPC 基础设施搭建**
-   - pom.xml 添加 gRPC 依赖 + protobuf-maven-plugin
-   - 新增 `GrpcClientConfig.java`、`AiGrpcClient.java`
-   - Java ↔ Python gRPC 链路已通
+`POST /api/mirror/chat`，`SseEmitter`，超时取 `mirror.sse-timeout-ms`（默认 600000 ms）。
 
-### Settings 模块（下午）
-   - 完整 CRUD：获取配置、更新配置（部分更新）
-   - 测试连接：AI 连接测试、数据库连接测试
-   - API Key 加密存储：使用 AES-256-GCM 加密，返回时脱敏
-   - 注册自动创建：用户注册时自动创建空配置
+请求体 `ChatRequestDTO`：
 
-2. **新增文件**
-   - `UserSettings.java` — 配置实体
-   - `SettingsDTO.java` — 配置更新 DTO
-   - `SettingsVO.java` — 配置视图对象（API Key 脱敏）
-   - `SettingsMapper.java` — MyBatis-Plus Mapper
-   - `SettingsService.java` — 配置服务接口
-   - `SettingsServiceImpl.java` — 配置服务实现
-   - `SettingsController.java` — 配置控制器（4 个端点）
-   - `CryptoUtils.java` — AES-256-GCM 加密工具类
+- `question`：必填，非空。
+- `sessionId`：可空；为空时解析/创建**当天**会话。
+- `requestId`：客户端幂等 ID；重连/重试必须复用，用户重新提问要生成新值。
 
-3. **修改文件**
-   - `AuthServiceImpl.java` — 注册时自动创建空配置
-   - `schema.sql` — 新增 user_settings 表定义
-   - `application.yml` — 新增 `type-handlers-package` 全局注册 TypeHandler
+响应不是一次性 JSON，而是 SSE 事件流。**两个引擎共用同一套事件名**：
 
-### 技术决策
+| 事件 | 用途 |
+|---|---|
+| `meta` | 会话、run、request、engine、route、累积 `tools_used`、`sourceMessageId` |
+| `thinking` | 规划器/模型的思考增量（解决"黑屏等待"） |
+| `delta` | 回答正文增量 |
+| `sources` | 引用的日记来源 |
+| `vault_refs` | 引用的资产文件卡 |
+| `action_proposal` / `action_status` | 操作卡准备/状态变化 |
+| `done` | 结束：sessionId、runId、requestId、engine、status、outcome、route、fallback、created_records、stop_reason、error_code |
+| `error` | 失败：code、partial、message |
 
-- **加密方案**：AES-256-GCM，每次加密生成随机 IV，安全性较高
-- **脱敏策略**：API Key 只显示前 3 位 + `***`（如 `sk-***`）
-- **部分更新**：PUT 接口只更新非 null 的字段，避免覆盖已有配置
-- **UUID TypeHandler**：全局注册 `type-handlers-package`，所有 UUID 字段自动使用 UuidTypeHandler，无需逐字段注解
+### 5.2 请求接纳（两个引擎共用）
 
-### UUID 映射踩坑记录
+`AgentRunService.startOrFindRun()` 在一个事务里完成：
 
-PostgreSQL UUID 列与 Java UUID 字段的映射需要 TypeHandler，踩了以下坑：
+1. 用 `requestId` + `requestHash(question, sessionId)` 做幂等；同 ID 不同问题返回冲突。
+2. `DailyChatSessionResolver` 解析或创建当天会话（`chat_sessions.user_id + day_key` 唯一）。
+3. 插入 `agent_runs`（status=`running`，engine=`legacy` / `graph_v2`，lease 默认 30 秒）。
+4. 插入**一条 user 消息**到 `conversation_history`，并回填 `agent_runs.user_message_id`。
+5. 构建 Java 侧可信 `AssistantContext`（角色语气、当前日期/时区、操作卡状态摘要、最多 5 条相关聊天记忆；塔罗上下文按需附加）。
 
-1. `@TableId` 字段不支持 `@TableField(typeHandler=...)` — 需要全局注册
-2. Java String 不能直接与 PostgreSQL UUID 列比较 — 必须用 UUID 类型
-3. 最终方案：`application.yml` 配置 `type-handlers-package`，所有 UUID 字段自动映射
+随后 `dispatch()` 异步执行。控制器在 SSE 关闭/超时/报错时会请求取消，避免孤儿 run。断线后可用 `GET /mirror/runs/{runId}` 读取已落库状态。
 
-### API 端点
+### 5.3 引擎选择
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/settings` | 获取配置（API Key 脱敏） |
-| PUT | `/api/settings` | 更新配置（部分更新） |
-| POST | `/api/settings/test-ai` | 测试 AI 连接 |
-| POST | `/api/settings/test-db` | 测试数据库连接 |
+`chat.engine` 决定本轮走哪条路：
+
+| 值 | 行为 |
+|---|---|
+| `legacy`（默认） | 走 Java 侧 `ChatServiceImpl.runLegacy()`；用户可见 |
+| `graph_v2` | 仅 `chat.graph-enabled-user-ids` 白名单（支持 `*`）命中时走 Python Agent v2；否则仍走 legacy |
+| `shadow` | 用户仍走 legacy；按 `shadow-sample-rate` 抽样在后台跑 graph_v2，影子 run 不产生用户可见副作用 |
+
+`chat.create-record-enabled` 默认 `false`，控制 graph_v2 是否能通过内部命令创建记录。
+
+### 5.4 legacy 引擎
+
+`ChatServiceImpl.runLegacy()` 内有两条子路径，由 `vault.chat-loop-enabled` 切换：
+
+**A. 循环路径（默认 `true`）**
+
+```
+问题
+ → 不预先跑 ExtractIntent / RAG
+ → ToolOrchestrator.loopAndExecute()
+     每步：Python PlanNextStep 流式返回 thinking + calls
+     Java 执行工具（审计 tool_calls）
+     thinking 逐块推 SSE；每步推累积 meta.tools_used
+     终止：done、calls 为空、步数 > 4、累计预算 > 180s、
+           同工具同参数指纹重复、流式中断/解析失败
+ → 始终进入 Chat 流式回答（即使没有任何工具结果）
+ → ChatFinalResult → AgentRunService.finish() 统一落库
+```
+
+关键事实：
+
+- "材料够不够"由模型每步判断，不再由检索完那一刻一次性判死。
+- 工具失败/循环失败只提前退出并带回已有结果；不会把整轮对话打挂。
+- 正常收束时若只执行过 `find_item`、没执行过 `recall_item`，会补读一次正文并打 `[auto-backstop]` 审计标记。
+- 回答历史窗口 `HISTORY_ROUNDS = 3`；规划器历史窗口 `vault.plan-history-rounds = 6`。两个窗口不同是**有意设计**：答案侧怕模型顺着上文措辞跑偏，规划侧需要更多指代消解。
+- 即使 `chunks` 和工具结果都为空，也照常调用模型；兜底文案只在 AI 失败/流为空时触发。
+- 兜底文案分三档：零记录新用户 / 有记录但没匹配上 / 情绪倾诉；兜底消息写 `is_fallback=true`，后续轮次不进入历史上下文。
+
+**B. 单次规划回滚路径（`false`）**
+
+先 `ExtractIntent` 路由 → 四路检索 → `PlanTools` 单次规划（最多 2 步）→ 回答。行为与改造前一致，用于一键回滚。
+
+### 5.5 graph_v2 引擎
+
+```
+Java AgentRunService
+ → AgentGrpcClient.buildRequest()
+     question、session、run、userMessageId、
+     AssistantContext、用户 LLM/Embedding 配置、
+     referenceDate、timezone、maxPlanRounds=4、
+     totalBudgetMs=480000、loopBudgetMs=180000、halfLife=30
+ → gRPC 10004，Python Agent 流式返回 AgentEvent
+ → AgentEventAdapter 校验：
+     run_id 必须一致；seq 必须连续；同一 call_id 不得重复；
+     终态后不得再收事件；影子 run 不允许 prepare_action
+ → thinking / delta / meta 直接转发 SSE
+ → tool_finished：若 Python 没审计，Java 补写 tool_calls
+ → prepare_action：Java 执行 prepare_* 工具，生成操作卡
+ → completed / failed：生成 ChatFinalResult
+ → AgentRunService.finish() 统一落库并发 done
+```
+
+信任边界：
+
+- Python 通过**只读** `mirror_ai` 视图读业务数据；不直连业务表，也不直接写业务状态。
+- 写操作必须回到 Java 的 `prepare_*` 工具，生成待用户确认的操作卡。
+- 内部命令入口 `/internal/agent/commands/*` 需要内部令牌 + HMAC 授权，不是普通用户接口。
+- 只要 graph 路径失败，**不会自动重跑 legacy**；本轮按失败/部分结果收尾。
+
+### 5.6 工具注册表（14 只）
+
+`ToolRegistry` 自动收集所有 `ToolExecutor` Bean，启动时校验名称唯一、effect 声明一致。
+
+**只读（10）**：`search_records`、`get_stats`、`get_profile`、`get_glossary`、`compare_snapshots`、`find_item`、`recall_item`、`get_coverage`、`list_todos`、`save_item`。
+
+**准备写（4）**：`prepare_record`、`prepare_todo`、`prepare_memory_change`、`prepare_growth_adjustment`。
+
+graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWriteProtoSpecs()`）；legacy 循环暴露完整注册表。
+
+### 5.7 会话、每日总结与记忆
+
+- **按日会话**：`chat_sessions.day_key` + `timezone`，同一用户同一天唯一。`GET /mirror/sessions/today` 只读；`POST` 幂等创建。`today()` 建的标题是"今日对话"占位，首条真实问题到达后替换一次。
+- **每日总结**：`chat_day_summaries` 按结束日生成；失败可 `POST /mirror/sessions/{id}/summary/retry`。总结不阻塞当天聊天。
+- **聊天记忆**：`chat_memories` 从对话中抽取（`ACTIVE`、可过期、有版本、记录来源 message ids）。注入时按问题词相关性排序，最多 5 条；只有授权来源可进入上下文。
+- **遗忘**：不提供直接删除 HTTP 端点；由 `MemoryActionHandler` 执行操作卡，写入 `chat_source_exclusions` 墓碑。被遗忘消息的**原始历史仍可查看**，但不会进入后续模型上下文；墓碑只存来源 ID，不复制正文。
+- **来源 lineage**：assistant 消息保存 `context_source_message_ids`；镜像快照有 `chat_lineage_known`，迁移来的旧快照在未重建前视为 lineage 不完整。
+
+### 5.8 统一落库出口
+
+无论哪个引擎，assistant 消息、来源、工具轨迹、文件引用、创建记录、run 终态、会话更新时间都由 `AgentRunService.finish()` 在一个事务里提交。这样"模型输出"和"持久化事实"不会各写一套。
 
 ---
 
-## 十、历史更新记录（2026-08-07）
+## 6. 数据模型
 
-### 完成功能
+`schema.sql` 当前有 **39 张表 + 8 个只读视图**。按用途分组：
 
-1. **用户配置模块（Settings）**
-   - 完整 CRUD：获取配置、更新配置
-   - 测试连接：AI 连接测试、数据库连接测试
-   - API Key 加密存储：使用 AES-256-GCM 加密，返回时脱敏
-   - 注册自动创建：用户注册时自动创建空配置
+| 组 | 表 |
+|---|---|
+| 账号与配置 | `users`、`user_settings`、`user_model_profiles` |
+| 记录与片段 | `records`、`chunks`、`chunk_embedding_jobs` |
+| 画像 | `profile_snapshots`、`snapshot_inputs` |
+| 对话与 Agent | `chat_sessions`、`conversation_history`、`agent_runs`、`agent_command_receipts`、`tool_calls` |
+| 记忆与总结 | `chat_day_summaries`、`chat_memories`、`chat_source_exclusions` |
+| 词典 | `user_terms` |
+| 资产 | `vault_items`、`vault_blobs` |
+| 待办与操作卡 | `todo_registry`、`todo_registry_links`、`todo_suggestions`、`assistant_actions` |
+| 成长 | `growth_axes`、`growth_entries`、`growth_axis_history`、`growth_entry_history` |
+| 塔罗 | `tarot_daily_draw`、`tarot_daily_request`、`tarot_collection`、`tarot_preferences`、`tarot_reading`、`tarot_analysis`、`tarot_chat_state` |
+| 成就 | `achievement_definition`、`achievement_event`、`user_activity_fact`、`user_achievement`、`user_achievement_showcase` |
 
-2. **新增文件**
-   - `UserSettings.java` — 配置实体
-   - `SettingsDTO.java` — 配置更新 DTO
-   - `SettingsVO.java` — 配置视图对象（API Key 脱敏）
-   - `SettingsMapper.java` — MyBatis-Plus Mapper
-   - `SettingsService.java` — 配置服务接口
-   - `SettingsServiceImpl.java` — 配置服务实现
-   - `SettingsController.java` — 配置控制器（4 个端点）
-   - `CryptoUtils.java` — AES-GCM 加密工具类
+`mirror_ai.*` 的 8 个视图：`record_chunks`、`glossary_terms`、`chat_history`、`profiles`、`vault_metadata`、`vault_content`、`vault_keys`、`todos`。它们是 Python Agent v2 的只读数据边界，带 `security_barrier`。
 
-3. **修改文件**
-   - `AuthServiceImpl.java` — 注册时自动创建空配置
-   - `schema.sql` — 新增 user_settings 表定义
+**迁移顺序**（已有库）：`v2` → `v3`（记录 AI 授权）→ `v4`（镜像归档/lineage）→ `v5`（异步片段向量化）→ `v6`（assistant actions）→ `v7`（待办直接操作）→ `v8`（记录记忆状态）→ `v9`（成长）→ `v10`（每日记忆）→ `v11`（Agent v2 视图/run/receipt）→ `v12`（塔罗）→ `v13`（plan→todo）→ `v14`（塔罗 v2）→ `v15`（模型连接档案）→ `v16`（成就）。
 
-### 技术决策
-
-- **加密方案**：AES-256-GCM，每次加密生成随机 IV，安全性较高
-- **脱敏策略**：API Key 只显示前 3 位 + `***`（如 `sk-***`）
-- **部分更新**：PUT 接口只更新非 null 的字段，避免覆盖已有配置
-- **UUID TypeHandler**：user_settings 表的 UUID 字段需要显式指定 TypeHandler
-
-### API 端点
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/settings` | 获取配置（API Key 脱敏） |
-| PUT | `/api/settings` | 更新配置（部分更新） |
-| POST | `/api/settings/test-ai` | 测试 AI 连接 |
-| POST | `/api/settings/test-db` | 测试数据库连接 |
+新库直接跑 `schema.sql`；它已包含 V16，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
 
 ---
 
-## 十、历史更新记录（2026-08-07）
+## 7. 关键配置开关
 
-### 完成功能
+| 配置 | 默认 | 作用 |
+|---|---|---|
+| `chat.engine` | `legacy` | 对话引擎：legacy / graph_v2 / shadow |
+| `chat.graph-enabled-user-ids` | 空 | graph_v2 用户白名单，`*` 为全量 |
+| `chat.shadow-sample-rate` | `0.0` | 影子采样率 |
+| `chat.create-record-enabled` | `false` | graph_v2 是否可创建记录 |
+| `agent.grpc-address` | `localhost:10004` | Agent v2 gRPC |
+| `agent.internal-token` / `command-hmac-key` | 空 | 内部命令鉴权，生产必须注入 |
+| `agent.total-budget-ms` | `480000` | graph 单轮总预算 |
+| `agent.loop-budget-ms` | `180000` | graph 循环预算 |
+| `agent.max-plan-rounds` | `4` | graph 规划轮数 |
+| `agent.lease-seconds` / `heartbeat-seconds` | `30` / `10` | run 租约与心跳 |
+| `vault.chat-loop-enabled` | `true` | legacy 内循环开关；false 回滚到单次 PlanTools |
+| `vault.max-loop-steps` | `4` | legacy 循环步数上限 |
+| `vault.loop-budget-ms` | `180000` | legacy 循环累计预算 |
+| `vault.plan-tools-timeout-ms` | `120000` | 单步规划超时，必须小于 SSE 超时 |
+| `vault.plan-history-rounds` | `6` | 规划器历史窗口 |
+| `mirror.sse-timeout-ms` | `600000` | SSE 连接超时 |
+| `mirror.rag-max-cosine-distance` | `0.35` | 语义检索阈值（有意保守） |
+| `mirror.lookback-*` / `per-chunk-max-chars` | 600 / 150000 / 2000 | 镜子四道防洪闸 |
+| `review.auto-enabled` | `false` | 自动审核模式 |
+| `mirror.achievements.worker-delay-ms` | `2000` | 成就事件消费间隔 |
 
-1. **记录模块完整 CRUD**
-   - 创建、查询列表、详情、更新、软删除、确认审查完成
-   - 支持按日期范围查询（默认查今天）
+---
 
-2. **软删除功能**
-   - 新增 `deleted_at` 字段
-   - 查询时自动过滤已删除记录
-   - 只有 REVIEWING 状态才能删除
+## 8. 测试地图
 
-3. **人工审查状态**
-   - 新增 REVIEWING 状态（AI处理完成，等待用户审核）
-   - 只有 REVIEWING 状态才能修改和删除
-   - 用户确认后状态变为 DONE
+| 范围 | 代表测试 |
+|---|---|
+| 对话主链路 | `ChatRetrievalTest`、`ChatLoopTest`、`ChatSessionDeletionTest`、`ChatInvocationTest` |
+| Agent v2 | `AgentRunServiceTest`、`AgentEventAdapterTest`、`AgentCommandAuthTest`、`AgentCommandServiceTest`、`AgentLifecycleTest`、`AgentGrpcClientContextTest`、`AgentShadowRequestTest` |
+| 工具 | `ToolOrchestratorTest`、`ToolsTest`、`PrepareWriteToolRegistryTest`、`PreparedActionReplyTest`、`SearchRecordsToolRoutingTest` |
+| 会话/记忆 | `DailyChatSessionTest`、`DailyChatSessionDatabaseTest`、`ChatMemoryServiceTest`、`ChatMemoryForgetTest`、`MemoryCandidateCapTest` |
+| 画像/归档 | `MirrorStatsTest`、`MirrorLineageReplayDatabaseTest`、`MirrorArchiveControllerTest` |
+| 记录/审核 | `ConfirmReviewTest`、`RecordAuthorizationGateTest`、`RecordAiAuthorizationDatabaseTest`、`ChunkEditInvalidationTest` |
+| 资产/词典 | `VaultServiceTest`、`DigestServiceTest`、`VaultRefsParseTest`、`GlossaryServiceTest` |
+| 成长/塔罗/成就 | `GrowthServiceTest`、`GrowthLedgerDatabaseTest`、`Tarot*DatabaseTest`、`AchievementDatabaseTest` |
+| 模型配置 | `ModelProfileServiceTest`、`ModelProfileDatabaseTest`、`SettingsServiceImplTest` |
 
-4. **API 文档注解**
-   - 所有接口添加 Knife4j/Swagger 注解
-   - 详细的中文说明、参数示例、响应状态码
+---
 
-5. **UUID 类型改造**
-   - userId 从 String 改为 UUID 类型
-   - 新增 UuidTypeHandler 处理 UUID ↔ PostgreSQL UUID 映射
-   - 解决 LambdaQueryWrapper 查询 UUID 类型不匹配问题
+## 9. 文档地图（本文件之外，均非当前进度依据）
 
-### 技术决策
+**仍可用的专题/运维文档**
 
-- **UUID vs String**：选择使用 UUID 类型，避免每次查询都指定 TypeHandler
-- **软删除方案**：使用 `deleted_at` 时间戳字段，不真正删除数据
-- **状态设计**：4 种状态（PROCESSING → REVIEWING → DONE / FAILED）
+- `README.md`：项目概览与快速开始。注意其中的控制器数、工具数、表数、迁移描述已过时，**以本文件为准**。
+- `docs/agent-v2-rollout.md`：Agent v2 的数据库准备、灰度顺序、回滚闸。
+- `docs/tarot-operations.md`、`docs/model-profiles.md`、`docs/achievements-operations.md`、`docs/decisions-achievements.md`：各自模块的发布与维护说明。
+- `docs/achievement-implementation-plan.md`：成就四批计划（代码已进第一批，文档状态需要随本文件更新）。
+- `docs/superpowers/specs/` 与 `reports/`：2026-10 的设计与验收记录，属于决策证据，不是当前状态。
+
+**历史参考（不要据此判断现状）**
+
+- `HANDOVER.md`（2026-09-06）：Java 版本、profile、AI 端口、工具数、表数、目录结构均已过时。
+- `docs/2026-09-03-system-design-v2.md`（v2.3，2026-09-06）：v2.3 基线的权威设计，但早于 Agent v2、塔罗、成长、模型档案、成就、聊天记忆。
+- `docs/coordination/*`（2026-09）：多 Agent sprint 文档，其中 `PROGRESS-BOARD.md` 停留在 2026-09-06。
+- `docs/archive/*`：更早的设计稿，已明确归档。
+
+---
+
+## 10. 夺回掌控路线（从对话功能开始）
+
+### 阶段 0：止血与建立基线（半天）
+
+1. 确认当前工作树：成就系统未提交；先把这批改动单独提交或至少建分支/备份，避免后续修改把它冲掉。
+2. 跑一次 `.\mvnw.cmd -DskipTests compile`；有数据库时再跑 `.\mvnw.cmd test`，把失败分成"代码问题 / 环境缺失 / 已知跳过"三类记录在本文件。
+3. 从今天起只维护本文件；每完成一次代码改动，当天更新"模块状态"和"对话链路"两节。
+
+### 阶段 1：读懂对话，不写代码（2–3 天）
+
+按这个顺序读，每读完一个文件，用自己的话写 3 行摘要到本文件或笔记：
+
+1. `MirrorController.chat()` → `AgentRunService.startOrFindRun()` / `dispatch()`：请求如何被接纳、幂等、租约、会话如何确定。
+2. `AgentRunService.runGraph()` + `AgentEventAdapter`：graph 事件如何校验、转发、落库。
+3. `ChatServiceImpl.runLegacy()` + `streamAnswer()`：legacy 两条子路径、兜底分档、sources/vault_refs 如何产生。
+4. `ToolOrchestrator.loopAndExecute()`：循环终止条件、审计、自动补读。
+5. `ToolRegistry` + `tools/impl/*`：14 只工具各自读/写什么（先读 `ToolDefinition`，再读执行体）。
+6. `DailyChatSessionResolver` + `ChatMemoryServiceImpl` + `ChatService`：每日会话、结束日总结、记忆注入与遗忘。
+
+产出：一张自己画的时序图（前端 → Controller → AgentRunService → 引擎 → Python → 落库 → SSE），以及一张"分支矩阵"（legacy 循环 / legacy 单次 / graph_v2 / shadow 各自何时触发、失败怎么办）。
+
+### 阶段 2：亲手跑通，建立验证肌肉（3–5 天）
+
+准备：本地 PostgreSQL（含 vector 扩展）、Python legacy AI（10003）；graph_v2 需要 Agent 服务（10004）和只读 DSN。
+
+按顺序验证并记录看哪些表/日志：
+
+1. 新用户第一问：零记录时的回答与兜底分档。
+2. 普通记录查询：`meta` 的 `tools_used`、`tool_calls` 行、`conversation_history` 的 assistant 行。
+3. 语义查询：`chunks.embedding` 命中、`sources` 事件。
+4. 文件查询：`find_item` → `recall_item`、`vault_refs` 文件卡。
+5. 操作卡：`action_proposal` → 确认 → `assistant_actions` 状态变化。
+6. 幂等/断线：同 `requestId` 重复请求、`GET /mirror/runs/{runId}` 恢复。
+
+每跑通一个场景，在本文件第 5 节补一句"我实际观察到的现象"。**跑不通的不要标通过**。
+
+### 阶段 3：接管规则（长期）
+
+- 一次只改一个可解释的改动；每个 AI 生成的 diff 必须能用一句话说清"为什么这样改"。
+- 每个改动必须同时有：测试（或明确说明为什么不能测）、回滚方式、对应文档更新。
+- 在对话链路稳定前，不新增模块、不扩大 Agent 权限、不默认开启 graph_v2。
+- 每周做一次"未知清单"复盘：还有哪些分支、配置、表、外部依赖说不清；只挑一个消灭。
+
+### 阶段 4：做一次明确的架构裁决（对话稳定后）
+
+三选一，不要悬着：
+
+1. **继续灰度 graph_v2**：补齐 `docs/agent-v2-rollout.md` 要求的权限、幂等、延迟和答案质量测量，再决定默认值。
+2. **长期保持 legacy 默认**：把 graph_v2 标为实验分支，明确维护成本，避免两套逻辑同时演进。
+3. **移除 graph_v2**：在确认 legacy 满足需求后，删代码、删视图、删配置，减少认知负担。
+
+### 验收标准（做到这些才算"拿回来"）
+
+- 不看代码能白板画出对话主链路，并说清四个分支的触发条件与失败策略。
+- 任意一轮对话出问题，能从 SSE 事件、`agent_runs`、`conversation_history`、`tool_calls`、`chunks` 定位到具体阶段。
+- 能独立复现并验证第 5 节的 6 个场景，不依赖"AI 说它好了"。
+- 每个模块都有一份"已知 / 未知 / 待验证"清单，且本文件是最新的。
+- 任何新改动都能由你解释、测试、回滚。
+
+---
+
+## 11. 已知风险与未验证项（2026-11-11）
+
+1. **工作树未提交**：成就系统整包、V16 迁移、目录 JSON、测试和若干修改仍在工作树中；发布前必须整理成可回滚的提交。
+2. **graph_v2 未完成小流量验证**：`docs/agent-v2-rollout.md` 明确写着尚无小流量灰度、延迟样本和配对答案评分；默认值仍是 `legacy`。
+3. **前端浏览器验收缺口**：助手成长改造验收报告把 R5 双端呈现标为"部分通过"，真实浏览器全流程未完成。
+4. **旧文档持续漂移**：README 仍写着 11 个控制器、9 个工具、14 张表；系统设计 v2.3 停在 2026-09-06。除本文件外不要拿它们判断现状。
+5. **测试依赖环境**：`MuMirrorBApplicationTests` 需要可达的 PostgreSQL；数据库测试未配置环境变量时会跳过，跳过不等于通过。
+6. **成就计划文档状态滞后**：计划文档写"第一批实施中"，但 `catalog.json` 已有 56 枚定义；需要核对第一批测试、迁移和发布是否真的完成。
+7. **双引擎并存成本**：legacy 循环、legacy 单次规划、graph_v2、shadow 四套路径同时存在，任何对话行为变更都要确认影响面。
+
+---
+
+## 12. 变更记录
+
+| 日期 | 事项 |
+|---|---|
+| 2026-11-11 | 以代码为准重写本文件；取代 2026-08-13 版进度文档；补充 Agent v2、成就、塔罗、成长、模型档案、聊天记忆等缺失模块；加入接管路线与已知风险 |

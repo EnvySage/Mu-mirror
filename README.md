@@ -1,8 +1,12 @@
 # Mu-mirror-B
 
+> 当前代码现状、模块状态、对话链路与接管路线以 [`docs/PROGRESS.md`](docs/PROGRESS.md)（最后核对：2026-11-11）为准；下方概览中的数量、迁移顺序和历史模块描述可能滞后。
+
 「AI 日记镜子」系统的 Java 后端。用户随手记录日常，AI 自动拆分、分类、打标签，用户审核确认后数据进入 RAG，最终生成用户画像（"镜子"）帮助认识自己。
 
 **分工原则：Java 管数据与业务，Python 管纯推理。** 向量检索用 pgvector SQL 在本仓完成；AI 服务无状态，用户模型配置随每次 gRPC 请求携带。
+
+成就系统：已有环境先执行 [V16 数据库升级步骤](docs/achievements-operations.md)，再启动新版应用。扩展规则见 [成就维护约定](docs/decisions-achievements.md)。
 
 ## 在系统中的位置
 
