@@ -84,7 +84,7 @@ Vue 3 前端（Mu-mirror-F）
 | 待办 Todo | ✅ | `TodoController`；registry 物化索引 + chunk.metadata 真源双写；建议需用户确认 |
 | 五维成长 | ✅ | `GrowthController`；成长账本、维度锁定、手动贡献、来源追溯 |
 | 塔罗 | ✅ | `TarotController`；78 张牌 v2 目录、每日抽牌、问题牌、分析版本、收藏、偏好 |
-| 成就 | ✅ 第一批已提交（`7dc5024`） | `achievement/`、`AchievementController`、`catalog.json`（**56 枚**：原 34 + 第一批 22），V16 迁移；第二至四批按 `docs/achievement-implementation-plan.md` 待实现 |
+| 成就 | ✅ 第一批已提交（`7dc5024`，29/29 测试通过） | `achievement/`、`AchievementController`、`catalog.json`（**56 枚**：原 34 + 第一批 22），V16 迁移；第二至四批按 `docs/achievement-implementation-plan.md` 待实现 |
 | 前端 | 独立仓 | `Mu-mirror-F`（Vue 3） |
 | 部署 | ✅ | `Jenkinsfile`、`deploy/backend-release.sh`、systemd、nginx 配置 |
 

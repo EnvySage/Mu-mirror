@@ -29,3 +29,14 @@
 3. **完成后归档**：一次性任务书、诊断、联调记录、完成态计划移入 `archive/`，不要留在 `docs/` 根目录。
 4. **文件大小**：pre-commit 拒绝超过约 20KB 的文本文件；`PROGRESS.md`、`REFERENCE.md` 已按职责拆分。
 5. **新克隆**：运行 `git config core.hooksPath .githooks` 启用钩子。
+6. **文档门禁**：pre-commit 会拦截“高风险改动但没有文档改动”的提交；紧急情况用 `SKIP_DOC_CHECK=1`，并在提交说明里写明原因。
+
+## 变更与文档对应
+
+| 改动类型 | 同一提交必须更新 |
+|---|---|
+| Controller / API / SSE 事件 | `REFERENCE.md`；模块状态变化再更新 `PROGRESS.md` |
+| `schema.sql` / 新 migration | `PROGRESS.md` 数据模型；相关 `*-operations.md` |
+| `application*.yml` / 配置项 | `REFERENCE.md`；本机差异写 `LOCAL-ENV.md` |
+| 模块完成、上线、回退 | `PROGRESS.md`；对应计划/运维文档 |
+| 一次性任务、诊断、联调记录 | 完成后移入 `archive/`；长期结论写 `HISTORY.md` |
