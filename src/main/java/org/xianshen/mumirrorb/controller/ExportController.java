@@ -65,7 +65,7 @@ public class ExportController {
         new com.fasterxml.jackson.databind.ObjectMapper()
                 .writerWithDefaultPrettyPrinter()
                 .writeValue(response.getWriter(), data);
-        if (achievementActivity != null) achievementActivity.exportGenerated(userId);
+        if (achievementActivity != null) achievementActivity.exportGenerated(userId, "json");
     }
 
     /**
@@ -88,7 +88,7 @@ public class ExportController {
         response.setContentType("text/markdown;charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
         response.getOutputStream().write(markdown.getBytes(StandardCharsets.UTF_8));
-        if (achievementActivity != null) achievementActivity.exportGenerated(userId);
+        if (achievementActivity != null) achievementActivity.exportGenerated(userId, "markdown");
     }
 
     /**

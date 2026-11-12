@@ -11,6 +11,7 @@ import java.util.*;
 
 @Service
 public class AchievementService {
+    public record Notification(String code,String kind) {}
     private final JdbcTemplate db;
     private final ObjectMapper json;
     private final AchievementCatalog catalog;
@@ -56,6 +57,18 @@ public class AchievementService {
                     INSERT INTO user_achievement(user_id,code,rule_version) VALUES(?,?,?) ON CONFLICT DO NOTHING
                     """,user,definition.get("code").asText(),definition.get("ruleVersion").asInt());
             }
+            String code=definition.path("code").asText();
+            JsonNode plating=catalog.platingRule(code);
+            if (definition.path("enabled").asBoolean(true) && plating!=null
+                    && AchievementRules.matches(plating.get("rule"),values)) {
+                // The higher challenge also grants the original medal, atomically.
+                db.update("""
+                    INSERT INTO user_achievement(user_id,code,rule_version,plated_at,plating_rule_version)
+                    VALUES(?,?,?,now(),?) ON CONFLICT(user_id,code) DO UPDATE
+                    SET plated_at=coalesce(user_achievement.plated_at,excluded.plated_at),
+                      plating_rule_version=coalesce(user_achievement.plating_rule_version,excluded.plating_rule_version)
+                    """,user,code,definition.path("ruleVersion").asInt(),plating.path("ruleVersion").asInt());
+            }
         }
         return values;
     }
@@ -64,8 +77,11 @@ public class AchievementService {
     public Map<String,Object> collection(UUID user) {
         Map<String,Long> values = reconcile(user);
         Map<String,String> unlocked = new HashMap<>();
-        db.query("SELECT code,unlocked_at FROM user_achievement WHERE user_id=?", row -> {
+        Map<String,String> plated = new HashMap<>();
+        db.query("SELECT code,unlocked_at,plated_at FROM user_achievement WHERE user_id=?", row -> {
             unlocked.put(row.getString("code"), row.getObject("unlocked_at", OffsetDateTime.class).toString());
+            var at=row.getObject("plated_at",OffsetDateTime.class);
+            if(at!=null) plated.put(row.getString("code"),at.toString());
         }, user);
         List<ObjectNode> items = new ArrayList<>();
         for (JsonNode definition : catalog.definitions()) {
@@ -74,6 +90,8 @@ public class AchievementService {
             boolean earned = unlocked.containsKey(code);
             ObjectNode item = catalog.display(definition, earned);
             item.put("earned", earned);
+            item.put("plated",plated.containsKey(code));
+            if(plated.containsKey(code)) item.put("platedAt",plated.get(code)); else item.putNull("platedAt");
             if (earned) item.put("unlockedAt",unlocked.get(code)); else item.putNull("unlockedAt");
             if (!definition.path("hidden").asBoolean() || earned) item.set("progress", progress(definition.get("rule"), values));
             items.add(item);
@@ -96,9 +114,14 @@ public class AchievementService {
     public List<Map<String,Object>> pending(UUID user) {
         reconcile(user);
         return db.queryForList("""
-            SELECT a.code,a.unlocked_at FROM user_achievement a JOIN achievement_definition d USING(code)
-            WHERE a.user_id=? AND a.acknowledged_at IS NULL AND d.enabled ORDER BY a.unlocked_at,a.code LIMIT 50
-            """, user);
+            SELECT n.code,n.kind,n.unlocked_at FROM (
+              SELECT a.code,'earned' AS kind,a.unlocked_at FROM user_achievement a JOIN achievement_definition d USING(code)
+              WHERE a.user_id=? AND a.acknowledged_at IS NULL AND d.enabled
+              UNION ALL
+              SELECT a.code,'plated' AS kind,a.plated_at AS unlocked_at FROM user_achievement a JOIN achievement_definition d USING(code)
+              WHERE a.user_id=? AND a.plated_at IS NOT NULL AND a.plating_acknowledged_at IS NULL AND d.enabled
+            ) n ORDER BY n.unlocked_at,n.code,n.kind LIMIT 50
+            """, user,user);
     }
 
     @Transactional
@@ -106,6 +129,18 @@ public class AchievementService {
         if (codes == null || codes.size() > 50) throw new BusinessException(400,"确认列表无效");
         for (String code : new HashSet<>(codes)) {
             db.update("UPDATE user_achievement SET acknowledged_at=coalesce(acknowledged_at,now()) WHERE user_id=? AND code=?",user,code);
+        }
+    }
+
+    @Transactional
+    public void acknowledgeNotifications(UUID user,List<Notification> notifications) {
+        if(notifications==null || notifications.size()>50 || notifications.stream().anyMatch(item -> item==null
+                || item.code()==null || item.kind()==null || !Set.of("earned","plated").contains(item.kind())))
+            throw new BusinessException(400,"确认列表无效");
+        for(Notification item:new HashSet<>(notifications)) {
+            String column="plated".equals(item.kind())?"plating_acknowledged_at":"acknowledged_at";
+            String condition="plated".equals(item.kind())?" AND plated_at IS NOT NULL":"";
+            db.update("UPDATE user_achievement SET "+column+"=coalesce("+column+",now()) WHERE user_id=? AND code=?"+condition,user,item.code());
         }
     }
 
@@ -131,6 +166,10 @@ public class AchievementService {
         if (version != expectedVersion) throw new BusinessException(409,"展架已在其他页面更新，请刷新后再保存");
         db.update("UPDATE user_achievement_showcase SET capacity=?,codes=?::jsonb,version=version+1,updated_at=now() WHERE user_id=?",
                 capacity,json.valueToTree(codes).toString(),user);
+        if(codes.size()>=8) {
+            long groups=codes.stream().map(code -> code.substring(0,code.indexOf('-'))).distinct().count();
+            new AchievementObservation(db).observe(user,"showcase.saved",String.valueOf(codes.size()),"","",String.valueOf(groups));
+        }
         return showcase(user);
     }
 }

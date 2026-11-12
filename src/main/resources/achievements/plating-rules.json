@@ -1,0 +1,316 @@
+{
+  "M-03": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.chat.opened_models",
+      "operator": "gte",
+      "value": 2
+    }
+  },
+  "M-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "x.chat.model_days",
+          "operator": "gte",
+          "value": 90
+        },
+        {
+          "metric": "x.chat.opened_records",
+          "operator": "gte",
+          "value": 10
+        }
+      ]
+    }
+  },
+  "R-02": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.record.edited_streak",
+      "operator": "gte",
+      "value": 7
+    }
+  },
+  "R-04": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "record.daily_max",
+      "operator": "gte",
+      "value": 10
+    }
+  },
+  "D-05": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.chat.memory_opened_days",
+      "operator": "gte",
+      "value": 5
+    }
+  },
+  "D-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.chat.multisource_days",
+      "operator": "gte",
+      "value": 3
+    }
+  },
+  "K-04": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "glossary.count",
+          "operator": "gte",
+          "value": 10
+        },
+        {
+          "metric": "x.glossary.enriched",
+          "operator": "gte",
+          "value": 5
+        }
+      ]
+    }
+  },
+  "K-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "memory.approved_chunks",
+          "operator": "gte",
+          "value": 100
+        },
+        {
+          "metric": "x.memory.reviewed_ready",
+          "operator": "gte",
+          "value": 30
+        },
+        {
+          "metric": "x.memory.ready_months",
+          "operator": "gte",
+          "value": 3
+        }
+      ]
+    }
+  },
+  "P-02": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "activity.todo.completed",
+          "operator": "gte",
+          "value": 10
+        },
+        {
+          "metric": "x.todo.evidenced",
+          "operator": "gte",
+          "value": 3
+        }
+      ]
+    }
+  },
+  "P-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "todo.completed_weeks",
+          "operator": "gte",
+          "value": 24
+        },
+        {
+          "metric": "x.todo.source_weeks",
+          "operator": "gte",
+          "value": 12
+        }
+      ]
+    }
+  },
+  "C-02": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "activity.summary.opened",
+          "operator": "gte",
+          "value": 7
+        },
+        {
+          "metric": "x.summary.linked_days",
+          "operator": "gte",
+          "value": 5
+        }
+      ]
+    }
+  },
+  "C-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "x.calendar.months",
+          "operator": "gte",
+          "value": 12
+        },
+        {
+          "metric": "x.calendar.linked_summaries",
+          "operator": "gte",
+          "value": 12
+        }
+      ]
+    }
+  },
+  "REF-03": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.snapshot.archived_gap90",
+      "operator": "gte",
+      "value": 1
+    }
+  },
+  "REF-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "x.snapshot.monthly_read",
+          "operator": "gte",
+          "value": 12
+        },
+        {
+          "metric": "x.snapshot.crossquarter_pairs",
+          "operator": "gte",
+          "value": 4
+        }
+      ]
+    }
+  },
+  "T-02": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "tarot.days",
+          "operator": "gte",
+          "value": 30
+        },
+        {
+          "metric": "x.tarot.both_sides",
+          "operator": "gte",
+          "value": 10
+        }
+      ]
+    }
+  },
+  "T-07": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "tarot.cards",
+          "operator": "gte",
+          "value": 60
+        },
+        {
+          "metric": "x.tarot.meanings",
+          "operator": "gte",
+          "value": 20
+        }
+      ]
+    }
+  },
+  "V-02": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "vault.count",
+          "operator": "gte",
+          "value": 20
+        },
+        {
+          "metric": "x.vault.open_items",
+          "operator": "gte",
+          "value": 5
+        }
+      ]
+    }
+  },
+  "V-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "x.vault.open_days",
+          "operator": "gte",
+          "value": 30
+        },
+        {
+          "metric": "x.vault.open_items",
+          "operator": "gte",
+          "value": 10
+        }
+      ]
+    }
+  },
+  "G-05": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.growth.axis_days_weeks",
+      "operator": "gte",
+      "value": 10
+    }
+  },
+  "G-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "all": [
+        {
+          "metric": "growth.months",
+          "operator": "gte",
+          "value": 12
+        },
+        {
+          "metric": "growth.axes",
+          "operator": "gte",
+          "value": 5
+        }
+      ]
+    }
+  },
+  "S-02": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.memory.types_five_filtered",
+      "operator": "gte",
+      "value": 4
+    }
+  },
+  "S-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.memory.mood_streak",
+      "operator": "gte",
+      "value": 12
+    }
+  },
+  "SYS-07": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.settings.configured_use_days",
+      "operator": "gte",
+      "value": 7
+    }
+  },
+  "SYS-08": {
+    "ruleVersion": 1,
+    "rule": {
+      "metric": "x.showcase.ten_groups",
+      "operator": "gte",
+      "value": 1
+    }
+  }
+}

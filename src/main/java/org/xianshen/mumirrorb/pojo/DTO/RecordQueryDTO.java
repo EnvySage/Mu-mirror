@@ -59,4 +59,10 @@ public class RecordQueryDTO {
 
     /** Free labels; matching is OR (a record matches any requested tag). */
     private java.util.List<String> tags;
+
+    @Schema(description = "记忆片段中的情绪，支持字符串与数组元数据")
+    private String mood;
+
+    @Schema(description = "记忆片段中的内容类型")
+    private String contentType;
 }

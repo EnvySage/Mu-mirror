@@ -19,6 +19,7 @@
 | `InspirationController` | `/inspiration` | `POST /` |
 | `ExportController` | `/export` | `GET /json`、`GET /markdown` |
 | `VaultController` | `/vault` | `POST /upload`、`GET /`、`GET /{id}/download`、`GET /{id}/preview`、`DELETE /{id}`、`POST /{id}/confirm`、`PUT /{id}`、`GET /search` |
+| `VaultReviewController` | `/vault` | `GET /{id}/chunks`，本人文件提取片段，排除内部 keyChunk |
 | `GlossaryController` | `/glossary` | `GET /`、`POST /`、`PUT /{id}`、`DELETE /{id}`、`POST /{id}/confirm`、`POST /{id}/dismiss`、`POST /extract` |
 | `TodoController` | `/todos` | `POST /`、`PATCH /{id}`、`GET /pending-suggestions`、`POST /suggestions/{id}/resolve`、`GET /`、`GET /open-chain`、`DELETE /{id}` |
 | `AssistantActionController` | `/assistant/actions` | `POST /prepare`、`PATCH /{id}`、`POST /{id}/confirm`、`POST /{id}/cancel`、`GET /{id}`、`GET /?sessionId=`、`GET /records` |
@@ -68,7 +69,11 @@
 | 画像/归档 | `MirrorStatsTest`、`MirrorLineageReplayDatabaseTest`、`MirrorArchiveControllerTest` |
 | 记录/审核 | `ConfirmReviewTest`、`RecordAuthorizationGateTest`、`RecordAiAuthorizationDatabaseTest`、`ChunkEditInvalidationTest` |
 | 资产/词典 | `VaultServiceTest`、`DigestServiceTest`、`VaultRefsParseTest`、`GlossaryServiceTest` |
-| 成长/塔罗/成就 | `GrowthServiceTest`、`GrowthLedgerDatabaseTest`、`Tarot*DatabaseTest`、`AchievementDatabaseTest` |
+| 成长/塔罗/成就 | `GrowthServiceTest`、`GrowthLedgerDatabaseTest`、`Tarot*DatabaseTest`、`Achievement*Test`、`AchievementBusinessIntegrationTest`、`AgentRunAchievementContextTest` |
 | 模型配置 | `ModelProfileServiceTest`、`ModelProfileDatabaseTest`、`SettingsServiceImplTest` |
 
 ---
+
+## 成就与来源接口补充
+
+完整目录 96 枚普通章，24 项镀层。字段、普通/镀层通知精确确认、结构化活动上下文、V17升级与补发见 [成就运维](achievements-operations.md)。SSE done新增assistantMessageId，恢复接口assistant.id；总结stats.sourceRecordIds列出实际输入的原始记录（stats含metadata，前端兼容camel/snake）。记录列表新增mood/contentType真实片段过滤，可与tags和日期叠加。

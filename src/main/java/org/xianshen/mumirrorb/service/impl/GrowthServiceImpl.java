@@ -27,7 +27,7 @@ public class GrowthServiceImpl implements GrowthService {
  @Override @Transactional public List<GrowthAxis> axes(UUID userId){
   List<GrowthAxis> found=axesMapper.selectList(new LambdaQueryWrapper<GrowthAxis>().eq(GrowthAxis::getUserId,userId));
   found=found==null?new ArrayList<>():new ArrayList<>(found);
-  if(found.isEmpty()){ for(var d:properties.getDefaults()){var a=new GrowthAxis();a.setUserId(userId);a.setDimensionId(d.getId());a.setName(d.getName());a.setDescription(d.getDescription());a.setDefinitionVersion(1L);a.setUpdatedAt(OffsetDateTime.now());axesMapper.insert(a);found.add(a);axisHistoryMapper.insertIfAbsent(userId,d.getId(),1L,d.getName(),d.getDescription());} }
+  if(found.isEmpty()){ for(var d:properties.getDefaults()){var a=new GrowthAxis();a.setUserId(userId);a.setDimensionId(d.getId());a.setName(d.getName());a.setDescription(d.getDescription());a.setDefinitionVersion(1L);a.setUpdatedAt(OffsetDateTime.now());axesMapper.insertDefaultIfAbsent(a);found.add(a);axisHistoryMapper.insertIfAbsent(userId,d.getId(),1L,d.getName(),d.getDescription());} }
   if(found.size()!=5) throw new BusinessException(409,"成长维度定义无效");
   Map<String,Integer> order=new HashMap<>();
   for(int i=0;i<properties.getDefaults().size();i++)order.put(properties.getDefaults().get(i).getId(),i);

@@ -145,6 +145,9 @@ public class SummaryServiceImpl implements SummaryService {
         metadata.put("contentType", METADATA_CONTENT_TYPE);
         metadata.put("summaryDate", summaryDate);
         metadata.put("recordCount", (int) recordCount);
+        metadata.put("sourceRecordIds", dayRecords.stream()
+                .filter(row -> row.get("content") != null && !row.get("content").toString().isBlank())
+                .map(row -> row.get("recordId")).filter(java.util.Objects::nonNull).distinct().toList());
 
         Chunk chunk = Chunk.builder()
                 .userId(userId)

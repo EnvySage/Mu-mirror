@@ -33,3 +33,5 @@
 | `archive/HANDOVER-2026-09-06.md` | 旧交接快照 |
 | `archive/todo-workflow-fix.md` | 一次性待办修复说明 |
 | `archive/2026-*` | 早期设计与旧总体设计 |
+
+- 2026-11-12：完成成就剩余三批（96 普通、24 镀层）；[实施计划](archive/plans/2026-11-12-achievement-implementation.md)归档。当前状态仅见 PROGRESS.md。

@@ -69,3 +69,7 @@ tests/rag-eval/
 # 本机开发覆盖（每台机器一份，不入库）
 src/main/resources/application-local.yml
 config/application-local.yml
+
+# Python verification artifacts
+__pycache__/
+*.py[cod]

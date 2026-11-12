@@ -9,6 +9,7 @@ import java.util.*;
 public class AchievementMetrics {
     private final JdbcTemplate db;
     private final TarotCatalog tarot;
+    private final AchievementExtendedMetrics extended;
     private final Map<String, String> queries = new LinkedHashMap<>();
     private static final String CHAT = """
         WITH completed AS (
@@ -23,6 +24,7 @@ public class AchievementMetrics {
     public AchievementMetrics(JdbcTemplate db, TarotCatalog tarot) {
         this.db = db;
         this.tarot = tarot;
+        this.extended = new AchievementExtendedMetrics(db);
         String records = " FROM records WHERE user_id=? AND source='user' AND deleted_at IS NULL AND status IN('record_only','done')";
         queries.put("record.count", "SELECT count(*)" + records);
         queries.put("record.days", "SELECT count(DISTINCT (created_at AT TIME ZONE 'Asia/Shanghai')::date)" + records);
@@ -68,28 +70,33 @@ public class AchievementMetrics {
             JOIN user_activity_fact v ON v.user_id=a.user_id AND v.kind='model.verified' AND v.subject_key=a.subject_key
             WHERE a.user_id=? AND a.kind='model.activated'
             """);
-        String chunks = " FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id WHERE c.user_id=? AND c.ai_memory_approved AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done'";
+        String chunks = " FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id WHERE c.user_id=? AND c.ai_memory_approved AND c.embedding_status='ready' AND c.embedding IS NOT NULL AND c.vault_item_id IS NULL AND record_memory_is_complete(r.id) AND r.source='user' AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done'";
         queries.put("record.types", "SELECT count(DISTINCT nullif(c.metadata->>'contentType',''))" + chunks);
         queries.put("record.moods", """
             SELECT count(DISTINCT mood.value) FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
             CROSS JOIN LATERAL jsonb_array_elements_text(
               CASE jsonb_typeof(c.metadata->'mood') WHEN 'array' THEN c.metadata->'mood'
               WHEN 'string' THEN jsonb_build_array(c.metadata->'mood') ELSE '[]'::jsonb END) mood(value)
-            WHERE c.user_id=? AND c.ai_memory_approved AND r.deleted_at IS NULL AND r.memory_state='READY'
-            AND r.status='done' AND nullif(mood.value,'') IS NOT NULL
+            WHERE c.user_id=? AND c.ai_memory_approved AND c.embedding_status='ready' AND c.embedding IS NOT NULL
+            AND c.vault_item_id IS NULL AND record_memory_is_complete(r.id) AND r.source='user'
+            AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done' AND nullif(mood.value,'') IS NOT NULL
             """);
     }
 
     public boolean supports(String metric) {
-        return queries.containsKey(metric) || Set.of("chat.count","chat.days","tarot.major","tarot.cards","tarot.repeat_max").contains(metric)
+        return extended.supports(metric) || queries.containsKey(metric) || Set.of("chat.count","chat.days","tarot.major","tarot.cards","tarot.repeat_max").contains(metric)
                 || Set.of("session.opened","summary.opened","calendar.opened","snapshot.compared","vault.search_opened",
                     "todo.completed","growth.customized","export.generated","home.changed").stream().anyMatch(kind -> metric.equals("activity." + kind));
     }
 
     public Map<String, Long> values(UUID user, Set<String> required) {
         Map<String, Long> values = new HashMap<>();
+        Set<String> additional = new HashSet<>();
+        required.stream().filter(extended::supports).forEach(additional::add);
+        if (!additional.isEmpty()) values.putAll(extended.values(user, additional));
         for (String metric : required) {
             if (!supports(metric)) throw new IllegalArgumentException("Unknown metric: " + metric);
+            if (extended.supports(metric)) continue;
             long value;
             if (metric.startsWith("activity.")) {
                 value = db.queryForObject("SELECT count(*) FROM user_activity_fact WHERE user_id=? AND kind=?", Long.class, user, metric.substring(9));

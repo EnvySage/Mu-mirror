@@ -32,6 +32,8 @@ public class SettingsServiceImpl implements SettingsService {
 
     private final SettingsMapper settingsMapper;
     private final AiGrpcClient aiGrpcClient;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.xianshen.mumirrorb.achievement.AchievementActivity achievementActivity;
 
     @Override
     @Transactional(readOnly = true)
@@ -148,6 +150,8 @@ public class SettingsServiceImpl implements SettingsService {
                     "AI 大模型已响应，但没有返回有效的记录整理结果");
         }
 
+        if (achievementActivity != null)
+            achievementActivity.connectionVerified(userId, "chat", settings.getUpdatedAt());
         log.info("测试 AI 大模型成功，用户: {}, provider: {}, model: {}", userId, settings.getAiProvider(), settings.getAiModel());
         return String.format("大模型连接正常。提供商: %s, 模型: %s, API Key: %s",
                 settings.getAiProvider(),
@@ -179,6 +183,8 @@ public class SettingsServiceImpl implements SettingsService {
                         "当前版本仅支持 1024 维模型（当前 " + info.getDimension() + " 维: "
                                 + info.getModelName() + "）");
             }
+            if (achievementActivity != null)
+                achievementActivity.connectionVerified(userId, "embedding", settings.getUpdatedAt());
             log.info("测试 Embedding 连接成功，用户: {}, model: {}, dimension: {}",
                     userId, info.getModelName(), info.getDimension());
             return String.format("连接正常。模型: %s, 来源: %s, 维度: %d",

@@ -147,7 +147,7 @@ public interface DailySummaryMapper {
      * createdAt 用 TO_CHAR 出字符串，避免 text → OffsetDateTime 的隐式转换坑。</p>
      */
     @Select("""
-            SELECT c.segment AS content,
+            SELECT r.id AS recordId, c.segment AS content,
                    TO_CHAR(r.created_at, 'HH24:MI') AS createdAt
             FROM records r
             JOIN chunks c ON c.record_id = r.id

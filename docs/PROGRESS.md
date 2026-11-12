@@ -1,6 +1,6 @@
 # Mu-mirror-B 当前现状（唯一维护文档）
 
-> **最后核对：2026-11-11**
+> **最后核对：2026-11-12**
 > 核对方式：逐项对照 `src/main/java`、`src/main/resources`、`src/test/java` 与当前工作树，**不沿用旧进度文档的结论**。
 > 维护约定：项目只维护这一份"当前真相"。其他文档要么是专题说明，要么是历史决策记录；与代码冲突时，以代码为准，并回来更新本文件。
 > 旧进度文档与 `docs/archive/HANDOVER-2026-09-06.md`不再作为进度依据。
@@ -48,8 +48,8 @@ Vue 3 前端（Mu-mirror-F）
   `mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev`
 - dev 数据源：`jdbc:postgresql://localhost:5432/mu_mirror`，时区 `Asia/Shanghai`。
 - 旧 AI 服务默认 `127.0.0.1:10003`；Agent v2 默认 `localhost:10004`。
-- 新库执行 `src/main/resources/db/schema.sql`（已包含 V16 最终结构）。
-- 已有库按 `migration-v2.sql` → `v3` → … → `v16` 顺序升级；`schema.sql` 不能替代存量迁移。
+- 新库执行 `src/main/resources/db/schema.sql`（已包含 V17 最终结构）。
+- 已有库按 `migration-v2.sql` → `v3` → … → `v17` 顺序升级；`schema.sql` 不能替代存量迁移。
 
 **测试**
 
@@ -84,11 +84,11 @@ Vue 3 前端（Mu-mirror-F）
 | 待办 Todo | ✅ | `TodoController`；registry 物化索引 + chunk.metadata 真源双写；建议需用户确认 |
 | 五维成长 | ✅ | `GrowthController`；成长账本、维度锁定、手动贡献、来源追溯 |
 | 塔罗 | ✅ | `TarotController`；78 张牌 v2 目录、每日抽牌、问题牌、分析版本、收藏、偏好 |
-| 成就 | ✅ 第一批已提交（`7dc5024`，29/29 测试通过） | `achievement/`、`AchievementController`、`catalog.json`（**56 枚**：原 34 + 第一批 22），V16 迁移；第二至四批按 `docs/achievement-implementation-plan.md` 待实现 |
+| 成就 | ✅ 四批实现与数据库验收完成 | 96 枚普通章、24 项隐藏镀层；V17、结构化可验证行为、独立通知和账号展架；升级见 `achievements-operations.md` |
 | 前端 | 独立仓 | `Mu-mirror-F`（Vue 3） |
 | 部署 | ✅ | `Jenkinsfile`、`deploy/backend-release.sh`、systemd、nginx 配置 |
 
-**当前工作树状态（2026-11-11）**：`ai` 分支工作树干净；成就第一批已随 `7dc5024` 提交，随后文档清理已单独提交。发布前仍应按 `docs/archive/` 的迁移顺序核对数据库。
+**本轮状态（2026-11-12）**：`ai` 分支包含成就余下三批、真实行为采集和文档更新，后端、前端与桌面/手机真实账号验收均已通过。生产环境仍须先执行 V17，不能把测试库迁移当作生产已升级。
 
 ---
 
@@ -226,7 +226,7 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 
 ## 5. 数据模型
 
-`schema.sql` 当前有 **39 张表 + 8 个只读视图**。按用途分组：
+`schema.sql` 当前有 **40 张表 + 8 个只读视图**。按用途分组：
 
 | 组 | 表 |
 |---|---|
@@ -240,13 +240,13 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 | 待办与操作卡 | `todo_registry`、`todo_registry_links`、`todo_suggestions`、`assistant_actions` |
 | 成长 | `growth_axes`、`growth_entries`、`growth_axis_history`、`growth_entry_history` |
 | 塔罗 | `tarot_daily_draw`、`tarot_daily_request`、`tarot_collection`、`tarot_preferences`、`tarot_reading`、`tarot_analysis`、`tarot_chat_state` |
-| 成就 | `achievement_definition`、`achievement_event`、`user_activity_fact`、`user_achievement`、`user_achievement_showcase` |
+| 成就 | `achievement_definition`、`achievement_event`、`user_activity_fact`、`user_achievement_activity`、`user_achievement`、`user_achievement_showcase` |
 
 `mirror_ai.*` 的 8 个视图：`record_chunks`、`glossary_terms`、`chat_history`、`profiles`、`vault_metadata`、`vault_content`、`vault_keys`、`todos`。它们是 Python Agent v2 的只读数据边界，带 `security_barrier`。
 
-**迁移顺序**（已有库）：`v2` → `v3`（记录 AI 授权）→ `v4`（镜像归档/lineage）→ `v5`（异步片段向量化）→ `v6`（assistant actions）→ `v7`（待办直接操作）→ `v8`（记录记忆状态）→ `v9`（成长）→ `v10`（每日记忆）→ `v11`（Agent v2 视图/run/receipt）→ `v12`（塔罗）→ `v13`（plan→todo）→ `v14`（塔罗 v2）→ `v15`（模型连接档案）→ `v16`（成就）。
+**迁移顺序**（已有库）：`v2` → `v3`（记录 AI 授权）→ `v4`（镜像归档/lineage）→ `v5`（异步片段向量化）→ `v6`（assistant actions）→ `v7`（待办直接操作）→ `v8`（记录记忆状态）→ `v9`（成长）→ `v10`（每日记忆）→ `v11`（Agent v2 视图/run/receipt）→ `v12`（塔罗）→ `v13`（plan→todo）→ `v14`（塔罗 v2）→ `v15`（模型连接档案）→ `v16`（成就基础）→ `v17`（成就行为与镀层）。
 
-新库直接跑 `schema.sql`；它已包含 V16，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
+新库直接跑 `schema.sql`；它已包含 V17，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
 
 ---
 
@@ -260,7 +260,7 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 2. **前端浏览器验收缺口**：助手成长改造验收报告把 R5 双端呈现标为"部分通过"，真实浏览器全流程未完成。
 3. **文档入口已收口**：当前文档地图见 `docs/README.md`；历史设计与一次性记录在 `docs/archive/`，不再放入 `docs/` 根目录。
 4. **测试依赖环境**：`MuMirrorBApplicationTests` 需要可达的 PostgreSQL；数据库测试未配置环境变量时会跳过，跳过不等于通过。
-5. **成就后续批次未实现**：第一批 56 枚已提交；第二至四批（探索、组合、镀层）仍待实现，计划见 `docs/achievement-implementation-plan.md`。
+5. **成就发布前置条件**：96 枚普通章及 24 项镀层已实现；目标环境须先执行 V17。外部真实模型提供商连通性不属于本数据库验收，仍需可用 Python 服务与用户配置。
 6. **双引擎并存成本**：legacy 循环、legacy 单次规划、graph_v2、shadow 四套路径同时存在，任何对话行为变更都要确认影响面。
 
 ---
@@ -270,3 +270,12 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 | 日期 | 事项 |
 |---|---|
 | 2026-11-11 | 以代码为准重写本文件；取代 2026-08-13 版进度文档；补充 Agent v2、成就、塔罗、成长、模型档案、聊天记忆等缺失模块；加入接管路线与已知风险 |
+
+## 9. 成就最终验证（2026-11-12）
+
+- 后端全量：604 项通过、0 失败、0 跳过。
+- 随后的标签规范化与成长首笔事实补丁：65 项专项通过、0 失败、0 跳过，package 成功。
+- 前端：74 项通过、0 失败、0 跳过，构建成功。
+- 目录同步检查及 Python 生成边界测试通过；V17 在隔离 PostgreSQL 可重复执行。
+- 最终真实浏览器：1440px 桌面及 390px 手机均通过；真实 API 校验 96/24 目录、普通/镀层独立确认、8/10 展架保存刷新、真实情绪/类型筛选、总结来源、三类滚底事实，浏览器错误 0。截图和 proof.json 在前端 .verify/achievement-complete/。
+- 完成计划已移至 docs/archive/plans/2026-11-12-achievement-implementation.md；规则、接口与发布步骤见成就专题，不再沿用旧的34/56枚状态。

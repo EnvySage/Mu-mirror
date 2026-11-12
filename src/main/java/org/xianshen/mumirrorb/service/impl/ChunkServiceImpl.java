@@ -102,7 +102,9 @@ public class ChunkServiceImpl implements ChunkService {
         if (dto.getUserTags() != null) {
             List<String> tags = dto.getUserTags().stream().filter(Objects::nonNull).map(String::trim)
                     .filter(s -> !s.isBlank()).distinct().limit(30).toList();
-            metadata.put("tags", tags);
+            metadata.put("userTags", tags);
+            metadata.remove("user_tags");
+            metadata.remove("tags");
             metadataChanged = true;
         }
         // taskStatus（F 第八轮欠账）：null = 清空（用户"点已选项取消"），非空 = 覆盖

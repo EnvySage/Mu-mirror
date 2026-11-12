@@ -33,7 +33,7 @@ git pull --rebase
 git config core.hooksPath .githooks
 ```
 
-数据库需 PostgreSQL + `vector` 扩展。新库执行 `Mu-mirror-B/src/main/resources/db/schema.sql`；已有库按 `migration-v2` 至 `migration-v16` 顺序升级。
+数据库需 PostgreSQL + `vector` 扩展。新库执行 `Mu-mirror-B/src/main/resources/db/schema.sql`；已有库按 `migration-v2` 至 `migration-v17` 顺序升级。
 
 ### 3.2 Java 后端
 
@@ -111,13 +111,13 @@ git status
 
 数据库名和端口可以两台机器不同，但**表结构必须通过 Git 同步**。任何新表、列、索引、函数、触发器都按同一流程：
 
-1. 在 `src/main/resources/db/` 新增下一个编号的迁移（当前已到 `migration-v16-achievements.sql`，下一条是 `migration-v17-*.sql`）。
+1. 在 `src/main/resources/db/` 新增下一个编号的迁移（当前已到 `migration-v17-achievement-progression.sql`，下一条是 `migration-v18-*.sql`）。
 2. 同一提交更新 `schema.sql`，让新库一次建到最新结构；不要只改迁移。
 3. 不改已发布的迁移文件；需要修正时新开一条迁移。
 4. 两台机器都执行同一条新迁移：
 
 ```bash
-psql -X -v ON_ERROR_STOP=1 -1 -d mu_mirror -f src/main/resources/db/migration-v17-*.sql
+psql -X -v ON_ERROR_STOP=1 -1 -d mu_mirror -f src/main/resources/db/migration-v18-*.sql
 ```
 
 5. 新机器/新库直接执行 `schema.sql`，不要逐份重放旧迁移。

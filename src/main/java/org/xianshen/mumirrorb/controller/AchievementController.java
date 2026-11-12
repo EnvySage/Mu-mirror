@@ -16,18 +16,20 @@ public class AchievementController {
     }
     private UUID user() { return UUID.fromString((String)SecurityContextHolder.getContext().getAuthentication().getPrincipal()); }
     public record ShowcaseInput(int capacity,List<String> codes,long expectedVersion) {}
-    public record ActivityInput(String kind,String subjectId,String otherId,String value) {}
-    public record Acknowledgement(List<String> codes) {}
+    public record ActivityInput(String kind,String subjectId,String otherId,String value,String contextId) {}
+    public record Acknowledgement(List<String> codes,List<AchievementService.Notification> notifications) {}
     @GetMapping public R<?> collection() { return R.ok(service.collection(user())); }
     @GetMapping("/pending") public R<?> pending() { return R.ok(service.pending(user())); }
     @PostMapping("/acknowledge") public R<?> acknowledge(@RequestBody Acknowledgement input) {
-        service.acknowledge(user(),input.codes()); return R.ok("已确认展示");
+        if (input.notifications()!=null) service.acknowledgeNotifications(user(),input.notifications());
+        else service.acknowledge(user(),input.codes());
+        return R.ok("已确认展示");
     }
     @GetMapping("/showcase") public R<?> showcase() { return R.ok(service.showcase(user())); }
     @PutMapping("/showcase") public R<?> showcase(@RequestBody ShowcaseInput input) {
         return R.ok(service.saveShowcase(user(),input.capacity(),input.codes(),input.expectedVersion()));
     }
     @PostMapping("/activity") public R<?> activity(@RequestBody ActivityInput input) {
-        activities.report(user(),input.kind(),input.subjectId(),input.otherId(),input.value()); return R.ok("已记录");
+        activities.report(user(),input.kind(),input.subjectId(),input.otherId(),input.value(),input.contextId()); return R.ok("已记录");
     }
 }

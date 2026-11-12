@@ -6,7 +6,7 @@
 
 **分工原则：Java 管数据与业务，Python 管纯推理。** 向量检索用 pgvector SQL 在本仓完成；AI 服务无状态，用户模型配置随每次 gRPC 请求携带。
 
-成就系统：已有环境先执行 [V16 数据库升级步骤](docs/achievements-operations.md)，再启动新版应用。扩展规则见 [成就维护约定](docs/decisions-achievements.md)。
+成就系统：已有环境先执行 [V16/V17 数据库升级步骤](docs/achievements-operations.md)，再启动新版应用。扩展规则见 [成就维护约定](docs/decisions-achievements.md)。
 
 ## 在系统中的位置
 
@@ -76,7 +76,7 @@ Swagger UI 在 `/api/doc.html`。
 
 ## 数据库
 
-PostgreSQL + pgvector，完整结构以 `src/main/resources/db/schema.sql` 为唯一基线（幂等，需 `CREATE EXTENSION vector`）；存量库按 `migration-v2` 至 `migration-v16` 顺序升级，`snapshot_inputs` 只记录来源 ID，不保存正文。
+PostgreSQL + pgvector，完整结构以 `src/main/resources/db/schema.sql` 为唯一基线（幂等，需 `CREATE EXTENSION vector`）；存量库按 `migration-v2` 至 `migration-v17` 顺序升级，`snapshot_inputs` 只记录来源 ID，不保存正文。
 
 新环境按顺序执行 `schema.sql`、`migration-v3-record-ai-authorization.sql` 和 `migration-v4-mirror-archive-lineage.sql`。已有 v3 本地库只需应用 v4：
 

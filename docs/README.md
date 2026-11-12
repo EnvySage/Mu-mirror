@@ -13,8 +13,9 @@
 | [ONBOARDING](ONBOARDING.md) | 接手路线：从对话链路开始读懂系统 |
 | [shared-protocol](shared-protocol.md) | gRPC 契约变更登记，改 proto 必须更新 |
 | [agent-v2-rollout](agent-v2-rollout.md) | graph_v2 灰度、回滚与验收门槛 |
-| [achievements-operations](achievements-operations.md) | 成就 V16 升级与维护 |
-| [achievement-implementation-plan](achievement-implementation-plan.md) | 成就四批计划（第一批已完成） |
+| [achievements-operations](achievements-operations.md) | 成就 V16/V17 升级、接口与维护 |
+| [成就四批实施归档](archive/plans/2026-11-12-achievement-implementation.md) | 已完成四批的范围与历史验收 |
+| [achievement-plating-rules](achievement-plating-rules.md) | 24 项隐藏镀层内部规则（不导入前端） |
 | [decisions-achievements](decisions-achievements.md) | 成就方案裁决与维护约定 |
 | [tarot-operations](tarot-operations.md) | 塔罗发布、迁移与回退 |
 | [model-profiles](model-profiles.md) | 模型档案 V15 接口与行为 |
