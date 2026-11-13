@@ -19,6 +19,8 @@
 | [decisions-achievements](decisions-achievements.md) | 成就方案裁决与维护约定 |
 | [tarot-operations](tarot-operations.md) | 塔罗发布、迁移与回退 |
 | [model-profiles](model-profiles.md) | 模型档案 V15 接口与行为 |
+| [AI 用量桌宠设计](superpowers/specs/2026-11-14-ai-usage-desktop-pet-design.md) | 第一版实施中：桌面半身角色、调用用量回传及累计统计 |
+| [AI 用量桌宠实施计划](superpowers/plans/2026-11-14-ai-usage-desktop-pet.md) | 三端契约、实现分工、阶段存档与验收 |
 | [record-category-migration](record-category-migration.md) | plan→todo 分类迁移 |
 | [record-memory-tiering-plan](record-memory-tiering-plan.md) | 选择性索引行为契约：已授权日常可查询但不建向量，索引状态与授权、成长、待办分离 |
 | [选择性索引实施归档](archive/plans/2026-11-12-record-selective-indexing.md) | 已完成实施步骤与历史验收；当前状态见 PROGRESS |
