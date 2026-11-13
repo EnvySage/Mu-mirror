@@ -21,7 +21,9 @@ class ChunkEmbeddingJobStateChangedListener {
         Chunk chunk = chunks.selectById(event.chunkId());
         if (chunk == null || !event.userId().equals(chunk.getUserId())) return;
         Record record = records.selectById(chunk.getRecordId());
-        if (record == null || record.getProcessingVersion() == null) return;
+        if (record == null || !event.userId().equals(record.getUserId())
+                || Integer.valueOf(1).equals(record.getIndexPolicyVersion())
+                || record.getDeletedAt() != null || record.getProcessingVersion() == null) return;
         if ("READY".equals(event.state()))
             lifecycle.onInitialIndexComplete(event.userId(), record.getId(), record.getProcessingVersion());
         else if ("FAILED".equals(event.state()))

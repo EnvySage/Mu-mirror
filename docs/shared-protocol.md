@@ -16,6 +16,8 @@
 | agent.proto | AgentRunner | RunAgent（仅流式 custom 事件，字段号见架构 v2 §11） | Task 5 双仓逐字节一致；独立端口 10004，须携带 `x-internal-token`；仅只读调用 |
 
 ## 变更登记
+| 2026-11-12 | B / AI | `GenerateProfileRequest` 新增 `optional string records=16`，传预算内授权回看正文。B 显式设置：空串表示无材料，未设置是旧调用，可回退 learnings；显式空串不得回退。旧端忽略未知字段。 | 双端重生成 stub，部署前核对字段与 presence。 |
+| 2026-11-12 | AI / B | `ClassifyItem`追加`optional bool embedding_enabled=11`、`string embedding_reason=12`。Java用hasEmbeddingEnabled区分缺失/false；缺失保守索引，原因最多200字符，仅写metadata、不参与向量正文。建议不修改memoryEnabled授权。B从AI源同步消息定义，保留B的java_package/java_outer_classname生成选项；Maven生成Java，不手写generated。 | 先部署兼容代码与v18，Java选择性索引开关初始false；两端均保留旧客户端缺失字段兼容。 |
 | 2026-10-16 | agent-B / AI | ClassifyRequest 增加 `bool processing_authorized = 8`，两仓 proto 同步。Java 仅在用户主动请求本次整理或确认片段的分类调用中设为 true；Python 对缺省/false 请求在创建 LLM 前返回 PERMISSION_DENIED。字段缺省为 false，旧客户端 fail-closed。 | 双端重跑/编译 proto；AI 侧补未授权拒绝测试。 |
 | 日期 | 改动方 | 内容 | 对方动作 |
 |------|--------|------|----------|

@@ -54,7 +54,10 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
     @Override
     @Transactional
     public void enqueue(Chunk chunk) {
+        if (!indexable(chunk)) return;
+        if (recordMapper != null && recordMapper.selectOwnedForUpdate(chunk.getUserId(),chunk.getRecordId()) == null) return;
         long version = chunk.getContentVersion() == null ? 1L : chunk.getContentVersion();
+        if (!chunkMapper.embeddingInputIsCurrent(chunk.getId(),chunk.getUserId(),version,hash(chunk.getSegment()),null,false)) return;
         int inserted = jobMapper.insertIfNoActiveVersion(chunk.getId(), chunk.getUserId(), version,
                 hash(chunk.getSegment()));
         if (inserted > 0 || "pending".equals(chunk.getEmbeddingStatus())) {
@@ -84,13 +87,19 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
         if (chunk == null || !userId.equals(chunk.getUserId())) {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "Chunk 不存在");
         }
+        if (recordMapper != null && recordMapper.selectOwnedForUpdate(userId,chunk.getRecordId()) == null)
+            throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
         if (!Boolean.TRUE.equals(chunk.getAiMemoryApproved())) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "该片段尚未授权给 AI 记忆");
         }
+        if (!indexable(chunk) || !chunkMapper.embeddingInputIsCurrent(chunkId,userId,chunk.getContentVersion(),hash(chunk.getSegment()),null,true))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "片段未选择索引或授权、正文、记录状态已变化");
         if (chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty()) return false;
         ChunkEmbeddingJob latest = jobMapper.findLatest(chunkId, userId);
         if (latest != null && ("pending".equals(latest.getStatus()) || "processing".equals(latest.getStatus()))) return false;
-        if (latest != null && "failed".equals(latest.getStatus())) {
+        if (latest != null && "failed".equals(latest.getStatus())
+                && java.util.Objects.equals(latest.getContentVersion(),chunk.getContentVersion())
+                && hash(chunk.getSegment()).equals(latest.getContentHash())) {
             if (jobMapper.retryFailed(latest.getId()) == 0) return false;
         } else {
             enqueue(chunk);
@@ -113,11 +122,13 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
         Chunk chunk = chunkMapper.selectById(job.getChunkId());
         if (chunk == null || !job.getUserId().equals(chunk.getUserId())
                 || !Boolean.TRUE.equals(chunk.getAiMemoryApproved())
+                || !chunk.getEmbeddingEnabled()
                 || !java.util.Objects.equals(job.getContentVersion(), chunk.getContentVersion())
                 || !hash(chunk.getSegment()).equals(job.getContentHash())
                 || chunk.getSegment() == null || chunk.getSegment().isBlank()) {
             return null;
         }
+        if (!chunkMapper.embeddingInputIsCurrent(job.getChunkId(),job.getUserId(),job.getContentVersion(),job.getContentHash(),job.getId(),true)) return null;
         return chunk.getSegment();
     }
 
@@ -137,20 +148,28 @@ public class ChunkEmbeddingJobServiceImpl implements ChunkEmbeddingJobService {
     @Override
     @Transactional
     public void markFailure(ChunkEmbeddingJob job, String error, int maxAttempts, Duration baseDelay) {
+        if (currentAuthorizedText(job) == null) { cancelStale(job); return; }
         boolean exhausted = job.getAttempts() >= maxAttempts;
         String status = exhausted ? "failed" : "pending";
         long multiplier = 1L << Math.min(Math.max(job.getAttempts() - 1, 0), 10);
         OffsetDateTime availableAt = exhausted ? OffsetDateTime.now()
                 : OffsetDateTime.now().plus(baseDelay.multipliedBy(multiplier));
         String safeError = error == null ? "未知 embedding 错误" : error.substring(0, Math.min(error.length(), 500));
-        jobMapper.finishAttempt(job.getId(), status, availableAt, safeError);
         if (exhausted) {
-            chunkMapper.markEmbeddingFailedIfCurrent(job.getChunkId(), job.getUserId(),
-                    job.getContentVersion(), safeError);
+            if (chunkMapper.markEmbeddingFailedIfCurrent(job.getChunkId(), job.getUserId(),
+                    job.getContentVersion(), job.getId(), safeError) == 0) { cancelStale(job); return; }
+            jobMapper.finishAttempt(job.getId(), status, availableAt, safeError);
             publishParentCheck(job, "FAILED", safeError);
         } else {
+            jobMapper.finishAttempt(job.getId(), status, availableAt, safeError);
             chunkMapper.markEmbeddingPending(job.getChunkId(), job.getUserId(), job.getContentVersion());
         }
+    }
+
+    private boolean indexable(Chunk chunk) {
+        return chunk != null && chunk.getId() != null && chunk.getUserId() != null
+                && Boolean.TRUE.equals(chunk.getAiMemoryApproved()) && chunk.getEmbeddingEnabled()
+                && chunk.getSegment() != null && !chunk.getSegment().isBlank();
     }
 
     @Override

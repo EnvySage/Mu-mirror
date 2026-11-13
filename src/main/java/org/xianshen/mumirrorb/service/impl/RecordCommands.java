@@ -125,6 +125,7 @@ final class RecordCommands {
         Record record = owner.recordMapper.selectOwnedForUpdate(userId, recordId);
         if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已删除");
         if (record.getStatus() != RecordStatus.RECORD_ONLY || Boolean.TRUE.equals(record.getAiProcessingAuthorized())
+                || (Integer.valueOf(1).equals(record.getIndexPolicyVersion()) && Boolean.TRUE.equals(record.getUserReviewed()))
                 || (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE))
             throw new BusinessException(ResultCode.PARAM_ERROR, "只有未授权 AI 的仅记录可以编辑原文");
         record.setContent(content);
@@ -136,12 +137,7 @@ final class RecordCommands {
 
     @Transactional
     public void softDelete(Long recordId, UUID userId) {
-        Record record = owner.recordMapper.selectOne(
-                new LambdaQueryWrapper<Record>()
-                        .eq(Record::getId, recordId)
-                        .eq(Record::getUserId, userId)
-                        .isNull(Record::getDeletedAt)
-        );
+        Record record = owner.recordMapper.selectOwnedForUpdate(userId, recordId);
 
         if (record == null) {
             throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
@@ -152,6 +148,17 @@ final class RecordCommands {
         record.setDeletedAt(OffsetDateTime.now());
         record.setProcessingVersion((record.getProcessingVersion() == null ? 0 : record.getProcessingVersion()) + 1);
         owner.recordMapper.updateById(record);
+        for (Chunk chunk : owner.chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                .eq(Chunk::getRecordId, recordId).eq(Chunk::getUserId, userId))) {
+            chunk.setAiMemoryApproved(false);
+            chunk.setContentVersion((chunk.getContentVersion() == null ? 1L : chunk.getContentVersion()) + 1);
+            chunk.setEmbeddingStatus("not_requested");
+            chunk.setEmbeddingError(null);
+            owner.chunkMapper.updateById(chunk);
+            owner.chunkMapper.clearEmbedding(chunk.getId(), userId);
+            owner.chunkEmbeddingJobService.cancel(chunk.getId(), userId);
+            owner.snapshotLineageService.invalidateSource(userId,"chunk",chunk.getId(),"record_deleted");
+        }
         if (owner.growthEntries != null) owner.growthEntries.delete(new LambdaQueryWrapper<org.xianshen.mumirrorb.pojo.DO.GrowthEntry>()
                 .eq(org.xianshen.mumirrorb.pojo.DO.GrowthEntry::getUserId, userId)
                 .eq(org.xianshen.mumirrorb.pojo.DO.GrowthEntry::getSourceRecordId, recordId));

@@ -114,6 +114,14 @@ public class Chunk {
     /** 用户是否确认该片段可供后续 AI 记忆、检索、摘要和画像使用。 */
     private Boolean aiMemoryApproved;
 
+    /** 是否建立向量；与用户授予 AI 使用权限独立，旧调用默认保留索引。 */
+    @Builder.Default
+    private Boolean embeddingEnabled = true;
+
+    public Boolean getEmbeddingEnabled() {
+        return !Boolean.FALSE.equals(embeddingEnabled);
+    }
+
     /** 用户是否单独确认将该片段作为待办登记。 */
     private Boolean todoApproved;
 

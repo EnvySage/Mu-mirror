@@ -64,6 +64,8 @@ public class ChunkServiceImpl implements ChunkService {
         }
         if (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE)
             throw new BusinessException(ResultCode.PARAM_ERROR, "记忆处理中或已确认的片段为只读；请新建关联更正记录");
+        if (Integer.valueOf(1).equals(record.getIndexPolicyVersion()) && Boolean.TRUE.equals(record.getUserReviewed()))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "AI审核确认后的片段为只读，请新建关联更正记录");
 
         boolean textChanged = false;
         // 4. 更新 segment
@@ -122,6 +124,8 @@ public class ChunkServiceImpl implements ChunkService {
         //    改文本 → classified_segment 置 NULL（confirm 时补分类）；改元数据 → 不影响它
         if (textChanged) {
             chunk.setClassifiedSegment(null);
+            chunk.setEmbeddingEnabled(true);
+            metadata.put("embeddingReason", "正文已修改，默认保留检索");
             chunk.setContentVersion((chunk.getContentVersion() == null ? 1L : chunk.getContentVersion()) + 1L);
         }
         if (textChanged) {
@@ -173,6 +177,8 @@ public class ChunkServiceImpl implements ChunkService {
         }
         if (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE)
             throw new BusinessException(ResultCode.PARAM_ERROR, "记忆处理中或已确认的片段为只读");
+        if (Integer.valueOf(1).equals(record.getIndexPolicyVersion()) && Boolean.TRUE.equals(record.getUserReviewed()))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "AI审核确认后的片段为只读");
 
         if (Boolean.TRUE.equals(chunk.getAiMemoryApproved())) {
             snapshotLineageService.invalidateSource(userId, "chunk", chunkId, "chunk_removed");
@@ -194,6 +200,8 @@ public class ChunkServiceImpl implements ChunkService {
         }
         if (record.getMemoryState() != null && record.getMemoryState() != RecordMemoryState.NONE)
             throw new BusinessException(ResultCode.PARAM_ERROR, "记忆处理中或已确认的记录不能新增片段");
+        if (Integer.valueOf(1).equals(record.getIndexPolicyVersion()) && Boolean.TRUE.equals(record.getUserReviewed()))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "AI审核确认后的记录不能新增片段");
         if (segmentText == null || segmentText.isBlank()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "片段内容不能为空");
         }
@@ -245,6 +253,8 @@ public class ChunkServiceImpl implements ChunkService {
                 .metadata(chunk.getMetadata())
                 .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
                 .aiMemoryApproved(Boolean.TRUE.equals(chunk.getAiMemoryApproved()))
+                .embeddingEnabled(chunk.getEmbeddingEnabled())
+                .embeddingReason(chunk.getMetadata() != null && chunk.getMetadata().get("embeddingReason") instanceof String reason ? reason : null)
                 .todoApproved(Boolean.TRUE.equals(chunk.getTodoApproved()))
                 .contentVersion(chunk.getContentVersion())
                 .embeddingStatus(chunk.getEmbeddingStatus() == null

@@ -1,6 +1,6 @@
 # Mu-mirror-B 当前现状（唯一维护文档）
 
-> **最后核对：2026-11-12**
+> **最后核对：2026-11-13**
 > 核对方式：逐项对照 `src/main/java`、`src/main/resources`、`src/test/java` 与当前工作树，**不沿用旧进度文档的结论**。
 > 维护约定：项目只维护这一份"当前真相"。其他文档要么是专题说明，要么是历史决策记录；与代码冲突时，以代码为准，并回来更新本文件。
 > 旧进度文档与 `docs/archive/HANDOVER-2026-09-06.md`不再作为进度依据。
@@ -48,8 +48,8 @@ Vue 3 前端（Mu-mirror-F）
   `mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev`
 - dev 数据源：`jdbc:postgresql://localhost:5432/mu_mirror`，时区 `Asia/Shanghai`。
 - 旧 AI 服务默认 `127.0.0.1:10003`；Agent v2 默认 `localhost:10004`。
-- 新库执行 `src/main/resources/db/schema.sql`（已包含 V17 最终结构）。
-- 已有库按 `migration-v2.sql` → `v3` → … → `v17` 顺序升级；`schema.sql` 不能替代存量迁移。
+- 新库执行 `src/main/resources/db/schema.sql`（已包含 V18 最终结构）。
+- 已有库按 `migration-v2.sql` → `v3` → … → `v18` 顺序升级；`schema.sql` 不能替代存量迁移。
 
 **测试**
 
@@ -67,7 +67,7 @@ Vue 3 前端（Mu-mirror-F）
 | 模块 | 状态 | 代码入口 / 说明 |
 |---|---|---|
 | 认证 | ✅ | `AuthController`，注册/登录/JWT/`me` |
-| 记录与片段 Chunk | ✅ | `RecordController`；事件管道 `pipeline/`；审核、拆分、重试、日历、片段编辑、异步向量化 |
+| 记录与片段 Chunk | ✅ | `RecordController`；事件管道 `pipeline/`；审核、拆分、重试、日历、片段编辑；version 1 独立记录授权与逐片段向量索引，未选索引的授权正文仍可读、可结构化查询 |
 | 用户设置 | ✅ | `SettingsController`；`user_settings`；API Key AES-256-GCM 加密、脱敏；`test-ai` / `test-embedding` / `test-db` |
 | 模型连接档案 | ✅ | `ModelProfileController`（同 `/settings` 前缀）；`user_model_profiles`；保存与"应用"分离 |
 | 镜子 / 画像 | ✅ | `MirrorController`、`MirrorServiceImpl`；累计画像、月度快照、漂移、来源 lineage、归档分页 |
@@ -88,7 +88,7 @@ Vue 3 前端（Mu-mirror-F）
 | 前端 | 独立仓 | `Mu-mirror-F`（Vue 3） |
 | 部署 | ✅ | `Jenkinsfile`、`deploy/backend-release.sh`、systemd、nginx 配置 |
 
-**本轮状态（2026-11-12）**：`ai` 分支包含成就余下三批、真实行为采集和文档更新，后端、前端与桌面/手机真实账号验收均已通过。生产环境仍须先执行 V17，不能把测试库迁移当作生产已升级。
+**本轮状态（2026-11-13）**：`ai` 分支已实施记录选择性索引的 AI、后端与前端适配。`legacy` 继续保留且没有自动切换对话引擎。完整后端测试、AI 全量测试、前端全量测试/构建、隔离浏览器流程、合成样例上的真实模型分类复核及 legacy/graph_v2 各 8 问真实聊天矩阵均已完成；目标运行环境配置与生产迁移仍未验证。部署目标必须按顺序应用 V18，不能把隔离测试库迁移当作生产已升级。
 
 ---
 
@@ -244,9 +244,9 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 
 `mirror_ai.*` 的 8 个视图：`record_chunks`、`glossary_terms`、`chat_history`、`profiles`、`vault_metadata`、`vault_content`、`vault_keys`、`todos`。它们是 Python Agent v2 的只读数据边界，带 `security_barrier`。
 
-**迁移顺序**（已有库）：`v2` → `v3`（记录 AI 授权）→ `v4`（镜像归档/lineage）→ `v5`（异步片段向量化）→ `v6`（assistant actions）→ `v7`（待办直接操作）→ `v8`（记录记忆状态）→ `v9`（成长）→ `v10`（每日记忆）→ `v11`（Agent v2 视图/run/receipt）→ `v12`（塔罗）→ `v13`（plan→todo）→ `v14`（塔罗 v2）→ `v15`（模型连接档案）→ `v16`（成就基础）→ `v17`（成就行为与镀层）。
+**迁移顺序**（已有库）：`v2` → `v3`（记录 AI 授权）→ `v4`（镜像归档/lineage）→ `v5`（异步片段向量化）→ `v6`（assistant actions）→ `v7`（待办直接操作）→ `v8`（记录记忆状态）→ `v9`（成长）→ `v10`（每日记忆）→ `v11`（Agent v2 视图/run/receipt）→ `v12`（塔罗）→ `v13`（plan→todo）→ `v14`（塔罗 v2）→ `v15`（模型连接档案）→ `v16`（成就基础）→ `v17`（成就行为与镀层）→ `v18`（选择性索引与只读 Agent 视图）。
 
-新库直接跑 `schema.sql`；它已包含 V17，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
+新库直接跑 `schema.sql`；它已包含 V18，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
 
 ---
 
@@ -260,7 +260,7 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 2. **前端浏览器验收缺口**：助手成长改造验收报告把 R5 双端呈现标为"部分通过"，真实浏览器全流程未完成。
 3. **文档入口已收口**：当前文档地图见 `docs/README.md`；历史设计与一次性记录在 `docs/archive/`，不再放入 `docs/` 根目录。
 4. **测试依赖环境**：`MuMirrorBApplicationTests` 需要可达的 PostgreSQL；数据库测试未配置环境变量时会跳过，跳过不等于通过。
-5. **成就发布前置条件**：96 枚普通章及 24 项镀层已实现；目标环境须先执行 V17。外部真实模型提供商连通性不属于本数据库验收，仍需可用 Python 服务与用户配置。
+5. **发布前置条件**：成就目标环境须先执行 V17；选择性索引目标环境还须执行 V18。V18 只在本轮隔离 PostgreSQL 验证过，尚未应用到生产数据库。外部真实模型提供商连通性不属于数据库验收，仍需可用 Python 服务与用户配置。
 6. **双引擎并存成本**：legacy 循环、legacy 单次规划、graph_v2、shadow 四套路径同时存在，任何对话行为变更都要确认影响面。
 
 ---
@@ -270,12 +270,29 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 | 日期 | 事项 |
 |---|---|
 | 2026-11-11 | 以代码为准重写本文件；取代 2026-08-13 版进度文档；补充 Agent v2、成就、塔罗、成长、模型档案、聊天记忆等缺失模块；加入接管路线与已知风险 |
+| 2026-11-13 | 整理推送材料：选择性索引计划与模型验收摘要归档，修正文档索引；前端成就确认收口到现有批量路径；保留正式回归测试。用户决定停止 tidy 流程，三仓 20KB 大小检查改为提醒，文档同步门禁保留，新钩子 18 项隔离检查通过。原始证据在三仓外 `_mirror_verification_archive_20261113/`；临时脚本/依赖的物理删除被自动审批拦截，已忽略并排除提交 |
 
 ## 9. 成就最终验证（2026-11-12）
 
+- 2026-11-13 追加批量通知适配：多个成就在同一限宽 640px 弹窗并列展示，桌面三列、手机两列，长列表内部纵向滚动、底部操作固定。真实隔离 HTTP/PostgreSQL 验收覆盖五项同批、新增第六项留待下一批、同编号普通/镀层独立展示，以及 480px 矮屏 50 项滚动与一次批量确认。前端全量 99/99、构建通过；证据在 F `.verify/achievement-batch/`。原账号和当前记忆系统手工测试账号的成就未被测试造数或确认。
 - 后端全量：604 项通过、0 失败、0 跳过。
 - 随后的标签规范化与成长首笔事实补丁：65 项专项通过、0 失败、0 跳过，package 成功。
 - 前端：74 项通过、0 失败、0 跳过，构建成功。
 - 目录同步检查及 Python 生成边界测试通过；V17 在隔离 PostgreSQL 可重复执行。
 - 最终真实浏览器：1440px 桌面及 390px 手机均通过；真实 API 校验 96/24 目录、普通/镀层独立确认、8/10 展架保存刷新、真实情绪/类型筛选、总结来源、三类滚底事实，浏览器错误 0。截图和 proof.json 在前端 .verify/achievement-complete/。
 - 完成计划已移至 docs/archive/plans/2026-11-12-achievement-implementation.md；规则、接口与发布步骤见成就专题，不再沿用旧的34/56枚状态。
+
+## 10. 选择性索引验收（2026-11-13）
+
+- 推送前再次完整复核：后端 647/647、AI 807/807、前端 99/99，均 0 失败、0 跳过；前端构建、upload 同步、跨端 proto 业务声明及待提交文档 73 个链接检查通过。后端使用新建且符合命名保护的隔离库，AI 使用独立 reader 夹具，临时库/角色均已移除。证据在三仓外 `_mirror_verification_archive_20261113/publish/`；早期密码/测试库命名预检失败与最后完整通过日志一并保留。未重跑真实模型聊天矩阵或浏览器全流程，本次仍沿用下方已记录的验收边界。
+- 最终补齐独立 PostgreSQL reader 夹具后，AI 完整套件 **807 通过、0 失败、0 跳过**，包含新超时预算回归及上一轮跳过的 18 项。临时视图只读角色已移除；手工验证库和运行服务未受影响。最终证据：`.verify/record-selective-index/ai-full-postgres-after-diary-fix.log`、`ai-full-postgres-after-diary-fix-grants.log`。下方 789/18 与 805/805 保留为此前轮次记录。
+- 追加真实日记写入验收：用指定 DeepSeek 本地代理从书写页创建、审核确认并查询。全日常记录实际 3 段/0 向量，成长 care +1；混合记录实际 4 段/2 向量，care +1、expression +1，生成 1 条物业待办。结构化查询读回零向量日常，语义查询命中新餐馆偏好。隔离手工实例最初漏开新写入开关，已仅在本地 9050 实例显式开启；chat.engine 保持 legacy。证据：`.verify/record-selective-index/live-diary-acceptance.json`。
+- 真实混合输入在修正前两次模型超时，验证了原文保留及用户确认后仅保存。AI Classify 现改为一次使用完整的 60 秒配置预算、关闭 SDK 内部重试，避免拆成两次 30 秒重复中断；总预算不增加。同输入后续复测成功，但有限样例不保证模型永不超时。新增慢响应回归先失败后通过；定向 31 通过，最新 AI 全量 789 通过、18 跳过（本次未配置独立的 `MIRROR_TEST_READ_DSN` 夹具），`upload/` 同步检查通过。下方 805/805 是此追加修正之前、配置完整数据库夹具时的首轮结果。
+- 记录授权与向量索引选择已分离。全日常 version 1 记录可以 `done/READY` 且零向量；重要授权片段进入 embedding 队列并可语义检索；失败只改变索引任务/片段状态，不撤销记录授权、成长或待办。v0 存量记录继续使用原行为。
+- legacy 工具保留 120 字 excerpt 的 `search_records` 兼容行为，并新增受用户授权、状态与 vault 边界过滤的全文分页 `read_record`。legacy 仍是现行路径之一；未删除、未自动切换。
+- 后端全量 `mvn -B test`：647/647 通过、0 失败/错误/跳过（隔离 PostgreSQL），详见 `.verify/record-selective-index/backend-full-test-release-final.log`。最后排序变更及 legacy reader 定向组：54/54，详见 `.verify/record-selective-index/backend-order-and-task7-targeted.log`。开关关闭的 AI_ASSISTED 候选回归也通过，默认生成 version 0 并走旧 single 分类接口。
+- 首轮 AI pytest 全量：805/805 通过、0 跳过；PostgreSQL 读权限集成包含在全量结果内。Anthropic thinking block 兼容修复有定向回归。固定 12 个合成分类样例（4 低信息、8 具体）使用用户指定的 `cn:deepseek-v4.1-flash` 本地 OpenAI-compatible 代理，12/12 符合预期。详见 `.verify/record-selective-index/ai-full-with-deepseek-and-postgres-final.log`、`real-model-12-case-deepseek.log`、`real-model-12-case-deepseek-results.json` 与 [AI 验收归档](../../Mu-mirror-AI/docs/archive/integration/2026-11-13-record-selective-index-real-model.md)。`sync_upload.py --check` 与两仓 proto 语义声明比对均通过。
+- 前端 `npm test`：93/93；`npm run build` 成功。隔离 Edge 浏览器流程覆盖桌面全日常、390px 手机混合、刷新、编辑正文后重选、重要片段最终 `ready` 且有向量，以及受控索引失败后记录仍 `done/READY`。请求、结果和截图见 `.verify/record-selective-index/browser-e2e-final/`。
+- V18 fresh schema/旧数据升级、reader 8 个视图授权及基础表拒读，在本地专用 PostgreSQL 验证；证据见 `.verify/record-selective-index/task2-postgres-test.log`、`actual-schema-setup.log`、`actual-reader-grant-script.log`。旧 migration history ledger 缺失，无法证明任何既有环境历史执行顺序或回填状态。
+- 已用用户指定的本地代理与合成数据完成 legacy、graph_v2 各 8 问的真实聊天矩阵：当前复测汇总均为 7 项通过、1 项需人工判断（宽泛的“最近该关注什么”）；店名问题 legacy 首轮漏检、隔离会话复测命中，保留两次输出。疲惫、全日常零向量查询、未索引关键词、21 段跨页全文及空结果均覆盖。空结果和 graph_v2 的工具读取由原验收脚本漏判，修正后保留 raw/复核结果及规则。详情见 `.verify/record-selective-index/chat-matrix-real-model-results.json`、`chat-matrix-real-model-results-first-attempt-raw.json`、`chat-matrix-restaurant-name-retake.json`。
+- 未检查目标环境有效 `chat.engine`/白名单/近期 `agent_runs`，也未执行真实部署或生产迁移。用户确认当前仍使用 legacy；本轮只为隔离验收临时启动双引擎实例，没有切换目标环境。旧数据/空开关/冲突路径由隔离数据库回归覆盖；未对业务库写入。迁移历史 ledger 缺失，不能证明现有环境的迁移顺序与回填状态。

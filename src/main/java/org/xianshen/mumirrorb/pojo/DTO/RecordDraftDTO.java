@@ -13,6 +13,7 @@ public class RecordDraftDTO {
     private String rawContent;
     private String finalContent;
     private String mode;
+    private Integer indexPolicyVersion = 0;
     private boolean privateInput;
     private String preparationStatus;
     private String preparationError;
@@ -33,6 +34,10 @@ public class RecordDraftDTO {
         private List<String> tags = new ArrayList<>();
         private String taskStatus;
         private boolean memoryEnabled;
+        private Boolean embeddingEnabled = true;
+        private String embeddingReason;
+
+        public Boolean getEmbeddingEnabled() { return !Boolean.FALSE.equals(embeddingEnabled); }
         private boolean todoEnabled;
     }
 }

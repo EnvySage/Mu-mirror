@@ -17,6 +17,7 @@ class TarotReferencesDatabaseTest {
         db.execute("CREATE TABLE IF NOT EXISTS records(id BIGSERIAL PRIMARY KEY,user_id UUID REFERENCES users(id) ON DELETE CASCADE,source TEXT,status TEXT,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ,memory_complete BOOLEAN DEFAULT TRUE)");
         db.execute("CREATE TABLE IF NOT EXISTS chunks(id BIGSERIAL PRIMARY KEY,record_id BIGINT REFERENCES records(id) ON DELETE CASCADE,user_id UUID,segment TEXT,metadata JSONB,ai_memory_approved BOOLEAN,todo_approved BOOLEAN)");
         db.execute("CREATE OR REPLACE FUNCTION record_memory_is_complete(BIGINT) RETURNS BOOLEAN LANGUAGE SQL AS 'SELECT memory_complete FROM records WHERE id=$1'");
+        db.execute("CREATE OR REPLACE FUNCTION record_ai_is_readable(BIGINT) RETURNS BOOLEAN LANGUAGE SQL AS 'SELECT record_memory_is_complete($1)'");
         db.execute("CREATE TABLE IF NOT EXISTS todo_registry(id BIGSERIAL PRIMARY KEY,user_id UUID REFERENCES users(id) ON DELETE CASCADE,title TEXT,notes TEXT,current_status TEXT,origin_kind TEXT,source_chunk_id BIGINT,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ,version BIGINT DEFAULT 0)");
         db.execute("CREATE TABLE IF NOT EXISTS profile_snapshots(id BIGSERIAL PRIMARY KEY,user_id UUID REFERENCES users(id) ON DELETE CASCADE,snapshot_type TEXT,period_month TEXT,version_no INT,is_current BOOLEAN,invalidated BOOLEAN,overall_summary TEXT,mood_analysis TEXT,learning_analysis TEXT,todo_analysis TEXT,rhythm_analysis TEXT,created_at TIMESTAMPTZ)");
     }

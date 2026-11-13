@@ -20,6 +20,8 @@
 | [tarot-operations](tarot-operations.md) | 塔罗发布、迁移与回退 |
 | [model-profiles](model-profiles.md) | 模型档案 V15 接口与行为 |
 | [record-category-migration](record-category-migration.md) | plan→todo 分类迁移 |
+| [record-memory-tiering-plan](record-memory-tiering-plan.md) | 选择性索引行为契约：已授权日常可查询但不建向量，索引状态与授权、成长、待办分离 |
+| [选择性索引实施归档](archive/plans/2026-11-12-record-selective-indexing.md) | 已完成实施步骤与历史验收；当前状态见 PROGRESS |
 | [HISTORY](HISTORY.md) | 已归档设计与一次性记录的一页摘要 |
 | [archive/](archive/) | 历史设计、specs、reports、已完成计划与旧 sprint 文档 |
 
@@ -28,7 +30,7 @@
 1. **代码优先**：文档与实现冲突时，以当前代码为准。
 2. **一处维护**：当前状态只写 `PROGRESS.md`；API/配置/测试写 `REFERENCE.md`；历史细节放 `HISTORY.md` 或 `archive/`。
 3. **完成后归档**：一次性任务书、诊断、联调记录、完成态计划移入 `archive/`，不要留在 `docs/` 根目录。
-4. **文件大小**：pre-commit 拒绝超过约 20KB 的文本文件；`PROGRESS.md`、`REFERENCE.md` 已按职责拆分。
+4. **文件大小**：pre-commit 对超过约 20KB 的文本文件给出提醒，不阻止提交；按职责评估是否拆分，文档同步门禁继续生效。
 5. **新克隆**：运行 `git config core.hooksPath .githooks` 启用钩子。
 6. **文档门禁**：pre-commit 会拦截“高风险改动但没有文档改动”的提交；紧急情况用 `SKIP_DOC_CHECK=1`，并在提交说明里写明原因。
 

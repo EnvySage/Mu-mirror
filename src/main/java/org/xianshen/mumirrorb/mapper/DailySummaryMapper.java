@@ -28,8 +28,8 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id))
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id))
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             """)
@@ -44,13 +44,13 @@ public interface DailySummaryMapper {
             SELECT c.metadata->>'contentType' AS type,
                    COUNT(*) AS count
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'contentType')
@@ -68,14 +68,14 @@ public interface DailySummaryMapper {
             SELECT m.value AS mood,
                    COUNT(*) AS count
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             CROSS JOIN LATERAL jsonb_array_elements_text(c.metadata->'mood') AS m(value)
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
               AND jsonb_exists(c.metadata, 'mood')
@@ -97,8 +97,8 @@ public interface DailySummaryMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id))
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id))
               AND r.created_at >= #{dayStart}
               AND r.created_at < #{dayEnd}
             GROUP BY 1
@@ -123,7 +123,7 @@ public interface DailySummaryMapper {
                    COALESCE(t.notes, c.metadata->>'summary') AS summary
             FROM todo_registry t
             LEFT JOIN chunks c ON c.id = t.source_chunk_id
-            LEFT JOIN records r ON r.id = c.record_id
+            LEFT JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
               AND t.current_status != 'completed'
@@ -150,13 +150,13 @@ public interface DailySummaryMapper {
             SELECT r.id AS recordId, c.segment AS content,
                    TO_CHAR(r.created_at, 'HH24:MI') AS createdAt
             FROM records r
-            JOIN chunks c ON c.record_id = r.id
+            JOIN chunks c ON c.record_id = r.id AND c.user_id = r.user_id
             WHERE r.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND c.segment IS NOT NULL
               AND c.segment <> ''
               AND r.created_at >= #{dayStart}

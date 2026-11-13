@@ -56,13 +56,13 @@ public interface UserTermMapper extends BaseMapper<UserTerm> {
             <script>
             SELECT COUNT(DISTINCT r.id) AS cnt
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND r.created_at &gt;= #{since}
               AND <foreach collection="patterns" item="p" open="(" separator=" OR " close=")">
                   c.segment ILIKE #{p}

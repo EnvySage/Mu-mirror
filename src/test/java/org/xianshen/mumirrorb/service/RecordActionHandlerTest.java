@@ -31,6 +31,30 @@ class RecordActionHandlerTest {
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
+    void reviewedVersionOneWithoutMemoryCannotBeReorganizedIntoAnEditableLegacyRecord() {
+        var mapper=mock(RecordMapper.class);
+        when(mapper.selectOne(any())).thenReturn(Record.builder().id(12L).userId(userId).source("user")
+                .content("更正内容").status(RecordStatus.RECORD_ONLY).memoryState(RecordMemoryState.NONE)
+                .aiProcessingAuthorized(false).userReviewed(true).indexPolicyVersion(1).build());
+        var handler=new RecordActionHandler(saveOnlyDraftService(),mock(RecordService.class),mapper,
+                mock(ChunkMapper.class),json,mock(SettingsService.class));
+        assertThrows(BusinessException.class,()->handler.validateAndPreview(userId,"record.organize",
+                json.createObjectNode().put("sourceRecordId",12L).put("mode","AI_ASSISTED")));
+    }
+
+    @Test
+    void persistedAiDraftPreservesExplicitMemoryRevocationAndIndexOptOut() {
+        var handler = new RecordActionHandler(mock(RecordDraftService.class), mock(RecordService.class),
+                mock(RecordMapper.class), mock(ChunkMapper.class), json, mock(SettingsService.class));
+        var preview = json.createObjectNode();
+        var draft = preview.putObject("recordDraft").put("mode", "AI_ASSISTED").put("indexPolicyVersion", 1);
+        draft.putArray("segments").addObject().put("memoryEnabled", false).put("embeddingEnabled", false);
+        var saved = handler.persistedPayload("record.create", json.createObjectNode(), preview);
+        assertFalse(saved.path("recordDraft").path("segments").get(0).path("memoryEnabled").asBoolean());
+        assertFalse(saved.path("recordDraft").path("segments").get(0).path("embeddingEnabled").asBoolean());
+    }
+
+    @Test
     void preparingRecordPersistsCandidateWithoutCreatingRecordOrChangingAuthorization() {
         RecordDraftService drafts = mock(RecordDraftService.class);
         var expected = new RecordDraftDTO();

@@ -288,7 +288,7 @@ public class MirrorServiceImpl implements MirrorService {
      * <p>闸门（MirrorProperties，全配置化）：条数闸与总字符闸先触发者生效，旧→新裁剪；
      * 触发时打 WARN 日志（F 侧 meta toast 透出待联调接线）。</p>
      */
-    protected record RollingContext(String prevMirror, String correctionIndex, int lookback,
+    protected record RollingContext(String prevMirror, String correctionIndex, int lookback, String records,
                                   String statsFacts, boolean lookbackTruncated,
                                   List<SnapshotSourceRef> sourceRefs) {
     }

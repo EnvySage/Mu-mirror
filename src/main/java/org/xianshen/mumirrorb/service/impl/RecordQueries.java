@@ -159,6 +159,8 @@ final class RecordQueries {
         List<Chunk> chunks = owner.chunkMapper.selectList(
                 new LambdaQueryWrapper<Chunk>()
                         .eq(Chunk::getRecordId, record.getId())
+                        .eq(Chunk::getUserId, record.getUserId())
+                        .orderByAsc(Chunk::getId)
         );
 
         List<ChunkVO> chunkVOs = chunks.stream()
@@ -173,6 +175,7 @@ final class RecordQueries {
                 .aiProcessingAuthorized(record.getAiProcessingAuthorized())
                 .memoryState(record.getMemoryState() == null ? RecordMemoryState.NONE : record.getMemoryState())
                 .processingVersion(record.getProcessingVersion())
+                .indexPolicyVersion(owner.indexPolicyVersionOf(record))
                 .correctionOfRecordId(record.getCorrectionOfRecordId())
                 .memoryFailureReason(record.getMemoryFailureReason())
                 .queuedEmbeddingJobIds(record.getQueuedEmbeddingJobIds())
@@ -199,6 +202,9 @@ final class RecordQueries {
                 .metadata(chunk.getMetadata())
                 .hasEmbedding(chunk.getEmbedding() != null && !chunk.getEmbedding().isEmpty())
                 .aiMemoryApproved(Boolean.TRUE.equals(chunk.getAiMemoryApproved()))
+                .embeddingEnabled(chunk.getEmbeddingEnabled())
+                .embeddingReason(chunk.getMetadata() != null
+                        && chunk.getMetadata().get("embeddingReason") instanceof String reason ? reason : null)
                 .todoApproved(Boolean.TRUE.equals(chunk.getTodoApproved()))
                 .contentVersion(chunk.getContentVersion())
                 .embeddingStatus(chunk.getEmbeddingStatus() == null

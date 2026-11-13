@@ -109,6 +109,7 @@ final class MirrorLineage {
         request.setPrevMirror(rolling.prevMirror())
                 .setCorrectionIndex(rolling.correctionIndex())
                 .setMirrorLookback(rolling.lookback())
+                .setRecords(rolling.records())
                 .setStatsFacts(rolling.statsFacts());
 
         owner.log.info("递归累计镜子输入组装：lookback={}, prevMirror={} 字符, correctionIndex={} 条, statsFacts={} 字符, lookbackTruncated={}",

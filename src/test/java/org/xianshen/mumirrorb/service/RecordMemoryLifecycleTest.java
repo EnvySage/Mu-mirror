@@ -33,6 +33,24 @@ class RecordMemoryLifecycleTest {
     private final UUID userId = UUID.randomUUID();
 
     @Test
+    void selectiveIndexCallbacksNeverRevokeOrRescoreConfirmedAuthorization() {
+        Record record = record(7, RecordMemoryState.PENDING);
+        record.setIndexPolicyVersion(1);
+        record.setUserReviewed(true);
+        record.setAiProcessingAuthorized(true);
+        record.setGrowthSuggestions("confirmed growth");
+        when(records.selectOwnedForUpdate(userId, 12L)).thenReturn(record);
+        var lifecycle = new RecordMemoryLifecycleServiceImpl(records, chunks, jobs, lineage, events);
+        lifecycle.onInitialIndexExhausted(userId, 12L, 7, "timeout");
+        lifecycle.onInitialIndexComplete(userId, 12L, 7);
+        assertTrue(record.getAiProcessingAuthorized());
+        assertTrue(record.getUserReviewed());
+        assertEquals("confirmed growth", record.getGrowthSuggestions());
+        verifyNoInteractions(chunks, jobs, lineage, events);
+        verify(records, never()).updateById(any(Record.class));
+    }
+
+    @Test
     void partialEmbeddingsNeverMakeWholeRecordReady() {
         Record record = record(5, RecordMemoryState.PENDING);
         Chunk ready = chunk(1L, "ready", List.of(.1f));

@@ -37,12 +37,13 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
     private static final String SELECT_DIARY_TARGETS = """
             SELECT c.id, c.segment AS embedding_text
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = ?::uuid
               AND c.vault_item_id IS NULL
               AND c.ai_memory_approved IS TRUE
+              AND c.embedding_enabled AND c.embedding_status = 'ready' AND c.embedding IS NOT NULL
               AND c.segment IS NOT NULL AND btrim(c.segment) <> ''
-              AND record_memory_is_complete(r.id)
+              AND record_ai_is_readable(r.id)
             ORDER BY c.id
             """;
 
@@ -66,11 +67,12 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
               AND c.segment = ?
               AND c.vault_item_id IS NULL
               AND c.ai_memory_approved IS TRUE
+              AND c.embedding_enabled AND c.embedding_status = 'ready' AND c.embedding IS NOT NULL
               AND EXISTS (
                   SELECT 1 FROM records r
                   WHERE r.id = c.record_id
                     AND r.user_id = c.user_id
-                    AND record_memory_is_complete(r.id)
+                    AND record_ai_is_readable(r.id)
               )
             """;
 
@@ -95,6 +97,7 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
             SET embedding = NULL
             WHERE c.user_id = ?::uuid
               AND c.embedding IS NOT NULL
+              AND (c.vault_item_id IS NOT NULL OR c.embedding_enabled)
               AND NOT (
                   (
                       c.vault_item_id IS NULL
@@ -104,7 +107,7 @@ public class EmbeddingReindexCommandLineRunner implements ApplicationRunner {
                           SELECT 1 FROM records r
                           WHERE r.id = c.record_id
                             AND r.user_id = c.user_id
-                            AND record_memory_is_complete(r.id)
+                            AND record_ai_is_readable(r.id)
                       )
                   )
                   OR

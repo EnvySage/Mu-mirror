@@ -18,6 +18,9 @@ import lombok.NoArgsConstructor;
 @Schema(description = "检索结果条目")
 public class RetrievedChunkDTO {
 
+    private Long chunkId;
+    private String moodsJson;
+
     @Schema(description = "记录ID", example = "1")
     private Long recordId;
 

@@ -44,6 +44,9 @@ public class RecordActionHandler implements ActionHandler {
     protected final ChunkMapper chunkMapper;
     protected final ObjectMapper json;
     protected final org.xianshen.mumirrorb.service.SettingsService settingsService;
+    @org.springframework.beans.factory.annotation.Autowired
+    protected org.xianshen.mumirrorb.config.RecordMemoryProperties recordMemoryProperties =
+            new org.xianshen.mumirrorb.config.RecordMemoryProperties();
     @org.springframework.beans.factory.annotation.Autowired protected org.xianshen.mumirrorb.service.GrowthService growthService;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     protected org.xianshen.mumirrorb.achievement.AchievementActivity achievementActivity;

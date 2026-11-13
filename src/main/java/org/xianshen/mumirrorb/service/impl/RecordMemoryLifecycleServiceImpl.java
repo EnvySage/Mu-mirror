@@ -35,7 +35,7 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
     public void onInitialIndexComplete(UUID userId, Long recordId, int processingVersion) {
         Record record = records.selectOwnedForUpdate(userId, recordId);
         if (!currentInitialIndex(record, processingVersion)) return;
-        List<Chunk> selected = selectedChunks(recordId);
+        List<Chunk> selected = selectedChunks(userId, recordId);
         if (selected.isEmpty() || selected.stream().anyMatch(c -> !ready(c))) return;
         record.setMemoryState(RecordMemoryState.READY);
         record.setUpdatedAt(OffsetDateTime.now());
@@ -72,7 +72,8 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
         record.setUpdatedAt(OffsetDateTime.now());
         records.updateById(record);
 
-        for (Chunk chunk : chunks.selectList(new LambdaQueryWrapper<Chunk>().eq(Chunk::getRecordId, recordId))) {
+        for (Chunk chunk : chunks.selectList(new LambdaQueryWrapper<Chunk>().eq(Chunk::getRecordId, recordId)
+                .eq(Chunk::getUserId, userId))) {
             jobs.cancelActive(chunk.getId(), userId);
             lineage.invalidateSource(userId, "chunk", chunk.getId(), "initial_memory_index_failed");
             if (Boolean.TRUE.equals(chunk.getAiMemoryApproved())) {
@@ -104,7 +105,7 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
         record.setProcessingVersion(expectedProcessingVersion + 1);
         record.setUpdatedAt(OffsetDateTime.now());
         records.updateById(record);
-        for (Chunk chunk : selectedChunks(recordId)) {
+        for (Chunk chunk : selectedChunks(userId, recordId)) {
             chunk.setAiMemoryApproved(false);
             chunk.setEmbedding(null);
             chunk.setEmbeddingStatus("not_requested");
@@ -119,15 +120,16 @@ public class RecordMemoryLifecycleServiceImpl implements RecordMemoryLifecycleSe
     }
 
     private boolean currentInitialIndex(Record record, int version) {
-        return record != null && record.getMemoryState() == RecordMemoryState.PENDING
+        return record != null && !Integer.valueOf(1).equals(record.getIndexPolicyVersion())
+                && record.getMemoryState() == RecordMemoryState.PENDING
                 && java.util.Objects.equals(record.getProcessingVersion(), version)
                 && record.getStatus() == RecordStatus.DONE
                 && record.getDeletedAt() == null;
     }
 
-    private List<Chunk> selectedChunks(Long recordId) {
+    private List<Chunk> selectedChunks(UUID userId, Long recordId) {
         return chunks.selectList(new LambdaQueryWrapper<Chunk>()
-                .eq(Chunk::getRecordId, recordId).eq(Chunk::getAiMemoryApproved, true));
+                .eq(Chunk::getRecordId, recordId).eq(Chunk::getUserId, userId).eq(Chunk::getAiMemoryApproved, true));
     }
 
     private boolean ready(Chunk chunk) {

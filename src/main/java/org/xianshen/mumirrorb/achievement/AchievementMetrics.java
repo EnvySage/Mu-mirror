@@ -36,8 +36,8 @@ public class AchievementMetrics {
         queries.put("memory.ready", "SELECT count(*) FROM records WHERE user_id=? AND source='user' AND deleted_at IS NULL AND memory_state='READY'");
         queries.put("memory.approved_chunks", """
             SELECT count(*) FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
-            WHERE c.user_id=? AND c.ai_memory_approved AND c.embedding_status='ready' AND c.embedding IS NOT NULL
-            AND c.vault_item_id IS NULL AND nullif(btrim(c.segment),'') IS NOT NULL AND record_memory_is_complete(r.id)
+            WHERE c.user_id=? AND c.ai_memory_approved AND (r.index_policy_version=1 OR (c.embedding_status='ready' AND c.embedding IS NOT NULL))
+            AND c.vault_item_id IS NULL AND nullif(btrim(c.segment),'') IS NOT NULL AND record_ai_is_readable(r.id)
             AND r.source='user' AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done'
             """);
         queries.put("chat.models", "SELECT count(*) FROM user_activity_fact WHERE user_id=? AND kind='chat.model_used'");
@@ -70,15 +70,15 @@ public class AchievementMetrics {
             JOIN user_activity_fact v ON v.user_id=a.user_id AND v.kind='model.verified' AND v.subject_key=a.subject_key
             WHERE a.user_id=? AND a.kind='model.activated'
             """);
-        String chunks = " FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id WHERE c.user_id=? AND c.ai_memory_approved AND c.embedding_status='ready' AND c.embedding IS NOT NULL AND c.vault_item_id IS NULL AND record_memory_is_complete(r.id) AND r.source='user' AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done'";
+        String chunks = " FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id WHERE c.user_id=? AND c.ai_memory_approved AND (r.index_policy_version=1 OR (c.embedding_status='ready' AND c.embedding IS NOT NULL)) AND c.vault_item_id IS NULL AND record_ai_is_readable(r.id) AND r.source='user' AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done'";
         queries.put("record.types", "SELECT count(DISTINCT nullif(c.metadata->>'contentType',''))" + chunks);
         queries.put("record.moods", """
             SELECT count(DISTINCT mood.value) FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
             CROSS JOIN LATERAL jsonb_array_elements_text(
               CASE jsonb_typeof(c.metadata->'mood') WHEN 'array' THEN c.metadata->'mood'
               WHEN 'string' THEN jsonb_build_array(c.metadata->'mood') ELSE '[]'::jsonb END) mood(value)
-            WHERE c.user_id=? AND c.ai_memory_approved AND c.embedding_status='ready' AND c.embedding IS NOT NULL
-            AND c.vault_item_id IS NULL AND record_memory_is_complete(r.id) AND r.source='user'
+            WHERE c.user_id=? AND c.ai_memory_approved AND (r.index_policy_version=1 OR (c.embedding_status='ready' AND c.embedding IS NOT NULL))
+            AND c.vault_item_id IS NULL AND record_ai_is_readable(r.id) AND r.source='user'
             AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done' AND nullif(mood.value,'') IS NOT NULL
             """);
     }

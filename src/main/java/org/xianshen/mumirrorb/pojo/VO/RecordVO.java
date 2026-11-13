@@ -61,6 +61,8 @@ public class RecordVO {
 
     private RecordMemoryState memoryState;
     private Integer processingVersion;
+    @Schema(description = "服务器生成的索引策略版本：0=兼容，1=选择性索引")
+    private Integer indexPolicyVersion;
     private Long correctionOfRecordId;
     private String memoryFailureReason;
     private List<Long> queuedEmbeddingJobIds;

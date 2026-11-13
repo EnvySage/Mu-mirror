@@ -372,14 +372,13 @@ public class AiGrpcClient {
         log.info("gRPC 调用 GetModelInfo，用户: {}", userId);
         try {
             EmbeddingProto.ModelInfoRequest.Builder reqBuilder = EmbeddingProto.ModelInfoRequest.newBuilder();
-            // field 1（2026-09-04 shared-protocol.md 登记）：api 模式下携带用户 EmbeddingConfig，
-            // Python 端按用户配置的模型返回维度，维度校验（裁决 #18）不再失真；
-            // local 模式不携带（Python 默认本地 BGE-m3=1024）。
-            if ("api".equalsIgnoreCase(buildEmbeddingConfigSource(userId))) {
-                reqBuilder.setEmbeddingConfig(buildEmbeddingConfig(userId, apiModelOverride));
-            } else if (apiModelOverride != null && !apiModelOverride.isBlank()) {
+            // 两种来源都携带配置：Python 不带配置时只执行轻量健康检查并返回 dimension=-1；
+            // 设置页的连接测试需要实际确认本地 BGE 或用户 API 模型的维度。
+            boolean apiSource = "api".equalsIgnoreCase(buildEmbeddingConfigSource(userId));
+            if (!apiSource && apiModelOverride != null && !apiModelOverride.isBlank()) {
                 throw new IllegalArgumentException("仅 API Embedding 支持指定模型探测");
             }
+            reqBuilder.setEmbeddingConfig(buildEmbeddingConfig(userId, apiModelOverride));
             return embedStub
                     .withDeadlineAfter(10, TimeUnit.SECONDS)
                     .getModelInfo(reqBuilder.build());

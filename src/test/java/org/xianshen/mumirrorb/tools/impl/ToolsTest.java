@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
@@ -75,7 +76,7 @@ class ToolsTest {
     @Test
     @DisplayName("search_records：SQL 结果转文件卡结构，limit≤20，summary 计数")
     void searchRecords_basic() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(List.of(chunk(1L, "标题", "正文内容一", "2026-09-01 10:00")));
 
         ToolExecutionResult r = searchRecords.execute(USER_ID, Map.of("days", 7));
@@ -94,95 +95,95 @@ class ToolsTest {
     @Test
     @DisplayName("search_records：query 关键词过滤（content 或 title 命中保留）")
     void searchRecords_queryFilter() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
-                .thenReturn(List.of(
-                        chunk(1L, "RAG 学习", "学了RAG检索", "2026-09-01 10:00"),
-                        chunk(2L, "健身", "卧推80kg", "2026-09-02 10:00")));
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), eq("RAG"), anyInt(), eq(0)))
+                .thenReturn(List.of(chunk(1L, "RAG 学习", "学了RAG检索", "2026-09-01 10:00")));
 
         ToolExecutionResult r = searchRecords.execute(USER_ID, Map.of("query", "RAG"));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> payload = (Map<String, Object>) r.getPayload();
         assertEquals(1, payload.get("count"));
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(any(), any(), any(), any(),
+                any(), any(), eq("RAG"), anyInt(), eq(0));
     }
 
     @Test
     @DisplayName("search_records：moods 参数下推到 SQL（2026-09-21 联调回归：此前写死传 null，情绪过滤失效）")
     void searchRecords_moodsPassedToSql() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(List.of());
 
         searchRecords.execute(USER_ID, Map.of("moods", List.of("Anxious", " exhausted "), "days", 30));
 
-        org.mockito.Mockito.verify(searchMapper).searchStructured(org.mockito.ArgumentMatchers.eq(USER_ID), any(),
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(org.mockito.ArgumentMatchers.eq(USER_ID), any(),
                 org.mockito.ArgumentMatchers.eq(List.of("anxious", "exhausted")),
                 org.mockito.ArgumentMatchers.eq("{\"anxious\",\"exhausted\"}"),
-                any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
+                any(), any(), org.mockito.ArgumentMatchers.isNull(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
     }
 
     @Test
     @DisplayName("search_records：date 查某一天 → [当天 0 点, 次日 0 点)，默认取满上限 20，summary 带日期")
     void searchRecords_singleDate() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(List.of(chunk(1L, "", "我终于能弹出小星星了", "2026-09-12 20:29")));
 
         ToolExecutionResult r = searchRecords.execute(USER_ID, Map.of("date", "2026-09-12"));
 
         java.time.ZoneId zone = java.time.ZoneId.of("Asia/Shanghai");
-        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(), any(), any(),
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(any(), any(), any(), any(),
                 org.mockito.ArgumentMatchers.eq(java.time.LocalDate.of(2026, 9, 12).atStartOfDay(zone).toOffsetDateTime()),
                 org.mockito.ArgumentMatchers.eq(java.time.LocalDate.of(2026, 9, 13).atStartOfDay(zone).toOffsetDateTime()),
-                org.mockito.ArgumentMatchers.eq(20), org.mockito.ArgumentMatchers.eq(0));
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(21), org.mockito.ArgumentMatchers.eq(0));
         assertEquals("search_records:1条（2026-09-12）", r.getSummary());
     }
 
     @Test
     @DisplayName("search_records：date_from/date_to 含首尾两天，写反了自动纠正；date 优先于 days")
     void searchRecords_dateRangeInclusiveAndSwapped() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(List.of());
 
         ToolExecutionResult r = searchRecords.execute(USER_ID,
                 Map.of("date_from", "2026-09-07", "date_to", "2026-09-01", "days", 3, "limit", 5));
 
         java.time.ZoneId zone = java.time.ZoneId.of("Asia/Shanghai");
-        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(), any(), any(),
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(any(), any(), any(), any(),
                 org.mockito.ArgumentMatchers.eq(java.time.LocalDate.of(2026, 9, 1).atStartOfDay(zone).toOffsetDateTime()),
                 org.mockito.ArgumentMatchers.eq(java.time.LocalDate.of(2026, 9, 8).atStartOfDay(zone).toOffsetDateTime()),
-                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(0));
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(6), org.mockito.ArgumentMatchers.eq(0));
         assertEquals("search_records:0条（2026-09-01~2026-09-07）", r.getSummary());
     }
 
     @Test
     @DisplayName("search_records：日期写坏了视为未传，退回 days 口径（不抛错、不查空区间）")
     void searchRecords_badDateIgnored() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(List.of());
 
         ToolExecutionResult r = searchRecords.execute(USER_ID, Map.of("date", "十二号", "days", 7));
 
-        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(), any(), any(),
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(any(), any(), any(), any(),
                 org.mockito.ArgumentMatchers.notNull(), org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.eq(10), org.mockito.ArgumentMatchers.eq(0));
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(11), org.mockito.ArgumentMatchers.eq(0));
         assertEquals("search_records:0条", r.getSummary());
     }
 
     @Test
     @DisplayName("search_records：moods 支持逗号串；不传 moods 时两个情绪参数都为 null（行为同改前）")
     void searchRecords_moodsCommaStringAndAbsent() {
-        when(searchMapper.searchStructured(any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
+        when(searchMapper.searchRecordsStructured(any(), any(), any(), any(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0)))
                 .thenReturn(List.of());
 
         searchRecords.execute(USER_ID, Map.of("moods", "sad,angry"));
-        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(),
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(any(), any(),
                 org.mockito.ArgumentMatchers.eq(List.of("sad", "angry")),
-                org.mockito.ArgumentMatchers.eq("{\"sad\",\"angry\"}"), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
+                org.mockito.ArgumentMatchers.eq("{\"sad\",\"angry\"}"), any(), any(), org.mockito.ArgumentMatchers.isNull(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
 
         org.mockito.Mockito.clearInvocations(searchMapper);
         searchRecords.execute(USER_ID, Map.of("days", 7));
-        org.mockito.Mockito.verify(searchMapper).searchStructured(any(), any(),
+        org.mockito.Mockito.verify(searchMapper).searchRecordsStructured(any(), any(),
                 org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(),
-                any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
+                any(), any(), org.mockito.ArgumentMatchers.isNull(), anyInt(), org.mockito.ArgumentMatchers.eq(0));
     }
 
     @Test

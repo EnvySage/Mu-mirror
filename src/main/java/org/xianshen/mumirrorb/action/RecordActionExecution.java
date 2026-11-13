@@ -46,6 +46,8 @@ final class RecordActionExecution {
             return ActionExecution.applied(owner.json.createObjectNode().put("recordId", target.getId()).put("deleted", true));
         }
         RecordDraftDTO draft = owner.json.convertValue(payload.path("recordDraft"), RecordDraftDTO.class);
+        owner.validateDraftShape(payload.path("recordDraft"));
+        owner.validateDraft(draft);
         if ("AI_ASSISTED".equals(draft.getMode()) && !draft.getGrowthSuggestions().isEmpty() && owner.growthService != null
                 && owner.growthService.axesVersion(action.getUserId()) != draft.getAxesVersion())
             throw new BusinessException(409, "成长维度已变化，请重新准备审核卡");
@@ -90,6 +92,7 @@ final class RecordActionExecution {
             owner.validateOrganizeSource(action.getUserId(), record);
         }
         record.setAiProcessingAuthorized(true);
+        record.setIndexPolicyVersion(draft.getIndexPolicyVersion());
         record.setProcessingVersion(Math.max(1, record.getProcessingVersion() == null ? 0 : record.getProcessingVersion() + 1));
         record.setStatus(RecordStatus.REVIEWING);
         try { record.setGrowthSuggestions(owner.json.writeValueAsString(draft.getGrowthSuggestions())); }
@@ -110,14 +113,16 @@ final class RecordActionExecution {
             metadata.put("keywords", segment.getKeywords() == null ? List.of() : segment.getKeywords());
             metadata.put("userTags", segment.getTags() == null ? List.of() : segment.getTags());
             if (segment.getTaskStatus() != null) metadata.put("taskStatus", segment.getTaskStatus());
+            if (segment.getEmbeddingReason() != null) metadata.put("embeddingReason", segment.getEmbeddingReason());
             Chunk chunk = Chunk.builder().userId(action.getUserId()).recordId(record.getId())
                     .content(draft.getRawContent()).segment(segment.getText()).classifiedSegment(segment.getText())
-                    .metadata(metadata).userEdited(true).aiMemoryApproved(false).todoApproved(false)
+                    .metadata(metadata).embeddingEnabled(segment.getEmbeddingEnabled())
+                    .userEdited(true).aiMemoryApproved(false).todoApproved(false)
                     .contentVersion(1L).embeddingStatus("not_requested").createdAt(OffsetDateTime.now()).build();
             owner.chunkMapper.insert(chunk);
             if (owner.achievementActivity!=null)
                 owner.achievementActivity.bindDraftEdit(action.getUserId(),action.getActionId(),segment.getDraftId(),chunk.getId());
-            if ("AI_ASSISTED".equals(draft.getMode()) || segment.isMemoryEnabled()) approvedMemory.add(chunk.getId());
+            if (segment.isMemoryEnabled()) approvedMemory.add(chunk.getId());
             if (segment.isTodoEnabled()) approvedTodos.add(chunk.getId());
         }
         List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments;
@@ -138,7 +143,7 @@ final class RecordActionExecution {
         if (correctionOfId != null) result.put("correctionOfRecordId", correctionOfId);
         if (confirmed.getQueuedEmbeddingJobIds() != null && !confirmed.getQueuedEmbeddingJobIds().isEmpty()) {
             result.set("jobIds", owner.json.valueToTree(confirmed.getQueuedEmbeddingJobIds()));
-            return ActionExecution.executing(result);
+            if (draft.getIndexPolicyVersion() == 0) return ActionExecution.executing(result);
         }
         return ActionExecution.applied(result.put("outcome", "APPLIED"));
     }

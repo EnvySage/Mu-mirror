@@ -26,6 +26,9 @@ public class RecordDraftServiceImpl implements RecordDraftService {
     private final AiGrpcClient aiGrpcClient;
     private final SettingsService settingsService;
     @org.springframework.beans.factory.annotation.Autowired
+    private org.xianshen.mumirrorb.config.RecordMemoryProperties recordMemoryProperties =
+            new org.xianshen.mumirrorb.config.RecordMemoryProperties();
+    @org.springframework.beans.factory.annotation.Autowired
     private org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
 
     @Override
@@ -39,6 +42,7 @@ public class RecordDraftServiceImpl implements RecordDraftService {
         draft.setSourceRecordId(input.getSourceRecordId());
         draft.setSourceRecordVersion(input.getSourceRecordVersion());
         draft.setRawContent(raw);
+        draft.setIndexPolicyVersion(recordMemoryProperties.indexPolicyVersion());
         draft.setFinalContent(input.getFinalContent() == null ? raw : input.getFinalContent());
         draft.setPrivateInput(input.isPrivateInput());
         draft.setAxesVersion(0);
@@ -59,27 +63,43 @@ public class RecordDraftServiceImpl implements RecordDraftService {
         draft.setMode("AI_ASSISTED");
         try {
             String referenceDate = LocalDate.now(RECORD_ZONE).toString();
-            RecordProcessorProto.ClassifyResponse response = aiGrpcClient.classifySingle(userId, raw, null, referenceDate);
+            boolean selective = draft.getIndexPolicyVersion() == 1;
+            RecordProcessorProto.ClassifyResponse response = selective
+                    ? aiGrpcClient.classify(userId, raw, true, referenceDate)
+                    : aiGrpcClient.classifySingle(userId, raw, null, referenceDate);
             if (response.getSkip() || response.getItemsCount() == 0)
                 throw new IllegalStateException(response.getSkipReason().isBlank() ? "分类未返回候选" : response.getSkipReason());
-            RecordProcessorProto.ClassifyItem item = response.getItems(0);
-            String resolved = TimeSubstitutionApplier.apply(raw, item.getTimeSubstitutionsList());
-            draft.setFinalContent(resolved);
-            draft.setSegments(List.of(segment(item, resolved)));
-            if (item.hasRefersToTodo() && todoRegistryService != null) {
-                try {
-                    var reference = item.getRefersToTodo();
-                    var todo = todoRegistryService.ownedActive(userId, reference.getTodoId());
-                    String status = reference.getSuggestedStatus().toLowerCase(java.util.Locale.ROOT);
-                    if (List.of("not_started", "in_progress", "completed").contains(status)) {
-                        draft.setTodoSuggestions(List.of(java.util.Map.of("todoId", todo.getId(), "title", todo.getTitle(),
-                                "currentStatus", todo.getCurrentStatus(), "suggestedStatus", status)));
-                        draft.getSegments().get(0).setTodoEnabled(false);
+            List<RecordDraftDTO.Segment> segments = new ArrayList<>();
+            List<java.util.Map<String,Object>> todos = new ArrayList<>();
+            for (RecordProcessorProto.ClassifyItem item : response.getItemsList()) {
+                String body = selective && !item.getContent().isBlank() ? item.getContent() : raw;
+                if (selective && response.getItemsCount() > 1 && item.getContent().isBlank())
+                    throw new IllegalStateException("拆分片段缺少正文");
+                String resolved = TimeSubstitutionApplier.apply(body, item.getTimeSubstitutionsList());
+                RecordDraftDTO.Segment segment = segment(item, resolved);
+                segment.setEmbeddingEnabled(!selective || !item.hasEmbeddingEnabled() || item.getEmbeddingEnabled());
+                if (selective && !item.getEmbeddingReason().isBlank())
+                    segment.setEmbeddingReason(item.getEmbeddingReason().substring(0, Math.min(200,item.getEmbeddingReason().length())));
+                segments.add(segment);
+                if (item.hasRefersToTodo() && todoRegistryService != null) {
+                    try {
+                        var reference = item.getRefersToTodo();
+                        var todo = todoRegistryService.ownedActive(userId, reference.getTodoId());
+                        String status = reference.getSuggestedStatus().toLowerCase(java.util.Locale.ROOT);
+                        if (List.of("not_started", "in_progress", "completed").contains(status)) {
+                            todos.add(java.util.Map.of("todoId",todo.getId(),"title",todo.getTitle(),
+                                    "currentStatus",todo.getCurrentStatus(),"suggestedStatus",status));
+                            segment.setTodoEnabled(false);
+                        }
+                    } catch (org.xianshen.mumirrorb.common.exception.BusinessException ignored) {
+                        // Unowned/deleted references never become proposed links.
                     }
-                } catch (org.xianshen.mumirrorb.common.exception.BusinessException ignored) {
-                    // Deleted or unowned model references never become proposed links.
                 }
+                if (!selective) break;
             }
+            draft.setSegments(segments);
+            draft.setFinalContent(String.join("\n",segments.stream().map(RecordDraftDTO.Segment::getText).toList()));
+            draft.setTodoSuggestions(todos);
             draft.setAxesVersion(Math.toIntExact(aiGrpcClient.growthAxesVersion(userId)));
             var allowedAxes = aiGrpcClient.growthAxisIds(userId);
             draft.setGrowthSuggestions(response.getGrowthSuggestionsList().stream().filter(s -> allowedAxes.contains(s.getDimensionId())).map(s -> {

@@ -25,11 +25,24 @@ class ChunkEmbeddingJobServiceTest {
     @Mock private ChunkMapper chunkMapper;
 
     @Test
+    void intentionallySkippedChunksCannotBeRetriedOrEnqueued() {
+        UUID user = UUID.randomUUID();
+        Chunk skipped = Chunk.builder().id(9L).userId(user).recordId(2L).segment("routine")
+                .aiMemoryApproved(true).embeddingEnabled(false).contentVersion(1L).build();
+        when(chunkMapper.selectById(9L)).thenReturn(skipped);
+        var service = new ChunkEmbeddingJobServiceImpl(jobMapper, chunkMapper);
+        assertThrows(org.xianshen.mumirrorb.common.exception.BusinessException.class, () -> service.retry(9L, user));
+        service.enqueue(skipped);
+        verifyNoInteractions(jobMapper);
+    }
+
+    @Test
     void enqueueIsBoundToExactChunkVersionAndMarksPending() {
         UUID userId = UUID.randomUUID();
         Chunk chunk = Chunk.builder().id(4L).userId(userId).segment("正文")
                 .contentVersion(7L).aiMemoryApproved(true).build();
         when(jobMapper.insertIfNoActiveVersion(eq(4L), eq(userId), eq(7L), anyString())).thenReturn(1);
+        when(chunkMapper.embeddingInputIsCurrent(eq(4L),eq(userId),eq(7L),anyString(),isNull(),eq(false))).thenReturn(true);
 
         new ChunkEmbeddingJobServiceImpl(jobMapper, chunkMapper).enqueue(chunk);
 
@@ -68,16 +81,19 @@ class ChunkEmbeddingJobServiceTest {
         ChunkMapper chunks = mock(ChunkMapper.class);
         ChunkEmbeddingJobMapper jobs = mock(ChunkEmbeddingJobMapper.class);
         ChunkEmbeddingJobServiceImpl service = new ChunkEmbeddingJobServiceImpl(jobs, chunks);
+        authorizeFailureFixture(chunks,job);
 
         service.markFailure(job, "timeout", 5, Duration.ofSeconds(1));
         verify(jobs).finishAttempt(eq(12L), eq("pending"), any(OffsetDateTime.class), eq("timeout"));
         verify(chunks).markEmbeddingPending(job.getChunkId(), job.getUserId(), 2L);
 
         reset(jobs, chunks);
+        authorizeFailureFixture(chunks,job);
+        when(chunks.markEmbeddingFailedIfCurrent(job.getChunkId(),job.getUserId(),2L,job.getId(),"invalid vector dimension")).thenReturn(1);
         job.setAttempts(5);
         service.markFailure(job, "invalid vector dimension", 5, Duration.ofSeconds(1));
         verify(jobs).finishAttempt(eq(12L), eq("failed"), any(OffsetDateTime.class), eq("invalid vector dimension"));
-        verify(chunks).markEmbeddingFailedIfCurrent(job.getChunkId(), job.getUserId(), 2L, "invalid vector dimension");
+        verify(chunks).markEmbeddingFailedIfCurrent(job.getChunkId(), job.getUserId(), 2L, job.getId(), "invalid vector dimension");
     }
 
     private ChunkEmbeddingJob job(int version) {
@@ -86,9 +102,19 @@ class ChunkEmbeddingJobServiceTest {
         job.setChunkId(9L);
         job.setUserId(UUID.randomUUID());
         job.setContentVersion((long) version);
-        job.setContentHash("hash");
+        job.setContentHash(java.util.HexFormat.of().formatHex(digest("正文")));
         job.setStatus("processing");
         job.setAttempts(1);
         return job;
+    }
+
+    private void authorizeFailureFixture(ChunkMapper chunks,ChunkEmbeddingJob job) {
+        when(chunks.selectById(job.getChunkId())).thenReturn(Chunk.builder().id(job.getChunkId()).userId(job.getUserId())
+                .segment("正文").aiMemoryApproved(true).contentVersion(job.getContentVersion()).build());
+        when(chunks.embeddingInputIsCurrent(eq(job.getChunkId()),eq(job.getUserId()),eq(job.getContentVersion()),anyString(),eq(job.getId()),eq(true))).thenReturn(true);
+    }
+    private byte[] digest(String value) {
+        try { return java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+        catch(java.security.NoSuchAlgorithmException e) { throw new AssertionError(e); }
     }
 }

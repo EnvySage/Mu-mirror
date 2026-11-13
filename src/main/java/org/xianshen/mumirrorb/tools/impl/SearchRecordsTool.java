@@ -54,7 +54,7 @@ public class SearchRecordsTool implements ToolExecutor {
                         + "structured 也用于明确日期/情绪/类型等条件，可用 offset 翻页。"
                         + "只有问题点名具体主题、事件、关键词时才用 semantic；需要字面关键词/全文匹配时用 keyword + keyword 参数；"
                         + "hybrid 在语义检索上叠加明确过滤条件。"
-                        + "已知某条记录的 record_id 时传 record_id 直接读取该记录片段。"
+                        + "结果为120字摘录；已知 record_id 要读完整已授权正文时调用 read_record。"
                         + "semantic/hybrid 的 query 写用户问题的核心意思，不要求复用原文词语。"
                         + "问某一天或明确日期范围时填写 date/date_from/date_to；问画像快照使用 get_profile。",
                 "{\"mode\": \"structured|semantic|hybrid|keyword（必填）\", \"query\": \"自然语言检索意图（语义/组合检索必填）\", "
@@ -102,7 +102,8 @@ public class SearchRecordsTool implements ToolExecutor {
                     ? LocalDate.now(ZONE).minusDays(days).atStartOfDay(ZONE).toOffsetDateTime() : null;
         }
         // 按日期查的意图是"那天的都要"，默认给到上限，不按最近 10 条截
-        int limit = Math.min(intOf(args.get("limit"), byDate ? MAX_LIMIT : 10), MAX_LIMIT);
+        int limit = Math.max(1, Math.min(intOf(args.get("limit"), byDate ? MAX_LIMIT : 10), MAX_LIMIT));
+        int fetchLimit = limit + 1;
 
         // moods 过滤：definition() 的 args_schema 一直对规划器宣称支持 moods，但此前执行时
         // 写死传 null——2026-09-21 联调实测 moods=["anxious"] 返回了 30 天全部 12 条（其中只有 1 条标了焦虑）
@@ -111,14 +112,16 @@ public class SearchRecordsTool implements ToolExecutor {
         boolean hasFilters = normalizedType != null || !moods.isEmpty() || byDate || days > 0;
         String mode = normalizeMode(requestedMode, query, keyword, hasFilters);
         List<String> normalizedMoods = moods.isEmpty() ? null : moods;
+        String structuredQuery = "structured".equals(mode) && query != null && !query.isBlank()
+                ? query.trim() : null;
         List<RetrievedChunkDTO> rows;
         if (recordId > 0) {
-            rows = searchMapper.searchByRecordId(userId, recordId, limit);
+            rows = searchMapper.searchRecordsByRecordId(userId, recordId, structuredQuery, fetchLimit, offset);
         } else if ("keyword".equals(mode)) {
-            rows = searchMapper.searchKeyword(userId, keyword, since, until, limit, offset);
+            rows = searchMapper.searchRecordsKeyword(userId, keyword, since, until, fetchLimit, offset);
         } else if ("structured".equals(mode)) {
-            rows = searchMapper.searchStructured(userId, normalizedType, normalizedMoods,
-                    toPgTextArray(moods), since, until, limit, offset);
+            rows = searchMapper.searchRecordsStructured(userId, normalizedType, normalizedMoods,
+                    toPgTextArray(moods), since, until, structuredQuery, fetchLimit, offset);
         } else {
             String vector = embedQueryVector(userId, query);
             Double maxDistance = mirrorProperties.getRagMaxCosineDistance() <= 0
@@ -126,42 +129,37 @@ public class SearchRecordsTool implements ToolExecutor {
             boolean decay = !byDate;
             double halfLife = halfLife(userId);
             if ("semantic".equals(mode)) {
-                rows = searchMapper.searchSemantic(userId, vector, decay, halfLife, maxDistance, limit);
+                rows = searchMapper.searchRecordsSemanticPage(userId, vector, decay, halfLife, maxDistance, fetchLimit, offset);
             } else {
-                rows = searchMapper.searchHybrid(userId, vector, normalizedType, normalizedMoods,
-                        toPgTextArray(moods), since, until, decay, halfLife, maxDistance, limit);
+                rows = searchMapper.searchRecordsHybridPage(userId, vector, normalizedType, normalizedMoods,
+                        toPgTextArray(moods), since, until, decay, halfLife, maxDistance, fetchLimit, offset);
             }
         }
 
         // 文件正文与元信息由 find_item/recall_item 提供 [F] 来源卡；search_records 只回日记记录，
         // 避免把 vault 资产伪装成可点击的日记来源。
-        rows = rows.stream().filter(r -> r.getVaultItemId() == null).toList();
-
         // 宽泛问题（"最近做了什么"）的语义距离经常高于相关性阈值，但用户要的是近期记录本身。
         // 语义/混合检索 0 条且带时间范围时，回退为按时间倒序取最近记录，避免只拿到统计没有内容。
         boolean fallbackRecent = false;
-        if (rows.isEmpty() && !"structured".equals(mode) && !"keyword".equals(mode) && since != null) {
-            rows = searchMapper.searchStructured(userId, normalizedType, normalizedMoods,
-                    toPgTextArray(moods), since, until, limit, 0);
-            rows = rows.stream().filter(r -> r.getVaultItemId() == null).toList();
+        if (rows.isEmpty() && recordId <= 0 && offset == 0 && !"structured".equals(mode) && !"keyword".equals(mode) && since != null) {
+            rows = searchMapper.searchRecordsStructured(userId, normalizedType, normalizedMoods,
+                    toPgTextArray(moods), since, until, null, fetchLimit, 0);
             fallbackRecent = !rows.isEmpty();
         }
 
-        if ("structured".equals(mode) && query != null && !query.isBlank()) {
-            String q = query.trim();
-            rows = rows.stream().filter(r ->
-                    (r.getContent() != null && r.getContent().contains(q))
-                            || (r.getTitle() != null && r.getTitle().contains(q))).toList();
-        }
+        boolean truncated = rows.size() > limit;
+        rows = truncated ? rows.subList(0, limit) : rows;
 
         List<Map<String, Object>> items = new ArrayList<>();
         for (RetrievedChunkDTO r : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
+            m.put("chunk_id", r.getChunkId());
             m.put("record_id", r.getRecordId());
             m.put("title", r.getTitle());
             m.put("quote", preview(r.getContent(), 120));
             m.put("date", r.getCreatedAt());
             m.put("content_type", r.getContentType());
+            m.put("moods", moodsJson(r.getMoodsJson()));
             if (r.getScore() != null) {
                 m.put("score", r.getScore());
             }
@@ -170,8 +168,13 @@ public class SearchRecordsTool implements ToolExecutor {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("count", items.size());
         payload.put("records", items);
+        payload.put("offset", offset);
+        payload.put("next_offset", truncated ? (long) offset + limit : null);
+        payload.put("truncated", truncated);
+        payload.put("content_scope", "excerpt");
+        payload.put("requested_args", args);
         if (fallbackRecent) payload.put("fallback", "semantic_empty_recent_records");
-        // 按日期查时把区间写进 summary：回答模型据此知道"这就是那天的全部记录"，前端芯片也看得出查的是哪天
+        // 日期区间仅描述查询范围；正文为摘录，分页可能仍有后续结果。
         String range = !byDate ? "" : (from != null && from.equals(to)) ? "（" + from + "）"
                 : "（" + (from == null ? "…" : from) + "~" + (to == null ? "…" : to) + "）";
         return ToolExecutionResult.builder()
@@ -181,6 +184,17 @@ public class SearchRecordsTool implements ToolExecutor {
                         + (fallbackRecent ? "（语义未命中，已回退最近记录）" : ""))
                 .payload(payload)
                 .build();
+    }
+
+    private static List<String> moodsJson(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            if (!node.isArray()) return List.of();
+            List<String> result = new ArrayList<>();
+            node.forEach(item -> { if (item.isTextual()) result.add(item.asText()); });
+            return result;
+        } catch (java.io.IOException ignored) { return List.of(); }
     }
 
     private String normalizeMode(String requested, String query, String keyword, boolean hasFilters) {

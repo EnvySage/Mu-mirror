@@ -157,6 +157,11 @@ public class RecordServiceImpl implements RecordService {
         return recordQueries.toVO(record);
     }
 
+    /** 只透出服务器持久化的版本；旧内存对象未赋值时按兼容策略解释。 */
+    protected int indexPolicyVersionOf(Record record) {
+        return record.getIndexPolicyVersion() == null ? 0 : record.getIndexPolicyVersion();
+    }
+
 
     protected ChunkVO toChunkVO(Chunk chunk) {
         return recordQueries.toChunkVO(chunk);

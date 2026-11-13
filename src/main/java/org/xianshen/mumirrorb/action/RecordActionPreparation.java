@@ -54,6 +54,7 @@ final class RecordActionPreparation {
         owner.validateOrganizeSource(userId, source);
         Record correction = owner.correctionSource(userId, payload);
         RecordDraftDTO draft = owner.draftInput(payload, source);
+        draft.setIndexPolicyVersion(owner.recordMemoryProperties.indexPolicyVersion());
         if (draft.getMode() == null || draft.getMode().isBlank())
             draft.setMode(source == null ? owner.defaultMode(userId, payload) : "AI_ASSISTED");
         draft.setFinalContent(draft.getRawContent());
@@ -73,15 +74,19 @@ final class RecordActionPreparation {
 
 
     public JsonNode completePreparationPreview(UUID userId, String kind, JsonNode payload) {
+        ensureOriginalPolicy(payload);
         ObjectNode sourcePayload = (ObjectNode) payload.deepCopy();
         sourcePayload.remove("recordDraft");
-        return owner.validateAndPreview(userId, kind, sourcePayload);
+        JsonNode completed = owner.validateAndPreview(userId, kind, sourcePayload);
+        ensureOriginalPolicy(payload);
+        return completed;
     }
 
 
 
 
     public JsonNode failedPreparationPreview(UUID userId, String kind, JsonNode payload, Exception error) {
+        ensureOriginalPolicy(payload);
         ObjectNode sourcePayload = (ObjectNode) payload.deepCopy();
         sourcePayload.remove("recordDraft");
         sourcePayload.put("mode", "ONLY_SAVE");
@@ -89,6 +94,7 @@ final class RecordActionPreparation {
         owner.validateOrganizeSource(userId, source);
         Record correction = owner.correctionSource(userId, sourcePayload);
         RecordDraftDTO fallback = owner.draftInput(sourcePayload, source);
+        fallback.setIndexPolicyVersion(owner.recordMemoryProperties.indexPolicyVersion());
         fallback.setMode("ONLY_SAVE");
         fallback.setFinalContent(fallback.getRawContent());
         fallback.setPreparationStatus("SAVE_ONLY");
@@ -104,6 +110,12 @@ final class RecordActionPreparation {
         return preview;
     }
 
+    private void ensureOriginalPolicy(JsonNode payload) {
+        if (payload.has("recordDraft") && payload.path("recordDraft").path("indexPolicyVersion").asInt(0)
+                != owner.recordMemoryProperties.indexPolicyVersion())
+            throw new BusinessException(409, "索引策略已变化，请保留原稿并重新准备候选");
+    }
+
 
 
 
@@ -117,6 +129,13 @@ final class RecordActionPreparation {
         RecordDraftDTO draft = payload.has("recordDraft")
                 ? owner.json.convertValue(payload.get("recordDraft"), RecordDraftDTO.class)
                 : owner.drafts.prepare(userId, owner.draftInput(payload, source));
+        if (!Objects.equals(draft.getIndexPolicyVersion(), owner.recordMemoryProperties.indexPolicyVersion()))
+            throw new BusinessException(409, "索引策略已变化，请保留原稿并重新准备候选");
+        if (payload.has("recordDraft") && "AI_ASSISTED".equals(draft.getMode())) {
+            JsonNode segments = payload.path("recordDraft").path("segments");
+            for (int i = 0; i < draft.getSegments().size(); i++)
+                if (!segments.path(i).has("memoryEnabled")) draft.getSegments().get(i).setMemoryEnabled(true);
+        }
         if (source != null && !Objects.equals(source.getContent(), draft.getRawContent()))
             throw owner.invalid("整理候选原文与来源记录不一致");
         draft.setSourceRecordId(source == null ? null : source.getId());
@@ -134,12 +153,6 @@ final class RecordActionPreparation {
         if ("record.delete".equals(kind)) return payload.deepCopy();
         ObjectNode saved = payload.deepCopy();
         saved.set("recordDraft", preview.path("recordDraft").deepCopy());
-        if ("AI_ASSISTED".equals(saved.path("recordDraft").path("mode").asText())
-                && saved.path("recordDraft").path("segments").isArray()) {
-            for (JsonNode segment : saved.path("recordDraft").path("segments")) {
-                if (segment.isObject()) ((ObjectNode) segment).put("memoryEnabled", true);
-            }
-        }
         return saved;
     }
 
@@ -151,6 +164,8 @@ final class RecordActionPreparation {
         boolean wasPrivate = originalPayload.path("privateInput").asBoolean(false)
                 || originalDraft.path("privateInput").asBoolean(false);
         JsonNode editedDraft = editedPayload.path("recordDraft");
+        if (originalDraft.path("indexPolicyVersion").asInt(0) != editedDraft.path("indexPolicyVersion").asInt(0))
+            throw new BusinessException(409, "候选索引策略由服务器生成，请重新准备候选");
         boolean remainsPrivate = editedPayload.path("privateInput").asBoolean(false) || editedDraft.path("privateInput").asBoolean(false);
         if (wasPrivate && (!remainsPrivate || !"ONLY_SAVE".equals(editedDraft.path("mode").asText())))
             throw owner.invalid("私有输入不能改为 AI 整理或记忆授权");

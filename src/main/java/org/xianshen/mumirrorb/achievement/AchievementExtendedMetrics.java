@@ -25,8 +25,8 @@ final class AchievementExtendedMetrics {
         "glossary.source_opened","todo.created","todo.edited","todo.source_opened","snapshot.opened","vault.previewed","growth.named");
     private static final String READY="""
          FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
-         WHERE c.user_id=:user AND c.ai_memory_approved AND c.embedding_status='ready' AND c.embedding IS NOT NULL
-         AND c.vault_item_id IS NULL AND nullif(btrim(c.segment),'') IS NOT NULL AND record_memory_is_complete(r.id)
+         WHERE c.user_id=:user AND c.ai_memory_approved AND (r.index_policy_version=1 OR (c.embedding_status='ready' AND c.embedding IS NOT NULL))
+         AND c.vault_item_id IS NULL AND nullif(btrim(c.segment),'') IS NOT NULL AND record_ai_is_readable(r.id)
          AND r.source='user' AND r.deleted_at IS NULL AND r.memory_state='READY' AND r.status='done'
         """;
     private static final String MOOD="""

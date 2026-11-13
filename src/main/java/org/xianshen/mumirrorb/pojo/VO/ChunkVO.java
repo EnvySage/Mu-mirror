@@ -63,6 +63,12 @@ public class ChunkVO {
     @Schema(description = "用户是否确认此片段可进入后续AI记忆")
     private Boolean aiMemoryApproved;
 
+    @Schema(description = "是否建立向量，与AI使用授权独立")
+    private Boolean embeddingEnabled;
+
+    @Schema(description = "索引建议原因，不参与向量正文")
+    private String embeddingReason;
+
     @Schema(description = "用户是否单独确认此片段作为待办")
     private Boolean todoApproved;
 

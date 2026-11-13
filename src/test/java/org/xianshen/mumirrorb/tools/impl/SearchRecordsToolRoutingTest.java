@@ -55,7 +55,7 @@ class SearchRecordsToolRoutingTest {
     @Test
     @DisplayName("semantic 模式用自然语言向量检索，并保留余弦距离供相关度展示")
     void semanticEmbedsQueryAndReturnsScore() {
-        when(searchMapper.searchSemantic(eq(USER_ID), eq("[0.1,0.2]"), eq(true), eq(14.0), eq(0.35), eq(10)))
+        when(searchMapper.searchRecordsSemanticPage(eq(USER_ID), eq("[0.1,0.2]"), eq(true), eq(14.0), eq(0.35), eq(11), eq(0)))
                 .thenReturn(List.of(RetrievedChunkDTO.builder().recordId(7L).title("开题")
                         .content("导师建议调整框架").createdAt("2026-10-12 14:30")
                         .contentType("work").score(0.2).build()));
@@ -71,16 +71,16 @@ class SearchRecordsToolRoutingTest {
         assertEquals(7L, record.get("record_id"));
         assertEquals(0.2, record.get("score"));
         verify(aiGrpcClient).embed(USER_ID, "最近为什么为开题感到压力");
-        verify(searchMapper).searchSemantic(eq(USER_ID), eq("[0.1,0.2]"), eq(true), eq(14.0), eq(0.35), eq(10));
-        verify(searchMapper, never()).searchHybrid(any(), anyString(), any(), any(), any(), any(), any(),
-                anyBoolean(), anyDouble(), any(), anyInt());
+        verify(searchMapper).searchRecordsSemanticPage(eq(USER_ID), eq("[0.1,0.2]"), eq(true), eq(14.0), eq(0.35), eq(11), eq(0));
+        verify(searchMapper, never()).searchRecordsHybridPage(any(), anyString(), any(), any(), any(), any(), any(),
+                anyBoolean(), anyDouble(), any(), anyInt(), anyInt());
     }
 
     @Test
     @DisplayName("semantic 问题附带明确日期/情绪过滤时自动走 hybrid，并关闭日期范围的时间衰减")
     void semanticWithFiltersUsesHybrid() {
-        when(searchMapper.searchHybrid(eq(USER_ID), eq("[0.1,0.2]"), isNull(), eq(List.of("anxious")),
-                eq("{\"anxious\"}"), any(), any(), eq(false), eq(14.0), eq(0.35), eq(10)))
+        when(searchMapper.searchRecordsHybridPage(eq(USER_ID), eq("[0.1,0.2]"), isNull(), eq(List.of("anxious")),
+                eq("{\"anxious\"}"), any(), any(), eq(false), eq(14.0), eq(0.35), eq(11), eq(0)))
                 .thenReturn(List.of());
 
         var result = tool.execute(USER_ID, Map.of(
@@ -88,8 +88,8 @@ class SearchRecordsToolRoutingTest {
                 "moods", List.of("anxious"), "limit", 10));
 
         assertEquals("search_records:0条（hybrid）（2026-10-15）", result.getSummary());
-        verify(searchMapper).searchHybrid(eq(USER_ID), eq("[0.1,0.2]"), isNull(), eq(List.of("anxious")),
-                eq("{\"anxious\"}"), any(), any(), eq(false), eq(14.0), eq(0.35), eq(10));
-        verify(searchMapper, never()).searchSemantic(any(), anyString(), anyBoolean(), anyDouble(), any(), anyInt());
+        verify(searchMapper).searchRecordsHybridPage(eq(USER_ID), eq("[0.1,0.2]"), isNull(), eq(List.of("anxious")),
+                eq("{\"anxious\"}"), any(), any(), eq(false), eq(14.0), eq(0.35), eq(11), eq(0));
+        verify(searchMapper, never()).searchRecordsSemanticPage(any(), anyString(), anyBoolean(), anyDouble(), any(), anyInt(), anyInt());
     }
 }

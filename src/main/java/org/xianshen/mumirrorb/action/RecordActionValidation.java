@@ -99,17 +99,25 @@ final class RecordActionValidation {
 
     protected void validateDraftShape(JsonNode draft) {
         Set<String> allowed = Set.of("sourceRecordId", "sourceRecordVersion", "rawContent", "finalContent", "mode",
-                "privateInput", "preparationStatus", "preparationError", "axesVersion", "growthSuggestions", "todoSuggestions", "segments");
+                "privateInput", "preparationStatus", "preparationError", "axesVersion", "growthSuggestions", "todoSuggestions", "segments", "indexPolicyVersion");
         if (draft == null || !draft.isObject()) throw owner.invalid("recordDraft 必须为对象");
         draft.fieldNames().forEachRemaining(field -> { if (!allowed.contains(field)) throw owner.invalid("recordDraft 不允许字段: " + field); });
         if (draft.has("privateInput") && !draft.get("privateInput").isBoolean()) throw owner.invalid("privateInput 必须为布尔值");
         if (draft.has("axesVersion") && !draft.get("axesVersion").isIntegralNumber()) throw owner.invalid("axesVersion 必须为整数");
+        if (draft.has("indexPolicyVersion") && (!draft.get("indexPolicyVersion").isIntegralNumber()
+                || !draft.get("indexPolicyVersion").canConvertToInt() || draft.get("indexPolicyVersion").intValue() < 0
+                || draft.get("indexPolicyVersion").intValue() > 1)) throw owner.invalid("indexPolicyVersion 必须为0或1整数");
         JsonNode segments = draft.get("segments");
         if (segments != null && segments.isArray()) {
-            Set<String> segmentAllowed = Set.of("draftId", "text", "title", "summary", "contentType", "moods", "keywords", "tags", "taskStatus", "memoryEnabled", "todoEnabled");
+            Set<String> segmentAllowed = Set.of("draftId", "text", "title", "summary", "contentType", "moods", "keywords", "tags", "taskStatus", "memoryEnabled", "todoEnabled", "embeddingEnabled", "embeddingReason");
             for (JsonNode segment : segments) {
                 if (!segment.isObject()) throw owner.invalid("片段必须为对象");
                 if (segment.has("todoEnabled") && !segment.get("todoEnabled").isBoolean()) throw owner.invalid("todoEnabled 必须为布尔值");
+                if (segment.has("memoryEnabled") && !segment.get("memoryEnabled").isBoolean()) throw owner.invalid("memoryEnabled 必须为布尔值");
+                if (segment.has("embeddingEnabled") && !segment.get("embeddingEnabled").isBoolean()) throw owner.invalid("embeddingEnabled 必须为布尔值");
+                if (segment.has("embeddingReason") && !segment.get("embeddingReason").isNull()
+                        && (!segment.get("embeddingReason").isTextual() || segment.get("embeddingReason").textValue().length() > 200))
+                    throw owner.invalid("embeddingReason 必须为不超过200字的文本");
                 segment.fieldNames().forEachRemaining(field -> { if (!segmentAllowed.contains(field)) throw owner.invalid("片段不允许字段: " + field); });
             }
         }
@@ -118,6 +126,8 @@ final class RecordActionValidation {
 
 
     protected void validateDraft(RecordDraftDTO draft) {
+        if (draft != null && !Objects.equals(draft.getIndexPolicyVersion(), owner.recordMemoryProperties.indexPolicyVersion()))
+            throw new BusinessException(409, "索引策略已变化，请保留原稿并重新准备候选");
         if (draft == null || draft.getRawContent() == null || draft.getRawContent().isBlank() || draft.getRawContent().length() > 2000)
             throw owner.invalid("原始内容不能为空且不能超过 2000 字");
         if (draft.getFinalContent() == null || draft.getFinalContent().isBlank() || draft.getFinalContent().length() > 2000)
@@ -146,6 +156,9 @@ final class RecordActionValidation {
             reviewedLength += segment.getText().length();
             if (segment.getTitle() != null && segment.getTitle().length() > 100) throw owner.invalid("片段标题不能超过 100 字");
             if (segment.getSummary() != null && segment.getSummary().length() > 500) throw owner.invalid("片段摘要不能超过 500 字");
+            if (segment.getEmbeddingReason() != null && segment.getEmbeddingReason().length() > 200) throw owner.invalid("索引原因不能超过200字");
+            if (Integer.valueOf(0).equals(draft.getIndexPolicyVersion()) && "AI_ASSISTED".equals(draft.getMode()) && !segment.getEmbeddingEnabled())
+                throw owner.invalid("兼容策略不支持跳过索引，请保留原稿并重新准备候选");
             if (segment.getContentType() != null && !Set.of("todo", "thought", "learning", "plan", "note", "work", "social", "health").contains(segment.getContentType()))
                 throw owner.invalid("片段分类非法");
             owner.validateStrings(segment.getMoods(), Set.of("happy", "excited", "satisfied", "grateful", "expecting", "calm", "bored", "confused", "anxious", "sad", "angry", "exhausted", "stressed"), "情绪");
@@ -235,6 +248,8 @@ final class RecordActionValidation {
 
     protected void validateOrganizeSource(UUID userId, Record source) {
         if (source == null) return;
+        if (Integer.valueOf(1).equals(source.getIndexPolicyVersion()) && Boolean.TRUE.equals(source.getUserReviewed()))
+            throw owner.invalid("已审核记录正文只读，请新建记录更正");
         boolean authorizedFailure = source.getStatus() == RecordStatus.FAILED
                 && Boolean.TRUE.equals(source.getAiProcessingAuthorized());
         boolean untouchedOnlySave = source.getStatus() == RecordStatus.RECORD_ONLY

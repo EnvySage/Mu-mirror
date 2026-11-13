@@ -91,6 +91,10 @@ public class Record {
     /** 异步处理代次；撤回/删除时递增，阻止旧任务回写。 */
     private Integer processingVersion;
 
+    /** 服务器选择的索引策略；历史记录和未赋值的旧调用保持兼容模式。 */
+    @Builder.Default
+    private Integer indexPolicyVersion = 0;
+
     private RecordMemoryState memoryState;
     @TableField(typeHandler = UuidTypeHandler.class)
     private UUID memoryActionId;

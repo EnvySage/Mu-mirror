@@ -24,11 +24,44 @@ import java.util.UUID;
 @Mapper
 public interface ChunkMapper extends BaseMapper<Chunk> {
 
+    /** Index work uses authorization/version checks, not the complete-vector read gate. */
+    @Select("""
+            <script>
+            SELECT EXISTS (
+              SELECT 1 FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+              WHERE c.id=#{chunkId} AND c.user_id=#{userId}::uuid AND c.content_version=#{contentVersion}
+                AND c.ai_memory_approved AND c.embedding_enabled
+                AND c.segment IS NOT NULL AND btrim(c.segment)&lt;&gt;''
+                AND encode(sha256(convert_to(c.segment,'UTF8')),'hex')=#{contentHash}
+                AND r.source='user' AND r.deleted_at IS NULL AND r.ai_processing_authorized
+                AND r.status IN ('reviewing','done') AND r.memory_state&lt;&gt;'DISABLED'
+                <if test="requireConfirmed">
+                AND r.status='done' AND r.user_reviewed AND r.memory_state IN ('PENDING','READY')
+                </if>
+                <if test="jobId != null">
+                AND EXISTS (SELECT 1 FROM chunk_embedding_jobs j WHERE j.id=#{jobId} AND j.chunk_id=c.id
+                  AND j.user_id=c.user_id AND j.content_version=c.content_version
+                  AND j.content_hash=#{contentHash} AND j.status='processing')
+                </if>
+            )
+            </script>
+            """)
+    boolean embeddingInputIsCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
+                                    @Param("contentVersion") Long contentVersion, @Param("contentHash") String contentHash,
+                                    @Param("jobId") Long jobId, @Param("requireConfirmed") boolean requireConfirmed);
+
     /** Explicitly remove a previously stored vector when its text or authorization changes. */
     @Update("UPDATE chunks SET embedding = NULL, embedding_status = 'not_requested', embedding_error = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid")
     int clearEmbedding(@Param("chunkId") Long chunkId, @Param("userId") UUID userId);
 
-    @Update("UPDATE chunks SET embedding_status = 'pending', embedding_error = NULL WHERE id = #{chunkId} AND user_id = #{userId}::uuid AND ai_memory_approved = TRUE AND content_version = #{contentVersion}")
+    @Update("""
+            UPDATE chunks c SET embedding_status='pending',embedding_error=NULL
+            WHERE c.id=#{chunkId} AND c.user_id=#{userId}::uuid AND c.ai_memory_approved AND c.embedding_enabled
+              AND c.content_version=#{contentVersion} AND c.segment IS NOT NULL AND btrim(c.segment)<>''
+              AND EXISTS (SELECT 1 FROM records r WHERE r.id=c.record_id AND r.user_id=c.user_id
+                AND r.source='user' AND r.deleted_at IS NULL AND r.ai_processing_authorized
+                AND r.status IN ('reviewing','done') AND r.memory_state<>'DISABLED')
+            """)
     int markEmbeddingPending(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
                              @Param("contentVersion") Long contentVersion);
 
@@ -36,10 +69,15 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             UPDATE chunks c SET embedding = #{embedding,typeHandler=org.xianshen.mumirrorb.common.handler.VectorTypeHandler},
                 embedding_status = 'ready', embedding_error = NULL
             WHERE c.id = #{chunkId} AND c.user_id = #{userId}::uuid
-              AND c.ai_memory_approved = TRUE AND c.content_version = #{contentVersion}
+              AND c.ai_memory_approved = TRUE AND c.embedding_enabled AND c.content_version = #{contentVersion}
+              AND c.segment IS NOT NULL AND btrim(c.segment)<>''
+              AND EXISTS (SELECT 1 FROM records r WHERE r.id=c.record_id AND r.user_id=c.user_id
+                          AND r.source='user' AND r.status='done' AND r.user_reviewed
+                          AND r.deleted_at IS NULL AND r.ai_processing_authorized AND r.memory_state IN ('PENDING','READY'))
               AND EXISTS (SELECT 1 FROM chunk_embedding_jobs j
                           WHERE j.id = #{jobId} AND j.chunk_id = c.id
                             AND j.user_id = c.user_id AND j.content_version = c.content_version
+                            AND j.content_hash=encode(sha256(convert_to(c.segment,'UTF8')),'hex')
                             AND j.status = 'processing')
             """)
     int saveEmbeddingIfCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
@@ -47,9 +85,20 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                                @Param("jobId") Long jobId,
                                @Param("embedding") List<Float> embedding);
 
-    @Update("UPDATE chunks SET embedding_status = 'failed', embedding_error = #{error} WHERE id = #{chunkId} AND user_id = #{userId}::uuid AND ai_memory_approved = TRUE AND content_version = #{contentVersion}")
+    @Update("""
+            UPDATE chunks c SET embedding_status='failed',embedding_error=#{error}
+            WHERE c.id=#{chunkId} AND c.user_id=#{userId}::uuid AND c.ai_memory_approved AND c.embedding_enabled
+              AND c.content_version=#{contentVersion} AND c.segment IS NOT NULL AND btrim(c.segment)<>''
+              AND EXISTS (SELECT 1 FROM records r WHERE r.id=c.record_id AND r.user_id=c.user_id
+                AND r.source='user' AND r.status='done' AND r.user_reviewed AND r.deleted_at IS NULL
+                AND r.ai_processing_authorized AND r.memory_state IN ('PENDING','READY'))
+              AND EXISTS (SELECT 1 FROM chunk_embedding_jobs j WHERE j.id=#{jobId} AND j.chunk_id=c.id
+                AND j.user_id=c.user_id AND j.content_version=c.content_version AND j.status='processing'
+                AND j.content_hash=encode(sha256(convert_to(c.segment,'UTF8')),'hex'))
+            """)
     int markEmbeddingFailedIfCurrent(@Param("chunkId") Long chunkId, @Param("userId") UUID userId,
                                      @Param("contentVersion") Long contentVersion,
+                                     @Param("jobId") Long jobId,
                                      @Param("error") String error);
 
     /** Clear classification provenance when the user changes the segment text. */
@@ -72,14 +121,15 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, c.created_at,
                    1 - (c.embedding <=> #{queryVector}::vector) AS similarity
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND record_memory_is_complete(r.id)
+              AND record_ai_is_readable(r.id)
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL
               AND c.vault_item_id IS NULL
+              AND c.embedding_enabled AND c.embedding_status = 'ready'
               AND c.embedding IS NOT NULL
             ORDER BY c.embedding <=> #{queryVector}::vector
             LIMIT #{limit}
@@ -148,14 +198,15 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
             SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, c.created_at,
                    1 - (c.embedding <=> #{queryVector}::vector) AS similarity
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
-              AND record_memory_is_complete(r.id)
+              AND record_ai_is_readable(r.id)
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment <> ''
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL
               AND c.vault_item_id IS NULL
+              AND c.embedding_enabled AND c.embedding_status = 'ready'
               AND c.embedding IS NOT NULL
               AND (#{contentType} IS NULL OR c.metadata->>'contentType' = #{contentType}
                 OR (#{contentType} IN ('todo', 'plan') AND c.metadata->>'contentType' IN ('todo', 'plan')))
@@ -177,21 +228,26 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      */
     @Select("""
             <script>
-            SELECT c.id, c.user_id, c.record_id, c.content, c.segment, c.metadata, c.created_at
+            SELECT recent.id, recent.user_id, recent.record_id, recent.content, recent.segment, recent.metadata, recent.created_at
+            FROM (
+            SELECT c.id, c.user_id, c.record_id, c.segment AS content, c.segment, c.metadata, r.created_at AS created_at,
+                   r.created_at AS record_time
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND record_memory_is_complete(r.id)
+              AND record_ai_is_readable(r.id)
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL
               AND c.vault_item_id IS NULL
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
-            ORDER BY r.created_at ASC, c.id ASC
+            ORDER BY r.created_at DESC, r.id DESC, c.id DESC
             <if test="limit &gt; 0">LIMIT #{limit}</if>
+            ) recent
+            ORDER BY recent.record_time ASC, recent.record_id ASC, recent.id ASC
             </script>
             """)
     List<Chunk> selectLookbackChunks(@Param("userId") UUID userId,
@@ -212,14 +268,14 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                    c.id AS "chunkId",
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS record_date
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND record_memory_is_complete(r.id)
+              AND record_ai_is_readable(r.id)
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''
@@ -253,14 +309,14 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                    c.metadata->'keywords' AS "keywordsJson",
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND record_memory_is_complete(r.id)
+              AND record_ai_is_readable(r.id)
               AND c.ai_memory_approved = TRUE
-              AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL
               AND c.vault_item_id IS NULL
               AND c.metadata->>'title' IS NOT NULL
               AND c.metadata->>'title' != ''

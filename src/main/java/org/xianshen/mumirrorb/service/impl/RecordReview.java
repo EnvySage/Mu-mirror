@@ -76,6 +76,9 @@ final class RecordReview {
                                   List<org.xianshen.mumirrorb.pojo.DTO.GrowthAdjustmentDTO> growthAdjustments, Long axesVersion) {
         Record record = owner.recordMapper.selectOwnedForUpdate(userId, recordId);
         if (record == null) throw new BusinessException(ResultCode.RECORD_NOT_FOUND, "记录不存在或已被删除");
+        boolean selective = Integer.valueOf(1).equals(record.getIndexPolicyVersion());
+        if (selective && Boolean.TRUE.equals(record.getUserReviewed()))
+            throw new BusinessException(ResultCode.PARAM_ERROR, "该记录的已确认正文不可再次修改");
         if (record.getMemoryState() == RecordMemoryState.PENDING || record.getMemoryState() == RecordMemoryState.READY
                 || record.getMemoryState() == RecordMemoryState.DISABLED)
             throw new BusinessException(ResultCode.PARAM_ERROR, "该记录的已确认正文不可再次修改");
@@ -86,6 +89,7 @@ final class RecordReview {
         List<Chunk> chunks = owner.chunkMapper.selectList(
                 new LambdaQueryWrapper<Chunk>()
                         .eq(Chunk::getRecordId, recordId)
+                        .eq(Chunk::getUserId, userId)
         );
         if (chunks.isEmpty()) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "至少需要一个片段才能确认记录");
@@ -138,9 +142,10 @@ final class RecordReview {
                     }
                 }
             }
-            boolean needsEmbedding = approveMemory && chunk.getSegment() != null && !chunk.getSegment().isBlank()
+            boolean needsEmbedding = approveMemory && chunk.getEmbeddingEnabled()
+                    && chunk.getSegment() != null && !chunk.getSegment().isBlank()
                     && (segmentResolved || !wasApproved || chunk.getEmbedding() == null || chunk.getEmbedding().isEmpty());
-            if (!approveMemory) {
+            if (!approveMemory || !chunk.getEmbeddingEnabled()) {
                 chunk.setEmbedding(null);
                 chunk.setEmbeddingStatus("not_requested");
                 chunk.setEmbeddingError(null);
@@ -166,7 +171,7 @@ final class RecordReview {
                     record.getQueuedEmbeddingJobIds().add(jobId);
                 }
             }
-            if (!approveMemory) owner.chunkMapper.clearEmbedding(chunk.getId(), userId);
+            if (!approveMemory || !chunk.getEmbeddingEnabled()) owner.chunkMapper.clearEmbedding(chunk.getId(), userId);
         }
 
         int generation = record.getProcessingVersion() == null ? 0 : record.getProcessingVersion();
@@ -177,7 +182,7 @@ final class RecordReview {
             record.setMemoryActionId(null);
             record.setMemoryActionExecutionVersion(null);
         } else {
-            boolean selectedChunksReady = chunks.stream().filter(c -> approvedIds.contains(c.getId()))
+            boolean selectedChunksReady = selective || chunks.stream().filter(c -> approvedIds.contains(c.getId()))
                     .allMatch(c -> "ready".equalsIgnoreCase(c.getEmbeddingStatus())
                             && c.getEmbedding() != null && !c.getEmbedding().isEmpty());
             record.setMemoryState(selectedChunksReady ? RecordMemoryState.READY : RecordMemoryState.PENDING);

@@ -33,7 +33,7 @@ public interface ProfileStatsMapper {
                    TO_CHAR(COALESCE(r.created_at, t.created_at), 'YYYY-MM-DD"T"HH24:MI:SS') AS createdAt
             FROM todo_registry t
             LEFT JOIN chunks c ON c.id = t.source_chunk_id
-            LEFT JOIN records r ON r.id = c.record_id
+            LEFT JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
               AND t.current_status != 'completed'
@@ -49,9 +49,10 @@ public interface ProfileStatsMapper {
             SELECT 'record' AS "inputKind", r.id AS "inputId", 'todo' AS "inputRole"
             FROM todo_registry t
             JOIN chunks c ON c.id = t.source_chunk_id
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
+              AND c.user_id = t.user_id AND r.user_id = t.user_id
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
@@ -60,9 +61,10 @@ public interface ProfileStatsMapper {
             SELECT 'chunk' AS "inputKind", c.id AS "inputId", 'todo' AS "inputRole"
             FROM todo_registry t
             JOIN chunks c ON c.id = t.source_chunk_id
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
+              AND c.user_id = t.user_id AND r.user_id = t.user_id
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
@@ -80,7 +82,7 @@ public interface ProfileStatsMapper {
                    COUNT(*) AS count
             FROM todo_registry t
             LEFT JOIN chunks c ON c.id = t.source_chunk_id
-            LEFT JOIN records r ON r.id = c.record_id
+            LEFT JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE t.user_id = #{userId}::uuid
               AND t.deleted_at IS NULL
               AND (t.origin_kind = 'direct' OR (t.origin_kind = 'record'
@@ -104,13 +106,13 @@ public interface ProfileStatsMapper {
                    c.metadata->'keywords' AS "keywordsJson",
                    TO_CHAR(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS "createdAt"
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND c.metadata->>'contentType' = 'learning'
             ORDER BY r.created_at DESC, c.id DESC
             LIMIT 30
@@ -121,13 +123,13 @@ public interface ProfileStatsMapper {
             WITH eligible AS (
                 SELECT r.id AS record_id, c.id AS chunk_id
                 FROM chunks c
-                JOIN records r ON r.id = c.record_id
+                JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
                 WHERE c.user_id = #{userId}::uuid
                   AND r.deleted_at IS NULL
                   AND r.source = 'user'
                   AND r.status = 'done'
-                  AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+                  AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
                   AND c.metadata->>'contentType' = 'learning'
                 ORDER BY r.created_at DESC, c.id DESC
                 LIMIT 30
@@ -150,13 +152,13 @@ public interface ProfileStatsMapper {
             WITH eligible AS (
                 SELECT r.id AS record_id, c.id AS chunk_id
                 FROM records r
-                JOIN chunks c ON c.record_id = r.id
+                JOIN chunks c ON c.record_id = r.id AND c.user_id = r.user_id
                 WHERE r.user_id = #{userId}::uuid
                   AND r.deleted_at IS NULL
                   AND r.source = 'user'
                   AND r.status = 'done'
-                  AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+                  AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
                   <if test="since != null">AND r.created_at &gt;= #{since}</if>
                   <if test="until != null">AND r.created_at &lt; #{until}</if>
             )
@@ -186,8 +188,8 @@ public interface ProfileStatsMapper {
               AND r.status = 'done'
               AND EXISTS (
                   SELECT 1 FROM chunks c
-                  WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+                  WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               )
             ORDER BY month
             """)
@@ -207,14 +209,14 @@ public interface ProfileStatsMapper {
             SELECT m.value AS mood,
                    COUNT(*) AS count
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             CROSS JOIN LATERAL jsonb_array_elements_text(c.metadata->'mood') AS m(value)
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -238,14 +240,14 @@ public interface ProfileStatsMapper {
                    m.value AS mood,
                    COUNT(*) AS count
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             CROSS JOIN LATERAL jsonb_array_elements_text(c.metadata->'mood') AS m(value)
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND jsonb_exists(c.metadata, 'mood')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -273,8 +275,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id))
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -293,14 +295,14 @@ public interface ProfileStatsMapper {
             SELECT k.value AS keyword,
                    COUNT(*) AS count
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             CROSS JOIN LATERAL jsonb_array_elements_text(c.metadata->'keywords') AS k(value)
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id)
+              AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id)
               AND jsonb_exists(c.metadata, 'keywords')
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
@@ -326,8 +328,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id))
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -350,8 +352,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id))
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             GROUP BY 1
@@ -372,8 +374,8 @@ public interface ProfileStatsMapper {
               AND r.deleted_at IS NULL
               AND r.source = 'user'
               AND r.status = 'done'
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.ai_memory_approved = TRUE
-              AND record_memory_is_complete(r.id))
+              AND EXISTS (SELECT 1 FROM chunks c WHERE c.record_id = r.id AND c.user_id = r.user_id AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL
+              AND record_ai_is_readable(r.id))
               <if test="since != null">AND r.created_at &gt;= #{since}</if>
               <if test="until != null">AND r.created_at &lt; #{until}</if>
             </script>

@@ -23,8 +23,8 @@ public class TarotContextServiceImpl implements TarotContextService {
                c.id::text || ':' || COALESCE(c.metadata::text,'') || ':' || c.segment AS fingerprint
         FROM chunks c JOIN records r ON r.id=c.record_id
         WHERE r.user_id=? AND c.user_id=r.user_id AND r.source='user' AND r.status='done'
-          AND r.deleted_at IS NULL AND c.ai_memory_approved=TRUE AND record_memory_is_complete(r.id)
-          AND c.segment IS NOT NULL AND c.segment<>''
+          AND r.deleted_at IS NULL AND c.ai_memory_approved=TRUE AND record_ai_is_readable(r.id)
+          AND NULLIF(btrim(c.segment), '') IS NOT NULL
         """;
     private static final String TODOS="""
         SELECT t.id::text AS source_id,t.title, t.created_at AS source_date,

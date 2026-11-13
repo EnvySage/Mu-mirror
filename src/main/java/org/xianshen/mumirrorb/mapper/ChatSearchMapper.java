@@ -48,7 +48,7 @@ public interface ChatSearchMapper {
      */
     @Select("""
             <script>
-            SELECT c.record_id,
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
                    c.segment AS content,
                    c.metadata->>'title'           AS title,
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
@@ -56,21 +56,21 @@ public interface ChatSearchMapper {
                    c.vault_item_id                AS vault_item_id,
                    -1.0 AS score
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.status = 'done'
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
-                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_ai_is_readable(r.id)
+                   AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
-              AND c.classified_segment IS NOT NULL
+              AND (r.source = 'user' OR c.classified_segment IS NOT NULL)
               <if test="contentType != null">AND (c.metadata->>'contentType' = #{contentType}
                 OR (#{contentType} IN ('todo', 'plan') AND c.metadata->>'contentType' IN ('todo', 'plan')))</if>
               <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
-            ORDER BY r.created_at DESC
+            ORDER BY r.created_at DESC, r.id DESC, c.id DESC
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
@@ -90,9 +90,62 @@ public interface ChatSearchMapper {
         return searchStructured(userId, contentType, moods, moodArray, timeStart, timeEnd, limit, 0);
     }
 
+    /** Diary-only STRUCTURED search used by search_records; all exclusions run before LIMIT/OFFSET. */
+    @Select("""
+            <script>
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
+                   c.segment AS content, c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id AS vault_item_id, -1.0 AS score
+            FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+            WHERE c.user_id=#{userId}::uuid AND r.source='user'
+              AND r.deleted_at IS NULL AND r.status='done'
+              AND record_ai_is_readable(r.id) AND c.ai_memory_approved=TRUE
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL AND c.vault_item_id IS NULL
+              <if test="contentType != null">AND (c.metadata->>'contentType' = #{contentType}
+                OR (#{contentType} IN ('todo','plan') AND c.metadata->>'contentType' IN ('todo','plan')))</if>
+              <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
+              <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
+              <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
+              <if test="structuredQuery != null and structuredQuery != ''">
+                AND (strpos(COALESCE(c.segment, ''), #{structuredQuery}) &gt; 0
+                  OR strpos(COALESCE(c.metadata->>'title', ''), #{structuredQuery}) &gt; 0)
+              </if>
+            ORDER BY r.created_at DESC, r.id DESC, c.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<RetrievedChunkDTO> searchRecordsStructured(@Param("userId") UUID userId,
+            @Param("contentType") String contentType, @Param("moods") List<String> moods,
+            @Param("moodArray") String moodArray, @Param("timeStart") OffsetDateTime timeStart,
+            @Param("timeEnd") OffsetDateTime timeEnd, @Param("structuredQuery") String structuredQuery,
+            @Param("limit") int limit, @Param("offset") int offset);
+
+    /** A record-scoped search_records page with literal query filtering before pagination. */
+    @Select("""
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
+                   c.segment AS content, c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id AS vault_item_id, -1.0 AS score
+            FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+            WHERE c.user_id=#{userId}::uuid AND c.record_id=#{recordId} AND r.source='user'
+              AND r.deleted_at IS NULL AND r.status='done'
+              AND record_ai_is_readable(r.id) AND c.ai_memory_approved=TRUE
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL AND c.vault_item_id IS NULL
+              AND (#{structuredQuery}::text IS NULL
+                OR strpos(COALESCE(c.segment, ''), #{structuredQuery}) > 0
+                OR strpos(COALESCE(c.metadata->>'title', ''), #{structuredQuery}) > 0)
+            ORDER BY c.id ASC LIMIT #{limit} OFFSET #{offset}
+            """)
+    List<RetrievedChunkDTO> searchRecordsByRecordId(@Param("userId") UUID userId,
+            @Param("recordId") Long recordId, @Param("structuredQuery") String structuredQuery,
+            @Param("limit") int limit, @Param("offset") int offset);
+
     /** 按记录 ID 读取单条已授权记录的片段（用户明确指向某条记录时使用）。 */
     @Select("""
-            SELECT c.record_id,
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
                    c.segment AS content,
                    c.metadata->>'title'           AS title,
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
@@ -100,16 +153,16 @@ public interface ChatSearchMapper {
                    c.vault_item_id                AS vault_item_id,
                    -1.0 AS score
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND c.record_id = #{recordId}
               AND r.deleted_at IS NULL
               AND r.status = 'done'
               AND r.source <> 'system'
-              AND (r.source <> 'user' OR (record_memory_is_complete(r.id)
-                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment <> ''))
+              AND (r.source <> 'user' OR (record_ai_is_readable(r.id)
+                   AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL))
               AND (r.source <> 'vault' OR c.metadata->>'keyChunk' = 'true')
-              AND c.classified_segment IS NOT NULL
+              AND (r.source = 'user' OR c.classified_segment IS NOT NULL)
             ORDER BY c.id
             LIMIT #{limit}
             """)
@@ -117,10 +170,27 @@ public interface ChatSearchMapper {
                                              @Param("recordId") Long recordId,
                                              @Param("limit") int limit);
 
-    /** 关键词模式：正文/标题/原文的 ILIKE 匹配，按时间倒序。 */
+    /** Complete authorized user segments, in source order; never return raw record content. */
+    @Select("""
+            SELECT c.id AS chunk_id, c.record_id, c.segment AS content,
+                   c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   COALESCE(c.metadata->'mood', '[]'::jsonb)::text AS moods_json
+            FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+            WHERE c.user_id=#{userId}::uuid AND r.id=#{recordId} AND r.source='user'
+              AND r.status='done'
+              AND record_ai_is_readable(r.id) AND c.ai_memory_approved
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL AND c.vault_item_id IS NULL
+            ORDER BY c.id ASC LIMIT #{limit} OFFSET #{offset}
+            """)
+    List<RetrievedChunkDTO> readAuthorizedRecord(@Param("userId") UUID userId, @Param("recordId") Long recordId,
+                                                  @Param("limit") int limit, @Param("offset") int offset);
+
+    /** 关键词模式：仅匹配已授权片段正文和标题，按时间倒序。 */
     @Select("""
             <script>
-            SELECT c.record_id,
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
                    c.segment AS content,
                    c.metadata->>'title'           AS title,
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
@@ -128,21 +198,20 @@ public interface ChatSearchMapper {
                    c.vault_item_id                AS vault_item_id,
                    -1.0 AS score
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.status = 'done'
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
-                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_ai_is_readable(r.id)
+                   AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
-              AND c.classified_segment IS NOT NULL
+              AND (r.source = 'user' OR c.classified_segment IS NOT NULL)
               AND (c.segment ILIKE '%' || #{keyword} || '%'
-                   OR c.content ILIKE '%' || #{keyword} || '%'
                    OR COALESCE(c.metadata->>'title', '') ILIKE '%' || #{keyword} || '%')
               <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
               <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
-            ORDER BY r.created_at DESC
+            ORDER BY r.created_at DESC, r.id DESC, c.id DESC
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
@@ -152,6 +221,31 @@ public interface ChatSearchMapper {
                                           @Param("timeEnd") OffsetDateTime timeEnd,
                                           @Param("limit") int limit,
                                           @Param("offset") int offset);
+
+    /** Diary-only keyword mode; user/vault separation is applied before page slicing. */
+    @Select("""
+            <script>
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
+                   c.segment AS content, c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id AS vault_item_id, -1.0 AS score
+            FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+            WHERE c.user_id=#{userId}::uuid AND r.source='user'
+              AND r.deleted_at IS NULL AND r.status='done'
+              AND record_ai_is_readable(r.id) AND c.ai_memory_approved=TRUE
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL AND c.vault_item_id IS NULL
+              AND (c.segment ILIKE '%' || #{keyword} || '%'
+                OR COALESCE(c.metadata->>'title', '') ILIKE '%' || #{keyword} || '%')
+              <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
+              <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
+            ORDER BY r.created_at DESC, r.id DESC, c.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<RetrievedChunkDTO> searchRecordsKeyword(@Param("userId") UUID userId,
+            @Param("keyword") String keyword, @Param("timeStart") OffsetDateTime timeStart,
+            @Param("timeEnd") OffsetDateTime timeEnd, @Param("limit") int limit, @Param("offset") int offset);
 
     /**
      * SEMANTIC 路由：pgvector 余弦距离检索
@@ -180,7 +274,7 @@ public interface ChatSearchMapper {
      */
     @Select("""
             <script>
-            SELECT c.record_id,
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
                    c.segment AS content,
                    c.metadata->>'title'           AS title,
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
@@ -188,15 +282,16 @@ public interface ChatSearchMapper {
                    c.vault_item_id                AS vault_item_id,
                    (c.embedding &lt;=&gt; #{queryVector}::vector) AS score
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
-                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_ai_is_readable(r.id)
+                   AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
-              AND c.classified_segment IS NOT NULL
+              AND (r.source &lt;&gt; 'user' OR (c.embedding_enabled AND c.embedding_status = 'ready'))
+              AND (r.source = 'user' OR c.classified_segment IS NOT NULL)
               <if test="maxDistance != null">AND (c.embedding &lt;=&gt; #{queryVector}::vector)
                   &lt; (CASE WHEN r.source = 'vault' THEN #{maxDistance} + 0.15 ELSE #{maxDistance} END)</if>
             ORDER BY
@@ -208,16 +303,51 @@ public interface ChatSearchMapper {
                 <otherwise>
                   (c.embedding &lt;=&gt; #{queryVector}::vector)
                 </otherwise>
-              </choose> ASC
-            LIMIT #{limit}
+              </choose> ASC, r.id DESC, c.id DESC
+            LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
-    List<RetrievedChunkDTO> searchSemantic(@Param("userId") UUID userId,
+    List<RetrievedChunkDTO> searchSemanticPage(@Param("userId") UUID userId,
                                            @Param("queryVector") String queryVector,
                                            @Param("applyDecay") boolean applyDecay,
                                            @Param("halfLifeDays") double halfLifeDays,
                                            @Param("maxDistance") Double maxDistance,
-                                           @Param("limit") int limit);
+                                           @Param("limit") int limit, @Param("offset") int offset);
+
+    /** Diary-only semantic page for search_records; unlike general Chat RAG, excludes vault key chunks. */
+    @Select("""
+            <script>
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
+                   c.segment AS content, c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id AS vault_item_id,
+                   (c.embedding &lt;=&gt; #{queryVector}::vector) AS score
+            FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+            WHERE c.user_id=#{userId}::uuid AND r.source='user'
+              AND r.deleted_at IS NULL AND r.status='done'
+              AND record_ai_is_readable(r.id) AND c.ai_memory_approved=TRUE
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL AND c.vault_item_id IS NULL
+              AND c.embedding IS NOT NULL AND c.embedding_enabled AND c.embedding_status='ready'
+              <if test="maxDistance != null">AND (c.embedding &lt;=&gt; #{queryVector}::vector) &lt; #{maxDistance}</if>
+            ORDER BY
+              <choose>
+                <when test="applyDecay">(c.embedding &lt;=&gt; #{queryVector}::vector)
+                  * (1 + EXTRACT(EPOCH FROM (NOW() - r.created_at)) / 86400.0 / #{halfLifeDays})</when>
+                <otherwise>(c.embedding &lt;=&gt; #{queryVector}::vector)</otherwise>
+              </choose> ASC, r.id DESC, c.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<RetrievedChunkDTO> searchRecordsSemanticPage(@Param("userId") UUID userId,
+            @Param("queryVector") String queryVector, @Param("applyDecay") boolean applyDecay,
+            @Param("halfLifeDays") double halfLifeDays, @Param("maxDistance") Double maxDistance,
+            @Param("limit") int limit, @Param("offset") int offset);
+
+    default List<RetrievedChunkDTO> searchSemantic(UUID userId, String vector, boolean decay, double halfLife,
+                                                    Double maxDistance, int limit) {
+        return searchSemanticPage(userId, vector, decay, halfLife, maxDistance, limit, 0);
+    }
 
     /**
      * HYBRID 路由：元数据预过滤 + pgvector + 时间衰减
@@ -231,7 +361,7 @@ public interface ChatSearchMapper {
      */
     @Select("""
             <script>
-            SELECT c.record_id,
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
                    c.segment AS content,
                    c.metadata->>'title'           AS title,
                    TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
@@ -239,15 +369,16 @@ public interface ChatSearchMapper {
                    c.vault_item_id                AS vault_item_id,
                    (c.embedding &lt;=&gt; #{queryVector}::vector) AS score
             FROM chunks c
-            JOIN records r ON r.id = c.record_id
+            JOIN records r ON r.id = c.record_id AND r.user_id = c.user_id
             WHERE c.user_id = #{userId}::uuid
               AND r.deleted_at IS NULL
               AND r.source &lt;&gt; 'system'
-              AND (r.source &lt;&gt; 'user' OR (record_memory_is_complete(r.id)
-                   AND c.ai_memory_approved = TRUE AND c.segment IS NOT NULL AND c.segment &lt;&gt; ''))
+              AND (r.source &lt;&gt; 'user' OR (record_ai_is_readable(r.id)
+                   AND c.ai_memory_approved = TRUE AND NULLIF(btrim(c.segment), '') IS NOT NULL))
               AND (r.source &lt;&gt; 'vault' OR c.metadata->>'keyChunk' = 'true')
               AND c.embedding IS NOT NULL
-              AND c.classified_segment IS NOT NULL
+              AND (r.source &lt;&gt; 'user' OR (c.embedding_enabled AND c.embedding_status = 'ready'))
+              AND (r.source = 'user' OR c.classified_segment IS NOT NULL)
               <if test="contentType != null">AND (c.metadata->>'contentType' = #{contentType}
                 OR (#{contentType} IN ('todo', 'plan') AND c.metadata->>'contentType' IN ('todo', 'plan')))</if>
               <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
@@ -264,11 +395,11 @@ public interface ChatSearchMapper {
                 <otherwise>
                   (c.embedding &lt;=&gt; #{queryVector}::vector)
                 </otherwise>
-              </choose> ASC
-            LIMIT #{limit}
+              </choose> ASC, r.id DESC, c.id DESC
+            LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
-    List<RetrievedChunkDTO> searchHybrid(@Param("userId") UUID userId,
+    List<RetrievedChunkDTO> searchHybridPage(@Param("userId") UUID userId,
                                          @Param("queryVector") String queryVector,
                                          @Param("contentType") String contentType,
                                          @Param("moods") List<String> moods,
@@ -278,5 +409,48 @@ public interface ChatSearchMapper {
                                          @Param("applyDecay") boolean applyDecay,
                                          @Param("halfLifeDays") double halfLifeDays,
                                          @Param("maxDistance") Double maxDistance,
-                                         @Param("limit") int limit);
+                                         @Param("limit") int limit, @Param("offset") int offset);
+
+    /** Diary-only hybrid page for search_records; all candidate exclusions precede pagination. */
+    @Select("""
+            <script>
+            SELECT c.id AS chunk_id, (c.metadata->'mood')::text AS moods_json, c.record_id,
+                   c.segment AS content, c.metadata->>'title' AS title,
+                   TO_CHAR(r.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') AS created_at,
+                   COALESCE(c.metadata->>'contentType', '') AS content_type,
+                   c.vault_item_id AS vault_item_id,
+                   (c.embedding &lt;=&gt; #{queryVector}::vector) AS score
+            FROM chunks c JOIN records r ON r.id=c.record_id AND r.user_id=c.user_id
+            WHERE c.user_id=#{userId}::uuid AND r.source='user'
+              AND r.deleted_at IS NULL AND r.status='done'
+              AND record_ai_is_readable(r.id) AND c.ai_memory_approved=TRUE
+              AND NULLIF(btrim(c.segment), '') IS NOT NULL AND c.vault_item_id IS NULL
+              AND c.embedding IS NOT NULL AND c.embedding_enabled AND c.embedding_status='ready'
+              <if test="contentType != null">AND (c.metadata->>'contentType' = #{contentType}
+                OR (#{contentType} IN ('todo','plan') AND c.metadata->>'contentType' IN ('todo','plan')))</if>
+              <if test="moods != null and moods.size() > 0">AND jsonb_exists_any(c.metadata->'mood', #{moodArray}::text[])</if>
+              <if test="timeStart != null">AND r.created_at &gt;= #{timeStart}</if>
+              <if test="timeEnd != null">AND r.created_at &lt; #{timeEnd}</if>
+              <if test="maxDistance != null">AND (c.embedding &lt;=&gt; #{queryVector}::vector) &lt; #{maxDistance}</if>
+            ORDER BY
+              <choose>
+                <when test="applyDecay">(c.embedding &lt;=&gt; #{queryVector}::vector)
+                  * (1 + EXTRACT(EPOCH FROM (NOW() - r.created_at)) / 86400.0 / #{halfLifeDays})</when>
+                <otherwise>(c.embedding &lt;=&gt; #{queryVector}::vector)</otherwise>
+              </choose> ASC, r.id DESC, c.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<RetrievedChunkDTO> searchRecordsHybridPage(@Param("userId") UUID userId,
+            @Param("queryVector") String queryVector, @Param("contentType") String contentType,
+            @Param("moods") List<String> moods, @Param("moodArray") String moodArray,
+            @Param("timeStart") OffsetDateTime timeStart, @Param("timeEnd") OffsetDateTime timeEnd,
+            @Param("applyDecay") boolean applyDecay, @Param("halfLifeDays") double halfLifeDays,
+            @Param("maxDistance") Double maxDistance, @Param("limit") int limit, @Param("offset") int offset);
+
+    default List<RetrievedChunkDTO> searchHybrid(UUID userId, String vector, String type, List<String> moods,
+                                                 String moodArray, OffsetDateTime start, OffsetDateTime end,
+                                                 boolean decay, double halfLife, Double maxDistance, int limit) {
+        return searchHybridPage(userId, vector, type, moods, moodArray, start, end, decay, halfLife, maxDistance, limit, 0);
+    }
 }

@@ -1,5 +1,4 @@
 syntax = "proto3";
-
 package mirror;
 
 import "common.proto";
@@ -7,47 +6,36 @@ import "common.proto";
 option java_package = "org.xianshen.mumirrorb.grpc.gen";
 option java_outer_classname = "RecordProcessorProto";
 
-// 记录处理服务
 service RecordProcessor {
-  // 分类：输入文本，返回标题/摘要/标签
-  rpc Classify (ClassifyRequest) returns (ClassifyResponse);
+  rpc Classify(ClassifyRequest) returns (ClassifyResponse);
 
   // 个人词典候选抽取（lexicon-design.md 第 3 节）：语料 → 候选词条（new/evidence/update）
-  rpc ExtractTerms (ExtractTermsRequest) returns (ExtractTermsReply);
+  rpc ExtractTerms(ExtractTermsRequest) returns (ExtractTermsReply);
 }
 
-// 分类请求
 message ClassifyRequest {
   string content = 1;
-  LlmConfig llm_config = 2;  // LLM 配置（每次请求携带）
-  bool single = 3;           // true：单段模式，禁止拆分，恰好返回 1 条 ClassifyItem（设计文档 4.4）
-  repeated GlossaryTerm glossary = 4; // 用户个人词典（confirmed top 30；注入点：分类现场修个人指代最便宜）
-  repeated TodoHint open_todos = 5;   // 用户未完成待办清单（todo-registry 判别期；B 侧查 registry，最近优先 ≤20 条）
-  repeated RecentHint recent_context = 6; // 近 7 天记录摘要（B 侧查 chunks.metadata，最近优先 ≤20 条；指代消解语境）
-  // 相对时间消解的参照日期（yyyy-MM-dd，Asia/Shanghai）——即"这条记录里的『今天』是几号"。
-  // B 侧取 record.created_at 的日期部分（不是 now()：隔天确认/审核补分类时不能锚错）。
-  // 未设计补记功能，故不存在"写入日期 ≠ 日记本体日期"的情况，直接取 created_at 即可。
-  // 周计算口径：一周从周一起算（"本周一"= 参照日期所在周的周一）。
+  LlmConfig llm_config = 2;
+  bool single = 3;  // true：单段模式，禁止拆分，恰好返回 1 条 ClassifyItem
+  repeated GlossaryTerm glossary = 4;  // 用户个人词汇表（confirmed top30），软约束注入
+  repeated TodoHint open_todos = 5;  // 用户未完成待办清单（todo-registry 判别期；B 侧查 registry，最近优先 ≤20 条）
+  repeated RecentHint recent_context = 6;  // 近 7 天记录摘要（B 侧查 chunks.metadata 注入；Python 只渲染不查库）
+  // 相对时间消解的参照日期（yyyy-MM-dd，Asia/Shanghai）= 这条记录里的「今天」是几号。
+  // B 侧取 record.created_at 的日期部分；未传 = 不消解，prompt 与旧版一致（零回归）。
+  // 与 B 仓 record_processor.proto 字段号 7 对齐（B 侧 2026-09-20 bc54a8c 已上线，本端此前漏做）
   string reference_date = 7;
+  // Java 仅在用户主动请求本次整理或明确确认片段时设置；缺省 false 一律拒绝分类。
+  // 服务端在创建 LLM 前执行 fail-closed 检查。
   bool processing_authorized = 8;
   GrowthContext growth_context = 9;
 }
 
-// 时间词替换项（LLM 判别输出）：把片段里的相对时间词替换成绝对日期
-//
-// 分工：AI 负责"识别 + 计算"，B 侧负责"执行替换"——LLM 不直接输出改写后的全文，
-// 避免它顺手润色掉非时间内容（segment 要给用户看、要进 embedding，改坏了代价大）。
-// 校验与替换规则见 TimeSubstitutionApplier（脏值丢弃 → 不替换，绝不阻断分类）。
+// 时间词替换项：把片段里的相对时间词替换成绝对日期。
+// 分工：本端负责「识别 + 计算」，B 侧 TimeSubstitutionApplier 负责「执行替换」——不让 LLM
+// 直接吐改写后的全文，避免它顺手润色掉非时间内容。与 B 仓字段号 1/2 对齐
 message TimeSubstitution {
-  string original = 1;   // 片段原文里的时间词，如"大后天"（必须原样出现在文本中）
-  string resolved = 2;   // 消解后的日期文本，如"9月22日" / "2026-09-22"
-}
-
-// 近期语境条目（近 7 天记录摘要）：B 侧查 chunks.metadata 注入；Python 侧只渲染不查库
-message RecentHint {
-  string date = 1;              // 记录日期 yyyy-MM-dd（Asia/Shanghai）
-  string title = 2;             // chunk metadata.title
-  repeated string keywords = 3; // chunk metadata.keywords（≤5 个）
+  string original = 1;   // 片段原文里逐字出现的时间词，如「大后天」
+  string resolved = 2;   // 消解后的日期文本，如「9月22日」（跨年时带年份）
 }
 
 // 待办清单条目（todo-registry-design.md §3.2）：B 侧查 todo_registry（current_status != 'completed'）注入；
@@ -58,6 +46,13 @@ message TodoHint {
   string source_excerpt = 3;    // 原始待办片段摘要（B 侧截 100 字符）
   string created_at = 4;        // 登记时间
   string current_status = 5;    // not_started / in_progress（清单只含未完成项）
+}
+
+// 近期语境条目（近 7 天记录摘要）：B 侧查 chunks.metadata 注入；Python 侧只渲染不查库
+message RecentHint {
+  string date = 1;              // 记录日期 yyyy-MM-dd（Asia/Shanghai）
+  string title = 2;             // chunk metadata.title
+  repeated string keywords = 3; // chunk metadata.keywords（≤5 个）
 }
 
 // 待办引用（LLM 判别输出）：当前片段明显在推进/完成清单中某项时由 LLM 给出；
@@ -87,24 +82,24 @@ message ExtractTermsReply {
   repeated TermCandidate candidates = 1;
 }
 
-// 分类响应（支持拆分：一次 LLM 调用可能返回多条结果）
 message ClassifyResponse {
-  bool skip = 1;                    // 是否跳过（无意义内容）
-  string skip_reason = 2;           // 跳过原因
-  repeated ClassifyItem items = 3;  // 分类结果（1条或多条，拆分后的每条记录）
+  bool skip = 1;
+  string skip_reason = 2;
+  repeated ClassifyItem items = 3;
   repeated GrowthSuggestion growth_suggestions = 4;
 }
 
-// 单条分类结果
 message ClassifyItem {
-  string title = 1;                 // 标题（10字以内）
-  string summary = 2;               // 摘要（30字以内）
-  string content = 3;               // 原文片段（拆分后对应的原文内容）
-  ContentType content_type = 4;     // 内容类型
-  repeated MoodType moods = 5;      // 情绪（多选）
-  TaskStatus status = 6;            // 状态（仅待办/计划类）
-  repeated string keywords = 7;     // 关键词 3-5 个
+  string title = 1;
+  string summary = 2;
+  string content = 3;               // 拆分后的原文
+  ContentType content_type = 4;
+  repeated MoodType moods = 5;
+  TaskStatus status = 6;
+  repeated string keywords = 7;
   TodoRef refers_to_todo = 8;       // 待办引用（todo-registry 判别期；无引用不设值）
-  repeated TimeSubstitution time_substitutions = 9; // 本片段内的时间词替换（相对时间 → 绝对日期；无则不设值）
+  repeated TimeSubstitution time_substitutions = 9;  // 本片段内的时间词替换（无参照日期 / 无相对时间词时为空）
   repeated string user_tags = 10;
+  optional bool embedding_enabled = 11;  // 逐段索引建议；缺失按 true 兼容，不影响记忆授权
+  string embedding_reason = 12;          // 建议原因，最多 200 字符；不参与 embedding
 }

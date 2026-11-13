@@ -116,8 +116,9 @@ final class MirrorRolling {
 
         // ---- ② 本月原始记录（四道防洪闸）----
         boolean truncated = false;
-        List<Chunk> chunks = owner.chunkMapper.selectLookbackChunks(userId, windowSince, windowUntil,
-                owner.mirrorProperties.getLookbackMaxChunks() + 1);
+        List<Chunk> chunks = lookback == 0 ? List.of()
+                : owner.chunkMapper.selectLookbackChunks(userId, windowSince, windowUntil,
+                        owner.mirrorProperties.getLookbackMaxChunks() + 1);
         if (chunks.size() > owner.mirrorProperties.getLookbackMaxChunks()) {
             // 条数闸：超限取最近的（SQL 升序，砍头部旧记录）
             chunks = chunks.subList(chunks.size() - owner.mirrorProperties.getLookbackMaxChunks(), chunks.size());
@@ -126,6 +127,7 @@ final class MirrorRolling {
                     owner.mirrorProperties.getLookbackMaxChunks(), userId);
         }
         StringBuilder records = new StringBuilder();
+        List<Integer> endOffsets = new ArrayList<>();
         int perChunkMax = owner.mirrorProperties.getPerChunkMaxChars();
         DateTimeFormatter dayFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
         for (Chunk c : chunks) {
@@ -139,20 +141,30 @@ final class MirrorRolling {
                 body = body.substring(0, perChunkMax) + "…（已截取最近部分）";
             }
             records.append("[").append(day).append("] ").append(body).append('\n');
+            endOffsets.add(records.length());
         }
         // 总字符闸：与条数闸先触发者生效，旧→新裁剪直到塞下（保尾部新记录）
         int maxChars = owner.mirrorProperties.getLookbackMaxChars();
+        int retainedStart = 0;
         if (records.length() > maxChars) {
             truncated = true;
             String all = records.toString();
-            String tail = all.substring(all.length() - maxChars);
+            retainedStart = all.length() - maxChars;
+            String tail = all.substring(retainedStart);
             int nl = tail.indexOf('\n');
             if (nl >= 0 && nl + 1 < tail.length()) {
+                retainedStart += nl + 1;
                 tail = tail.substring(nl + 1); // 从下一条完整记录起
             }
             records = new StringBuilder(tail);
             owner.log.warn("回看原文触发总字符闸（lookback_max_chars={}），已按旧→新裁剪到 {} 字符，用户: {}",
                     maxChars, records.length(), userId);
+        }
+        for (int i = 0; i < chunks.size(); i++) {
+            if (endOffsets.get(i) <= retainedStart) continue;
+            Chunk c = chunks.get(i);
+            owner.addSource(sourceRefs, "record", c.getRecordId(), "lookback");
+            owner.addSource(sourceRefs, "chunk", c.getId(), "lookback");
         }
 
         // ---- ④ 待办/统计实况直查（数据库实时值；LLM 只叙事不记账）----
@@ -199,7 +211,7 @@ final class MirrorRolling {
             }
         }
 
-        return new RollingContext(previous.text(), correctionIndex, lookback, facts.toString(), truncated,
+        return new RollingContext(previous.text(), correctionIndex, lookback, records.toString(), facts.toString(), truncated,
                 List.copyOf(sourceRefs));
     }
 
