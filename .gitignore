@@ -74,6 +74,3 @@ config/application-local.yml
 __pycache__/
 *.py[cod]
 .verify/
-
-# Completed plan retained locally; versioned history is under docs/archive/plans/.
-/docs/superpowers/plans/2026-11-12-record-selective-indexing.md
