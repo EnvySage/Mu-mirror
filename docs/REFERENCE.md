@@ -108,3 +108,6 @@
 AI 发起写入使用 `ledger.create` 操作卡，legacy 查询用 `query_ledger`，graph_v2 用 ledger_summary/list_ledger_flows。截图协议为 `mirror.LedgerVision/Recognize`。Java 保留当日和用户归属校验，重复确认只落一份账目。模板随记明确采用 index_policy_version=1、READY、已授权及 embedding_enabled=false，直接可查询；含用户正文时沿用现有记录审核和独立索引选择。
 
 迁移顺序现为 v18 → v19-ledger → v20-ledger-planning，schema.sql 同步最终结构。发布脚本先备份再原子重放迁移，reader 增加 ledger_cashflows 视图读取权限。当前选择性索引二进制兼容边界继续适用，回退时保留新增表。
+
+
+提交信息含 `[skip deploy]` 时，发布脚本在创建发布目录、执行迁移、同步代码或重启服务之前退出。用于只推送代码的同步提交。需要发布该版本时，后续提交不带此标记再走正常发布流程。

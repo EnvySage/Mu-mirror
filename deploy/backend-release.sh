@@ -11,6 +11,13 @@
 # 用法：bash deploy/backend-release.sh
 set -euo pipefail
 
+# A code-only push can opt out before any release files or services are changed.
+deployment_commit_message="$(git -C "$(dirname "${BASH_SOURCE[0]}")" log -1 --format=%B)"
+if [[ "$deployment_commit_message" == *'[skip deploy]'* ]]; then
+  printf '%s\n' 'Code synchronized; deployment skipped by commit marker.'
+  exit 0
+fi
+
 MIRROR_HOME="${MIRROR_HOME:-/opt/mirror}"
 SERVICE="${BACKEND_SERVICE:-mirror-backend}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:10002/api/auth/status}"
