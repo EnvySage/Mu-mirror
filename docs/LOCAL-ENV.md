@@ -33,7 +33,7 @@ git pull --rebase
 git config core.hooksPath .githooks
 ```
 
-数据库需 PostgreSQL + `vector` 扩展。新库执行 `Mu-mirror-B/src/main/resources/db/schema.sql`；已有库按 `migration-v2` 至 `migration-v17` 顺序升级。
+数据库需 PostgreSQL + `vector` 扩展。新库执行 `Mu-mirror-B/src/main/resources/db/schema.sql`；已有库按 `migration-v2` 至 `migration-v20` 顺序升级。
 
 ### 3.2 Java 后端
 

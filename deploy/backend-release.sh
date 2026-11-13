@@ -20,12 +20,15 @@ KEEP_BACKUPS="${KEEP_BACKUPS:-10}"
 MIGRATION="${MIGRATION:-src/main/resources/db/migration-v2.sql}"
 RECORD_CATEGORY_MIGRATION="${RECORD_CATEGORY_MIGRATION:-src/main/resources/db/migration-v13-plan-to-todo.sql}"
 RECORD_SELECTIVE_INDEX_MIGRATION="${RECORD_SELECTIVE_INDEX_MIGRATION:-src/main/resources/db/migration-v18-record-selective-index.sql}"
+LEDGER_MIGRATION="src/main/resources/db/migration-v19-ledger.sql"
+LEDGER_PLANNING_MIGRATION="src/main/resources/db/migration-v20-ledger-planning.sql"
 ENV_FILE="$MIRROR_HOME/shared/backend.env"
 
 log() { printf '\n\033[1;34m[%s]\033[0m %s\n' "$(date '+%F %T')" "$*"; }
 die() { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ---------- 0. 前置检查 ----------
+[[ -f "$LEDGER_MIGRATION" && -f "$LEDGER_PLANNING_MIGRATION" ]] || die "缺少记账 v19/v20 迁移"
 [[ -f "$ENV_FILE" ]] || die "缺 $ENV_FILE —— 先跑 deploy/init-server.sh 并填密钥"
 JAR="$(ls -1 target/*.jar 2>/dev/null | grep -v '\.original$' | head -n1 || true)"
 [[ -n "$JAR" ]] || die "target/ 下没有可执行 jar，先执行 ./mvnw -B package"
@@ -140,7 +143,7 @@ if [[ -f "$MIGRATION" || -f "$RECORD_CATEGORY_MIGRATION" || -f "$RECORD_SELECTIV
           IN (r.columns, CASE WHEN r.name='mirror_ai.record_chunks'
             THEN r.columns||ARRAY['embedding_enabled','embedding_status','index_policy_version'] ELSE r.columns END))
     ) AND (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-      WHERE n.nspname='mirror_ai' AND c.relkind='v')=8;
+      WHERE n.nspname='mirror_ai' AND c.relkind='v' AND c.relname<>'ledger_cashflows')=8;
   ")" || die "v17 基线检查失败 —— 已中止发布"
   [[ "$BASELINE_READY" == "t" ]] || die "数据库缺少本次发布要求的 v17 结构；核对 docs/REFERENCE.md 的历史迁移与发布前提，再发布"
 
@@ -161,6 +164,11 @@ if [[ -f "$MIGRATION" || -f "$RECORD_CATEGORY_MIGRATION" || -f "$RECORD_SELECTIV
   psql "$PG_URI" -U "$DB_USER_V" --single-transaction -v ON_ERROR_STOP=1 -q -f "$RECORD_SELECTIVE_INDEX_MIGRATION" >/dev/null \
     || die "选择性索引 v18 迁移失败 —— 已中止发布，代码未切换、服务未重启"
   log "选择性索引已同步：$RECORD_SELECTIVE_INDEX_MIGRATION（保留旧数据授权、向量与版本）"
+  for ledger_migration in "$LEDGER_MIGRATION" "$LEDGER_PLANNING_MIGRATION"; do
+    psql "$PG_URI" -U "$DB_USER_V" --single-transaction -v ON_ERROR_STOP=1 -q -f "$ledger_migration" >/dev/null \
+      || die "记账迁移失败 —— 已中止发布"
+    log "记账已同步：$ledger_migration"
+  done
 else
   log "跳过迁移（未找到 $MIGRATION）"
 fi

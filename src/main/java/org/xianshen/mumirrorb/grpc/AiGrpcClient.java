@@ -14,6 +14,8 @@ import org.xianshen.mumirrorb.config.RecordContextProperties;
 import org.xianshen.mumirrorb.grpc.gen.CommonProto;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingProto;
 import org.xianshen.mumirrorb.grpc.gen.EmbeddingServiceGrpc;
+import org.xianshen.mumirrorb.grpc.gen.LedgerProto;
+import org.xianshen.mumirrorb.grpc.gen.LedgerVisionGrpc;
 import org.xianshen.mumirrorb.grpc.gen.MirrorChatGrpc;
 import org.xianshen.mumirrorb.grpc.gen.MirrorChatProto;
 import org.xianshen.mumirrorb.grpc.gen.MirrorProfileGrpc;
@@ -81,6 +83,14 @@ public class AiGrpcClient {
     private EmbeddingServiceGrpc.EmbeddingServiceBlockingStub embedStub;
     private MirrorProfileGrpc.MirrorProfileBlockingStub profileStub;
     private MirrorChatGrpc.MirrorChatBlockingStub chatStub;
+
+    public LedgerProto.LedgerImageResponse recognizeLedgerReceipt(UUID owner, byte[] image, String mime,
+                                                                  java.time.LocalDate today) {
+        var request = LedgerProto.LedgerImageRequest.newBuilder()
+                .setImage(com.google.protobuf.ByteString.copyFrom(image))
+                .setMimeType(mime).setToday(today.toString()).setLlmConfig(buildLlmConfig(owner)).build();
+        return LedgerVisionGrpc.newBlockingStub(channel).withDeadlineAfter(35, TimeUnit.SECONDS).recognize(request);
+    }
 
     /** Summarizes only the supplied user's messages; validation of source ids happens again in Java. */
     public MirrorChatProto.SummarizeDayResponse summarizeDay(UUID userId, java.time.LocalDate sourceDate,

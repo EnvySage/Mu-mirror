@@ -211,11 +211,27 @@ final class MirrorRolling {
             }
         }
 
+        appendLedgerFacts(userId, month, facts, sourceRefs);
         return new RollingContext(previous.text(), correctionIndex, lookback, records.toString(), facts.toString(), truncated,
                 List.copyOf(sourceRefs));
     }
 
 
+    private void appendLedgerFacts(UUID userId, YearMonth month, StringBuilder facts, Set<SnapshotSourceRef> sources) {
+        if (owner.ledgerQueries == null) return;
+        LocalDate end = month == null ? LocalDate.now(owner.ZONE) : month.atEndOfMonth();
+        LocalDate start = month == null ? end.minusDays(29) : month.atDay(1);
+        var brief = owner.ledgerQueries.brief(userId, start, end);
+        if (brief.flowCount() == 0 && brief.categories().isEmpty()) return;
+        facts.append("\n已确认账目（").append(start).append(" 至 ").append(end).append("，人民币）：")
+                .append("付出 ").append(brief.expense().toPlainString())
+                .append("，收入 ").append(brief.income().toPlainString())
+                .append("，收回款 ").append(brief.recovery().toPlainString())
+                .append("，归属期净消费 ").append(brief.netExpense().toPlainString()).append("。\n");
+        brief.categories().stream().limit(12).forEach(category -> facts.append("- ")
+                .append(category.name()).append("净消费 ").append(category.netExpense().toPlainString()).append("\n"));
+        for (long id : owner.ledgerQueries.sourceIds(userId, start, end)) owner.addSource(sources, "ledger", id, "stats");
+    }
 
     /**
      * ① 上期镜子全文（递归链压缩）：

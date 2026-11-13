@@ -17,7 +17,7 @@ import java.util.UUID;
 @Service
 public class SnapshotLineageService {
 
-    private static final Set<String> SOURCE_KINDS = Set.of("record", "chunk");
+    private static final Set<String> SOURCE_KINDS = Set.of("record", "chunk", "ledger");
 
     private final ProfileSnapshotMapper profileSnapshotMapper;
     private final SnapshotInputMapper snapshotInputMapper;
@@ -45,7 +45,7 @@ public class SnapshotLineageService {
     @Transactional
     public void invalidateSource(UUID userId, String inputKind, Long inputId, String reason) {
         if (userId == null || inputId == null || inputKind == null || !SOURCE_KINDS.contains(inputKind)) {
-            throw new IllegalArgumentException("A user and a record or chunk source are required");
+            throw new IllegalArgumentException("A user and a supported source are required");
         }
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("An invalidation reason is required");
@@ -53,7 +53,7 @@ public class SnapshotLineageService {
 
         lockUserLineage(userId);
         profileSnapshotMapper.invalidateTrackedFromSource(userId, inputKind, inputId, reason);
-        profileSnapshotMapper.invalidateUntrackedForUser(userId);
+        if (!"ledger".equals(inputKind)) profileSnapshotMapper.invalidateUntrackedForUser(userId);
     }
 
     /** Invalidate snapshots derived from forgotten chat messages and conservatively retire legacy snapshots. */

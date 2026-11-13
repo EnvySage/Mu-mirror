@@ -97,3 +97,14 @@
 先迁移并部署兼容代码，再按跨端验收结果开启 `record-memory.selective-index-enabled`（`MIRROR_RECORD_SELECTIVE_INDEX_ENABLED`，初始false）。回退使用本次兼容代码关闭开关，关闭只影响未来候选；已持久化版本1仍按新规则可读。不能直接回退到不认识版本1的旧二进制，也不删除原始日记、授权或历史向量作为回退步骤。发布脚本自动切回上一产物前，须确保该上一产物也已支持版本1；首次引入兼容代码时保持开关关闭。
 
 隔离数据库测试需显式设置 `MIRROR_TEST_DB_URL`、`MIRROR_TEST_DB_USERNAME`、`MIRROR_TEST_DB_PASSWORD`，运行 `mvn "-Dtest=RecordSelectiveIndexingDatabaseTest" test`。数据库须预装pgvector；reader用例要求预置且可 `SET ROLE` 的 `mirror_ai_reader`，不创建或修改集群角色。测试仅在随机 `test_selective_*` / 对应视图schema建对象，读取 `deploy/agent-reader-role.sql` 的精确SELECT授权子句后映射到测试视图，检查完整夹具中每张基础表均无SELECT且全部可SELECT关系恰为该8视图；全部在事务结束回滚，不会改真实 `mirror_ai`。完整角色收紧脚本另在隔离部署验证中执行。未设置DSN时数据库用例跳过，不能视为迁移或权限验收通过。
+
+
+## 记账与愿望接口（2026-11-13）
+
+`/api/ledger/categories` 读取/创建分类；`records` 按 start/end/q/limit 查询并创建账目，`records/{id}` 查改删，`records/{id}/flows` 追加当天流水。流水性质为 EXPENSE、INCOME、RECOVERY，上海自然日校验，历史流水只读。RECOVERY 冲减原消费归属期，现金流仍按实际到账日展示。
+
+`brief` 汇总已确认账目，`export?format=csv|json` 按发生日导出，`recognize` 接收 vaultItemId 返回可编辑候选。`diaries/{diaryId}/records` GET/PUT 双向关联。`wishes` 支持普通/周期愿望，金额可调、规则固定，`wish-events` 查询达成快照；`recurring` 创建周期规则，`recurring/due/{id}/confirm|skip` 决定本期候选，确认才入账。
+
+AI 发起写入使用 `ledger.create` 操作卡，legacy 查询用 `query_ledger`，graph_v2 用 ledger_summary/list_ledger_flows。截图协议为 `mirror.LedgerVision/Recognize`。Java 保留当日和用户归属校验，重复确认只落一份账目。模板随记明确采用 index_policy_version=1、READY、已授权及 embedding_enabled=false，直接可查询；含用户正文时沿用现有记录审核和独立索引选择。
+
+迁移顺序现为 v18 → v19-ledger → v20-ledger-planning，schema.sql 同步最终结构。发布脚本先备份再原子重放迁移，reader 增加 ledger_cashflows 视图读取权限。当前选择性索引二进制兼容边界继续适用，回退时保留新增表。

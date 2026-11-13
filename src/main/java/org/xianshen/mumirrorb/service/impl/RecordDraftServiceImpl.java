@@ -30,6 +30,8 @@ public class RecordDraftServiceImpl implements RecordDraftService {
             new org.xianshen.mumirrorb.config.RecordMemoryProperties();
     @org.springframework.beans.factory.annotation.Autowired
     private org.xianshen.mumirrorb.service.TodoRegistryService todoRegistryService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.xianshen.mumirrorb.ledger.LedgerDiaryContext ledgerDiaryContext;
 
     @Override
     public RecordDraftDTO prepare(UUID userId, RecordDraftDTO input) {
@@ -63,10 +65,12 @@ public class RecordDraftServiceImpl implements RecordDraftService {
         draft.setMode("AI_ASSISTED");
         try {
             String referenceDate = LocalDate.now(RECORD_ZONE).toString();
+            String context = ledgerDiaryContext == null ? raw
+                    : ledgerDiaryContext.withLinkedFacts(userId, input.getSourceRecordId(), raw);
             boolean selective = draft.getIndexPolicyVersion() == 1;
             RecordProcessorProto.ClassifyResponse response = selective
-                    ? aiGrpcClient.classify(userId, raw, true, referenceDate)
-                    : aiGrpcClient.classifySingle(userId, raw, null, referenceDate);
+                    ? aiGrpcClient.classify(userId, context, true, referenceDate)
+                    : aiGrpcClient.classifySingle(userId, context, null, referenceDate);
             if (response.getSkip() || response.getItemsCount() == 0)
                 throw new IllegalStateException(response.getSkipReason().isBlank() ? "分类未返回候选" : response.getSkipReason());
             List<RecordDraftDTO.Segment> segments = new ArrayList<>();

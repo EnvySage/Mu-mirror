@@ -71,6 +71,10 @@ GRANT SELECT ON
     mirror_ai.todos
 TO :"reader_role";
 
+SELECT 'GRANT SELECT ON mirror_ai.ledger_cashflows TO ' || quote_ident(:'reader_role')
+WHERE to_regclass('mirror_ai.ledger_cashflows') IS NOT NULL
+\gexec
+
 SELECT
     current_database() AS database_name,
     :'reader_role' AS reader_role,

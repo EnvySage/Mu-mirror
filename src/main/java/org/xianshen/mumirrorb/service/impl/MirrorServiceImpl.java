@@ -90,6 +90,9 @@ public class MirrorServiceImpl implements MirrorService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     protected org.xianshen.mumirrorb.achievement.AchievementActivity achievementActivity;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    protected org.xianshen.mumirrorb.ledger.LedgerQueries ledgerQueries;
+
     @Override
     @Transactional(readOnly = true)
     public MirrorProfileVO getMirror(UUID userId) {
