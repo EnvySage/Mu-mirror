@@ -26,6 +26,7 @@ public class UsageClientInterceptor implements ClientInterceptor {
     public void remember(UUID user,CommonProto.LlmConfig config,UUID profile) {
         snapshots.remember(user,config,store.snapshot(user,config,profile));
     }
+    public void finishTask(UUID user,UUID task) {store.finishTask(user,task);}
     @Override public <Q,A> ClientCall<Q,A> interceptCall(MethodDescriptor<Q,A> method,CallOptions options,Channel channel) {
         ClientCall<Q,A> delegate=channel.newCall(method,options);
         UUID user=options.getOption(OWNER);

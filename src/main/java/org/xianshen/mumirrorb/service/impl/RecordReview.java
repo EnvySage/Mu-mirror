@@ -105,6 +105,10 @@ final class RecordReview {
 
         String referenceDate = TimeSubstitutionApplier.referenceDateOf(record.getCreatedAt());
         java.util.List<Long> revokedMemoryChunkIds = new java.util.ArrayList<>();
+        var parentUsage = org.xianshen.mumirrorb.usage.UsageTaskScope.current(userId);
+        UUID usageTaskId = parentUsage == null ? UUID.randomUUID() : parentUsage.task();
+        try (var usageScope = org.xianshen.mumirrorb.usage.UsageTaskScope.open(userId, usageTaskId,
+                parentUsage == null ? "record_analysis" : parentUsage.scene())) {
         for (Chunk chunk : chunks) {
             boolean approveMemory = approvedIds.contains(chunk.getId());
             boolean approveTodo = approvedTodoIds.contains(chunk.getId());
@@ -172,6 +176,9 @@ final class RecordReview {
                 }
             }
             if (!approveMemory || !chunk.getEmbeddingEnabled()) owner.chunkMapper.clearEmbedding(chunk.getId(), userId);
+        }
+        } finally {
+            if (parentUsage == null) owner.aiGrpcClient.finishUsageTask(userId, usageTaskId);
         }
 
         int generation = record.getProcessingVersion() == null ? 0 : record.getProcessingVersion();

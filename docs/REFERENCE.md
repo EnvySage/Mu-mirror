@@ -10,17 +10,19 @@
 | `GET /ai-usage/tasks` | `limit` 缺省 30、上限 100；`before` 是不透明游标；`period=today/month/all` 缺省 all，保留最近任务轮询；成对 `from/to` 覆盖 period，上海日/月边界及非法参数校验与 summary 一致；支持 `scene/provider/model`。返回 `{items,nextCursor}`，按 updatedAt/id 倒序稳定分页 |
 | `GET /ai-usage/tasks/{id}` | 任务聚合与安全 `attempts`、`invocations` 明细；非本人或不存在返回 code 404，无归属信息 |
 
-任务字段：`id,scene,label,provider,model,status,startedAt,completedAt,updatedAt,inputTokens,outputTokens,totalTokens,requestCount,unknownCount,incompleteCount,activeCount,credits`。status 为 running/complete/partial/error/cancelled。已确认 attempt 用量不足时计入 unknownCount；未完整报告的 invocation 计入 incompleteCount；pending 计入 activeCount，三者不伪装成物理请求数。实际请求数只来自 attempt。所有 Token 累计是已知下界；只有接口明确提供的零才是已知零。
+任务字段：`id,scene,label,provider,model,status,startedAt,completedAt,updatedAt,inputTokens,outputTokens,totalTokens,requestCount,unknownCount,incompleteCount,activeCount,credits`。status 为 running/complete/partial/error/cancelled，描述用量归集状态，不宣称业务写入成功。已确认 attempt 用量不足时计入 unknownCount；未完整报告的 invocation 计入 incompleteCount；pending 计入 activeCount，三者不伪装成物理请求数。实际请求数只来自 attempt。Token 累计是已知下界：每个 attempt 优先使用已返回 total；total 缺失时只加已知 input/output，原始 attempt.totalTokens 仍保持 null，unknownCount 不被清除。缓存/思考细项不重复加入总量；只有接口明确提供的零才是已知零。
 
-credits 为 `{channelKey,channelName,unit,amount}` 数组，amount 始终是十进制字符串，不混合渠道或单位，不换算人民币。渠道 key 由调用时模型档案标识和规范化入口摘要组成，显示名只含当时档案名/入口 host；不会保存 URL 用户信息、query、密钥或原文。档案标识与配置在同一次设置读取时绑定，通过弱身份引用传递至 RPC，即使两个档案配置值相同也不会串档。历史快照不依赖后续模型档案是否被修改或删除。日期按 invocation 开始时间和 Asia/Shanghai 日/月边界筛选；`since` 为该用户最早用量凭据时间，未记录返回 null。model/provider 匹配请求快照或实际返回名称。
+credits 为 `{channelKey,channelName,unit,amount}` 数组，amount 始终是十进制字符串，不混合渠道或单位，不换算人民币。渠道 key 由调用时模型档案标识和规范化入口摘要组成，显示名只含当时档案名/入口 host；不会保存 URL 用户信息、query、密钥或原文。档案标识与配置在同一次设置读取时绑定，通过弱身份引用传递至 RPC，即使两个档案配置值相同也不会串档。已保存档案的草稿连接测试先验证归属，再显式绑定该档案 ID；未保存草稿保持无档案，普通连接测试保留当时生效档案。历史快照不依赖后续模型档案是否被修改或删除。日期按 invocation 开始时间和 Asia/Shanghai 日/月边界筛选；`since` 为该用户最早用量凭据时间，未记录返回 null。model/provider 匹配请求快照或实际返回名称。
 
-持久表为 `ai_usage_tasks`、`ai_usage_invocations`、`ai_usage_attempts`，升级执行 `migration-v21-ai-usage.sql`，新库基线已同步。回执独立事务、单次本地补录，写入失败不改变 AI 业务响应；20 分钟过期 pending 显式转 incomplete。协议与边界见 [shared-protocol](shared-protocol.md)。
+持久表为 `ai_usage_tasks`、`ai_usage_invocations`、`ai_usage_attempts`，升级执行 `migration-v21-ai-usage.sql`，新库基线已同步。回执独立事务、单次本地补录，写入失败不改变 AI 业务响应；20 分钟过期 pending 显式转 incomplete。崩溃后未收口的任务若所有 RPC 已结束、且空闲超过 20 分钟，则按最后已观察 RPC 完成时间收口，保持已有回执和 coverage，不伪造未知消费。一次记录确认内多个片段补分类共用一个 record_analysis 任务，分类阶段 finally 收口；已有父作用域则沿用并由父任务收口，业务回滚不撤销回执。协议与边界见 [shared-protocol](shared-protocol.md)。
 
 `UsageReportTest` 覆盖类型、版本、截断、未知与精确小数；`UsageDatabaseTest` 使用真实 PostgreSQL 和本地 gRPC 覆盖业务回滚、幂等、用户隔离、上海日界、游标、聊天归集及三客户端/后台入口。数据库需 `MIRROR_TEST_DB_URL/USERNAME/PASSWORD`，库名必须以 `codex_assistant_growth_test_` 开头；每次使用随机 usage_fixture schema，结束只清理该 schema。未设置数据库变量会跳过数据库测试，不能当作通过。
 
 完整测试同时需要在该安全库预装 `schema.sql`，并令 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 指向同库，给应用上下文提供测试 `JWT_SECRET`。用量定向命令为 `mvnw.cmd "-Dtest=UsageReportTest,UsageDatabaseTest,UsageGrpcDatabaseTest" test`；`UsageGrpcDatabaseTest` 通过真实本地 gRPC 校验 metadata、模型档案弱身份绑定、流结束落库及 Embedding 排除。现有发布前提测试在 Windows 优先查找 D 盘或 Program Files 下的 Git Bash，避免 System32 的 WSL 启动器改变命令语义。
 
 `UsagePeriodsDatabaseTest` 用真实回执库和 MockMvc 同时验证 tasks/summary 的 today、month、all、自定义范围覆盖、范围内游标分页和非法周期拒绝；最近轮询未传 period 的行为保持 all。全量账本计划测试还需 `MIRROR_LEDGER_PLANNING_TEST_DB_URL/USERNAME/PASSWORD`，其中 URL 必须指向独立的 `mirror_ledger_planning_test`；不要将它指向业务库。
+
+`UsageRecordReviewDatabaseTest` 使用当前 records/chunks DDL、真实 MyBatis/gRPC 和事务验证两片段一任务、业务回滚仍保留回执；`UsageModelProfilesDatabaseTest` 使用真实档案归属查询和 gRPC 验证同入口不同档案、未保存草稿和普通探针快照。`src/test/resources/usage/ai-usage-name-contract.json` 是 AI 同步的无密钥夹具，解析测试接受方括号/未知模型名，两个 attempt 精确累计 100 Token，测试不依赖另一仓 checkout。
 
 
 

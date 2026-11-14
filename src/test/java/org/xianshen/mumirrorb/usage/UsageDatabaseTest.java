@@ -68,5 +68,48 @@ class UsageDatabaseTest extends UsageDatabaseFixture {
         assertEquals(0L,((Number)summary(null,null).get("incompleteCount")).longValue());
         assertEquals(0L,((Number)summary(null,null).get("requestCount")).longValue());
     }
+    @Test void idleUnsealedTaskAfterCrashUsesLastRpcCompletionWithoutChangingKnownReceipts() {
+        UUID task=UUID.randomUUID();
+        var first=envelope(task,false,"a","2026-11-14T01:00:00Z");
+        var last=envelope(task,false,"a","2026-11-14T01:01:00Z");
+        for(var e:List.of(first,last)) {
+            store.begin(e);store.complete(e,report(e.id(),UUID.randomUUID().toString(),"50","\"0.1\"",true),"success");
+        }
+        db.update("UPDATE ai_usage_invocations SET completed_at=? WHERE id=?",OffsetDateTime.parse("2026-11-14T01:00:30Z"),first.id());
+        db.update("UPDATE ai_usage_invocations SET completed_at=? WHERE id=?",OffsetDateTime.parse("2026-11-14T01:01:30Z"),last.id());
+        db.update("UPDATE ai_usage_tasks SET updated_at=now()-interval '21 minutes' WHERE id=?",task);
+        var fresh=envelope(UUID.randomUUID(),false,"a",OffsetDateTime.now().toString());
+        store.begin(fresh);store.complete(fresh,new UsageReport(true,List.of()),"success");
+        store.expirePending();
+        var detail=queries.detail(user,task);
+        assertEquals("complete",detail.get("status"));
+        assertEquals("2026-11-14T01:01:30Z",detail.get("completedAt"));
+        assertEquals("running",queries.detail(user,fresh.taskId()).get("status"),"active phase gap must not be sealed early");
+        assertEquals(100L,((Number)detail.get("totalTokens")).longValue());
+        assertEquals(2L,((Number)detail.get("requestCount")).longValue());
+        assertEquals(0L,((Number)detail.get("unknownCount")).longValue());
+        assertEquals(0L,((Number)detail.get("incompleteCount")).longValue());
+        assertEquals(List.of("complete","complete"),db.queryForList("SELECT coverage FROM ai_usage_invocations WHERE task_id=? ORDER BY started_at",String.class,task));
+    }
+    @Test void partialInputAndOutputContributeKnownLowerBoundsWithoutRepeatingCacheOrReasoning() {
+        var e=envelope(UUID.randomUUID(),true,"a",OffsetDateTime.now().toString());
+        String payload="{\"version\":1,\"invocation_id\":\""+e.id()+"\",\"complete\":true,\"attempts\":["
+                +"{\"id\":\""+UUID.randomUUID()+"\",\"status\":\"error\",\"provider\":\"deepseek\",\"model\":\"deepseek\",\"input_tokens\":34,\"output_tokens\":null,\"total_tokens\":null,\"cache_read_tokens\":12,\"reasoning_tokens\":10,\"usage_state\":\"partial\"}]}";
+        var observed=new UsageReport.Parser(new ObjectMapper()).parse(payload.getBytes(StandardCharsets.UTF_8),e.id());
+        store.begin(e);store.complete(e,observed,"error");
+        var summary=summary(null,null);var task=queries.detail(user,e.taskId());
+        for(var aggregate:List.of(summary,task)) {
+            assertEquals(34L,((Number)aggregate.get("inputTokens")).longValue());
+            assertEquals(34L,((Number)aggregate.get("totalTokens")).longValue());
+            assertEquals(1L,((Number)aggregate.get("unknownCount")).longValue());
+        }
+        var raw=(Map<String,Object>)((List<?>)task.get("attempts")).get(0);
+        assertNull(raw.get("totalTokens"));assertNull(raw.get("outputTokens"));
+        var later=envelope(UUID.randomUUID(),true,"a",OffsetDateTime.now().toString());
+        payload="{\"version\":1,\"invocation_id\":\""+later.id()+"\",\"complete\":true,\"attempts\":["
+                +"{\"id\":\""+UUID.randomUUID()+"\",\"status\":\"success\",\"provider\":\"deepseek\",\"model\":\"deepseek\",\"input_tokens\":34,\"output_tokens\":16,\"total_tokens\":50,\"cache_read_tokens\":12,\"reasoning_tokens\":10,\"usage_state\":\"complete\"}]}";
+        store.begin(later);store.complete(later,new UsageReport.Parser(new ObjectMapper()).parse(payload.getBytes(StandardCharsets.UTF_8),later.id()),"success");
+        assertEquals(84L,((Number)summary(null,null).get("totalTokens")).longValue(),"explicit total wins over input/output; cache/reasoning remain details");
+    }
 }
 

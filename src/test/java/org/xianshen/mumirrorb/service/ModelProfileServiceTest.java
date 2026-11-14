@@ -49,6 +49,9 @@ class ModelProfileServiceTest {
         when(ai.testLlmConnection(eq(user), any(CommonProto.LlmConfig.class)))
                 .thenReturn(RecordProcessorProto.ClassifyResponse.newBuilder().addItems(
                         RecordProcessorProto.ClassifyItem.newBuilder().setTitle("test")).build());
+        when(ai.testLlmConnection(eq(user), any(CommonProto.LlmConfig.class), eq(saved.getId())))
+                .thenReturn(RecordProcessorProto.ClassifyResponse.newBuilder().addItems(
+                        RecordProcessorProto.ClassifyItem.newBuilder().setTitle("test")).build());
     }
 
     ModelProfileDTO form() {
@@ -100,7 +103,7 @@ class ModelProfileServiceTest {
         var dto = draft(); dto.setProfileId(saved.getId()); dto.setAiApiKey("");
         assertTrue(service.testDraft(user, dto).contains("连接正常"));
         var capture = ArgumentCaptor.forClass(CommonProto.LlmConfig.class);
-        verify(ai).testLlmConnection(eq(user), capture.capture());
+        verify(ai).testLlmConnection(eq(user), capture.capture(), eq(saved.getId()));
         assertEquals("draft-model", capture.getValue().getModel());
         assertEquals("draft-provider", capture.getValue().getProvider());
         assertEquals("https://draft.test/v1", capture.getValue().getBaseUrl());

@@ -49,7 +49,8 @@ public class UsageQueries {
             ), counted AS (SELECT i.*,a.* FROM selected i LEFT JOIN LATERAL (
               SELECT count(*) AS requests,count(*) FILTER(WHERE usage_state<>'complete') AS unknowns,
               COALESCE(sum(input_tokens),0) AS inputs,COALESCE(sum(output_tokens),0) AS outputs,
-              COALESCE(sum(total_tokens),0) AS tokens FROM ai_usage_attempts a WHERE a.invocation_id=i.id
+              COALESCE(sum(COALESCE(total_tokens,COALESCE(input_tokens,0)+COALESCE(output_tokens,0))),0) AS tokens
+              FROM ai_usage_attempts a WHERE a.invocation_id=i.id
             ) a ON true)
             """,args);
     }

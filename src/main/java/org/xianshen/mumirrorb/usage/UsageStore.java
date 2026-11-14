@@ -113,6 +113,15 @@ public class UsageStore {
                 UUID task=(UUID)row.get("task_id"),user=(UUID)row.get("user_id");
                 db.update("UPDATE ai_usage_tasks SET sealed=true WHERE id=? AND user_id=?",task,user);refresh(user,task);
             }
+            // A worker may die after its final RPC receipt but before closing the grouping scope.
+            // Seal only idle groups; their complete receipts remain complete and no charge is invented.
+            db.update("""
+                UPDATE ai_usage_tasks t SET sealed=true,completed_at=COALESCE(
+                  (SELECT max(i.completed_at) FROM ai_usage_invocations i WHERE i.task_id=t.id AND i.user_id=t.user_id),
+                  t.updated_at),updated_at=now()
+                WHERE NOT t.sealed AND t.updated_at < now()-interval '20 minutes'
+                  AND NOT EXISTS(SELECT 1 FROM ai_usage_invocations p WHERE p.task_id=t.id AND p.status='pending')
+                """);
         });
     }
     private void safely(UUID id,Runnable write) {

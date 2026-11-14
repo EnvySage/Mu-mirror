@@ -117,7 +117,8 @@ public class ModelProfileService {
                 .setApiKey(key.trim()).build();
         org.xianshen.mumirrorb.grpc.gen.RecordProcessorProto.ClassifyResponse result;
         try {
-            result = ai.testLlmConnection(userId, config);
+            result = profile == null ? ai.testLlmConnection(userId, config)
+                    : ai.testLlmConnection(userId, config, profile.getId());
         } catch (Exception e) {
             // Provider/gRPC errors may contain authorization headers or the submitted key.
             throw new BusinessException(ResultCode.INTERNAL_ERROR,

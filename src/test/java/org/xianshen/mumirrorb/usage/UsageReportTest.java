@@ -57,4 +57,14 @@ class UsageReportTest {
         root=root.replace("4294967297","1")+" {}";
         assertFalse(parser.parse(root.getBytes(StandardCharsets.UTF_8),invocation).complete());
     }
+    @Test void sharedAiFixtureAcceptsBracketedAndUnknownNamesWithExactKnownTotals() throws Exception {
+        UUID id=UUID.fromString("0b59b70e-9bc2-4d21-97b2-ef062d8c5e8d");
+        byte[] bytes=new org.springframework.core.io.ClassPathResource("usage/ai-usage-name-contract.json").getContentAsByteArray();
+        var report=parser.parse(bytes,id);
+        assertTrue(report.complete());assertEquals(2,report.attempts().size());
+        assertEquals(100L,report.attempts().stream().mapToLong(UsageReport.Attempt::totalTokens).sum());
+        assertEquals("[体验]deepseek-v4.1-flash",report.attempts().get(0).model());
+        assertEquals("unknown",report.attempts().get(1).provider());
+        assertEquals("[体验]custom/model?mode=fast",report.attempts().get(1).model());
+    }
 }

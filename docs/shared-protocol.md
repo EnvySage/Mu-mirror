@@ -60,3 +60,5 @@ Java 校验版本、对应 invocation、规范 UUID、重复 attempt、字段类
 完整空 attempts 表示没有实际上游请求；缺失、损坏或旧 AI 无 trailer 则是未完整回传的 invocation，不伪造一次 attempt 或零消费。Java 独立事务预录待完成 envelope，结束后幂等保存 `(invocation_id,attempt_id)`，业务回滚不撤销用量。聊天 legacy 规划/回答共用 run UUID，graph_v2/shadow 各用自己的 run UUID；后台入口显式绑定 owner，不依赖 HTTP 登录线程。超过 20 分钟的 pending invocation 自动标记 incomplete。只保存脱敏模型/渠道快照、数值与状态，不保存密钥、原文、图片或原始报告。
 
 配套 REST `/ai-usage/tasks` 接受与 summary 相同的显式 `period=today/month/all`，使用 Asia/Shanghai 自然日/月筛选；成对 from/to 覆盖 period。列表未传 period 时缺省 all，供最近任务轮询；summary 继续缺省 today。游标后续页须携带原筛选参数，返回字段形状不变。
+
+回执 model/provider 是有界安全文本，允许 `[体验]deepseek-v4.1-flash` 和未知 `[体验]custom/model?mode=fast` 等真实名称；不把名称中的方括号或查询样式文本当作凭证或任意元数据。Java 测试夹具 `src/test/resources/usage/ai-usage-name-contract.json` 与 AI `tests/fixtures/ai-usage-name-contract.json` 同步，两个已知 attempt 累计 100 Token。汇总优先 total_tokens；缺失时只用已知 input/output 计算下界，原始 total 仍为 null，不加入 cache/reasoning 细项。任务完成只表示用量分组已收口，业务写入是否成功仍由原业务接口判定。

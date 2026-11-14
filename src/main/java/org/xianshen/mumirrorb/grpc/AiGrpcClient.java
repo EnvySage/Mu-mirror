@@ -95,6 +95,10 @@ public class AiGrpcClient {
                 .withOption(org.xianshen.mumirrorb.usage.UsageClientInterceptor.SCENE,scene);
     }
 
+    public void finishUsageTask(UUID user,UUID task) {
+        if(usageInterceptor!=null)usageInterceptor.finishTask(user,task);
+    }
+
     public LedgerProto.LedgerImageResponse recognizeLedgerReceipt(UUID owner, byte[] image, String mime,
                                                                   java.time.LocalDate today) {
         var request = LedgerProto.LedgerImageRequest.newBuilder()
@@ -294,6 +298,12 @@ public class AiGrpcClient {
      */
     public RecordProcessorProto.ClassifyResponse testLlmConnection(UUID userId) {
         return testLlmConnection(userId, buildLlmConfig(userId));
+    }
+
+    /** The service has already checked that this saved profile belongs to the caller. */
+    public RecordProcessorProto.ClassifyResponse testLlmConnection(UUID userId,CommonProto.LlmConfig config,UUID profileId) {
+        if(usageInterceptor!=null)usageInterceptor.remember(userId,config,profileId);
+        return testLlmConnection(userId,config);
     }
 
     /** Tests an explicit draft without reading or changing the user's active model. */
