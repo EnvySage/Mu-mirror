@@ -35,3 +35,4 @@
 | `archive/2026-*` | 早期设计与旧总体设计 |
 
 - 2026-11-12：完成成就剩余三批（96 普通、24 镀层）；[实施计划](archive/plans/2026-11-12-achievement-implementation.md)归档。当前状态仅见 PROGRESS.md。
+- 2026-11-14：完成 AI 用量桌宠第一版本机验收；[设计](archive/specs/2026-11-14-ai-usage-desktop-pet-design.md)与[实施计划](archive/plans/2026-11-14-ai-usage-desktop-pet.md)归档。当前状态见 PROGRESS，升级与回退见 ai-usage-pet-operations.md。

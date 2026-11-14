@@ -20,8 +20,8 @@
 | [tarot-operations](tarot-operations.md) | 塔罗发布、迁移与回退 |
 | [model-profiles](model-profiles.md) | 模型档案 V15 接口与行为 |
 | [AI 用量与桌宠运维](ai-usage-pet-operations.md) | 用量口径、桌面入口、V21 升级与回退 |
-| [AI 用量桌宠设计](superpowers/specs/2026-11-14-ai-usage-desktop-pet-design.md) | 第一版实施中：桌面半身角色、调用用量回传及累计统计 |
-| [AI 用量桌宠实施计划](superpowers/plans/2026-11-14-ai-usage-desktop-pet.md) | 三端契约、实现分工、阶段存档与验收 |
+| [AI 用量桌宠设计归档](archive/specs/2026-11-14-ai-usage-desktop-pet-design.md) | 第一版已完成的需求与交互设计 |
+| [AI 用量桌宠实施归档](archive/plans/2026-11-14-ai-usage-desktop-pet.md) | 三端契约、阶段存档与验收；当前状态见 PROGRESS |
 | [record-category-migration](record-category-migration.md) | plan→todo 分类迁移 |
 | [record-memory-tiering-plan](record-memory-tiering-plan.md) | 选择性索引行为契约：已授权日常可查询但不建向量，索引状态与授权、成长、待办分离 |
 | [选择性索引实施归档](archive/plans/2026-11-12-record-selective-indexing.md) | 已完成实施步骤与历史验收；当前状态见 PROGRESS |

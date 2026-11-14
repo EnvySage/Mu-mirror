@@ -7,13 +7,17 @@
 
 ---
 
-## AI 用量与桌宠（2026-11-14，本机联调中）
+## AI 用量与桌宠（2026-11-14，本机第一版验收完成）
 
 V21 新增 `ai_usage_tasks` / `ai_usage_invocations` / `ai_usage_attempts`，同步新库 schema。三个 gRPC 客户端的全部非 Embedding 入口绑定可信 owner、场景、模型/渠道快照；legacy 聊天规划与回答共用 run UUID，graph_v2 和 shadow 分开归集，后台和模型连接测试也统计。回执独立事务、幂等保存，缺失 trailer 不伪造物理请求；过期 pending 显式转统计不完整。当前用户汇总、游标分页任务和安全明细 API 已实现，积分按渠道/单位用 NUMERIC 精确累加，周期按上海日期。
 
 审查修正已补齐：记录确认的多个片段补分类共用一个任务，业务回滚仍保留两次实际回执；崩溃后所有 RPC 已结束的未收口任务在空闲 20 分钟后按最后 RPC 完成时间收口，不改写已知覆盖率。保存档案的草稿连接测试先核对归属，再显式绑定该档案；未保存草稿保持无档案。部分回执缺少 total 时，汇总计入已知 input/output 下界，原始 total 保持 null，缓存和思考细项不重复加总。任务 complete 只表示用量已归集，不宣称业务操作成功。
 
-隔离验证库为 `codex_assistant_growth_test_usage_20261114`，V21 连续执行两次通过；`codex_assistant_growth_test_usage_fresh_20261114` 从完整 schema 新建通过。本后端子任务只操作测试库；根任务已另行备份 debug 库并应用 V21，原 `mu_mirror` 未改。服务重启、三端联调与真实上游模型用量验收由根任务继续，不能把隔离测试描述成上线完成。
+隔离验证库为 `codex_assistant_growth_test_usage_20261114`，V21 连续执行两次通过；`codex_assistant_growth_test_usage_fresh_20261114` 从完整 schema 新建通过。根任务另行备份并升级本机 `mu_mirror_debug_20261114`，原 `mu_mirror` 未改。匹配三端已启动并完成真实模型/API/浏览器验收；这不代表另一机器或生产已升级。
+
+八角色半身透明图集各含八种表情；桌面端自动跟随厂商或手动固定，未知回退 DeepSeek。桌宠支持本地互动、拖拽、用量面板及账本/模型设置快捷路由。移动及宽触屏不挂载桌宠。临时弹窗关闭后恢复未读提醒，真正离线仍重建通知基线；账号切换及旧轮询有 generation 门禁。
+
+最终验证：AI 全量 878 通过、无跳过，根任务复核 61 项用量专项；前端 119 项通过、构建及浏览器夹具通过。根任务使用用户授权的本机模型完成同步探针与流式聊天，首轮 3 次请求/2 项任务/8428 Token 的唯一回执与汇总一致；真实浏览器追加调用后累计 13593 Token、5 次请求、4 项任务，未知与不完整均为 0。账号隔离、本地互动零新增调用、八角色、厂商筛选、路由与手机隐藏通过，页面错误 0。真实积分平台未提供，积分分支使用契约夹具验证。证据在三仓外 `own/backups/usage-pet-v1-20261114/verification/`，失败轮次与最终通过均保留；运维见 `ai-usage-pet-operations.md`。
 
 后端全量 `mvnw.cmd -q test` 最新退出 0：674 项全部通过，0 失败/错误/跳过；根任务准备独立 `mirror_ledger_planning_test` 后，此前跳过的 3 项账本用例也已执行通过。用量专项 21 项全部通过，包含真实 PostgreSQL、本地 gRPC、全部非 Embedding 客户端入口、相同配置不同档案的并发归属、记录多片段归集与回滚、崩溃收口、部分 Token 下界及共享模型名夹具，以及 `/tasks` 与 summary 相同的上海周期/日期筛选、范围内分页、非法参数和归属隔离。任务列表未传 period 仍缺省 all，供最近任务轮询。Windows 发布前提测试优先使用已安装的 Git Bash，避免误调系统 WSL 启动器。最新证据在 `.verify/ai-usage/usage-reviewed-full-suite.log`；测试用数据库与应用上下文均显式指向上述安全库。
 

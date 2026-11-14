@@ -1,6 +1,8 @@
 # AI Usage Desktop Pet Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. User explicitly authorized autonomous execution and checkpoint commits; do not ask for another plan approval. Independent repositories may be delegated under dispatching-parallel-agents after fixing the interfaces below.
+Completed 2026-11-14: local isolated API and browser acceptance passed. Original baselines and staged checkpoints retained; no push or production deployment.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking. User explicitly authorized autonomous execution and checkpoint commits; do not ask for another plan approval. Independent repositories may be delegated under dispatching-parallel-agents after fixing the interfaces below.
 
 **Goal:** Ship eight desktop-only interactive half-body pets with honest per-task and cumulative AI usage, plus useful navigation shortcuts.
 
@@ -89,7 +91,7 @@ Root owns `Mu-mirror-F/public/pets/`. Filenames: `deepseek-expressions.png`, `ge
 
 - [x] Verify three repositories and preserve baseline branches; create feature branches without changing current service paths.
 - [x] Dump the isolated debug database to `own/backups/usage-pet-v1-20261114/database-before.dump`.
-- [ ] Commit design, this plan and document index as checkpoint 0. Save baseline SHAs and rollback instructions outside repos in the backup directory.
+- [x] Commit design, this plan and document index as checkpoint 0. Save baseline SHAs and rollback instructions outside repos in the backup directory.
 
 ## Task 1: Upstream capture and trailer reporting (AI owner)
 
@@ -97,11 +99,11 @@ Root owns `Mu-mirror-F/public/pets/`. Filenames: `deepseek-expressions.png`, `ge
 
 **Interfaces:** consumes metadata and emits exact report above; does not modify B/F or change business proto payloads.
 
-- [ ] Write and run failing behavioral tests using real SDKs with httpx mock transport: unary 34+16=50, final empty-choice usage chunk, Anthropic cumulative output and cache normalization, explicit decimal credit consumption, ambiguous quota, interrupted stream, retry attempts and per-request context isolation.
-- [ ] Implement bounded capture without reading/retaining model content, changing request payloads except supported stream usage request, or altering network retry/timeout/proxy behavior. Unknown upstream/network outcomes are explicit.
-- [ ] Add unary and server-streaming gRPC interceptor coverage for success/error/finally, Embedding exclusion and complete empty reports; verify context propagation through graph work.
-- [ ] Run targeted tests then complete existing pytest suite; disclose environment skips and set up isolated reader fixtures if needed. Sync `upload/` and run `--check`.
-- [ ] Update docs and commit a checkpoint. Report exact trailer sample and any integration caveats to root/B owner.
+- [x] Write and run failing behavioral tests using real SDKs with httpx mock transport: unary 34+16=50, final empty-choice usage chunk, Anthropic cumulative output and cache normalization, explicit decimal credit consumption, ambiguous quota, interrupted stream, retry attempts and per-request context isolation.
+- [x] Implement bounded capture without reading/retaining model content, changing request payloads except supported stream usage request, or altering network retry/timeout/proxy behavior. Unknown upstream/network outcomes are explicit.
+- [x] Add unary and server-streaming gRPC interceptor coverage for success/error/finally, Embedding exclusion and complete empty reports; verify context propagation through graph work.
+- [x] Run targeted tests then complete existing pytest suite; disclose environment skips and set up isolated reader fixtures if needed. Sync `upload/` and run `--check`.
+- [x] Update docs and commit a checkpoint. Report exact trailer sample and any integration caveats to root/B owner.
 
 ## Task 2: Persistent receipts, ownership and API (backend owner)
 
@@ -109,12 +111,12 @@ Root owns `Mu-mirror-F/public/pets/`. Filenames: `deepseek-expressions.png`, `ge
 
 **Interfaces:** consumes exact report and emits exact APIs above. Coordinate refinements with AI/frontend owners. Do not modify AI/F. Root owns design/plan/checkpoint manifest.
 
-- [ ] Write and run failing tests for report validation, replay idempotence, missing/partial trailers, accurate decimal credit aggregation, ownership filtering, date boundaries and task grouping.
-- [ ] Implement invocation pre-record and independent completion transaction. Persist observed attempts once, immutable channel/provider/model snapshots, status and coverage. Pending stale invocations become visibly incomplete instead of active forever.
-- [ ] Bind trusted owner/config/scene for every non-Embedding method across all three gRPC clients, propagate one chat task ID across planner/answer RPCs, and group standalone background tasks. Exclude Embed/EmbedBatch/GetModelInfo entirely.
-- [ ] Implement current-user summary, paginated tasks and task detail, keeping credits per channel and totals separate. Usage write failures must not turn successful business answers into failures.
-- [ ] Verify V21 twice and fresh schema against an isolated database; run targeted tests and backend full suite with safe named test DB. Leave live debug migration/restart to root after checkpoint.
-- [ ] Update docs and commit checkpoint. Provide API fixtures and integration instructions to frontend/root.
+- [x] Write and run failing tests for report validation, replay idempotence, missing/partial trailers, accurate decimal credit aggregation, ownership filtering, date boundaries and task grouping.
+- [x] Implement invocation pre-record and independent completion transaction. Persist observed attempts once, immutable channel/provider/model snapshots, status and coverage. Pending stale invocations become visibly incomplete instead of active forever.
+- [x] Bind trusted owner/config/scene for every non-Embedding method across all three gRPC clients, propagate one chat task ID across planner/answer RPCs, and group standalone background tasks. Exclude Embed/EmbedBatch/GetModelInfo entirely.
+- [x] Implement current-user summary, paginated tasks and task detail, keeping credits per channel and totals separate. Usage write failures must not turn successful business answers into failures.
+- [x] Verify V21 twice and fresh schema against an isolated database; run targeted tests and backend full suite with safe named test DB. Leave live debug migration/restart to root after checkpoint.
+- [x] Update docs and commit checkpoint. Provide API fixtures and integration instructions to frontend/root.
 
 ## Task 3: Desktop pet, usage panel and routes (frontend owner)
 
@@ -122,23 +124,23 @@ Root owns `Mu-mirror-F/public/pets/`. Filenames: `deepseek-expressions.png`, `ge
 
 **Interfaces:** consumes exact REST/asset contracts above. Root supplies atlases. Do not modify `public/pets/`, backend or AI.
 
-- [ ] Write and run failing tests for manufacturer aliases (including `cn:deepseek-v4.1-flash`), manual lock/fallback, credit formatting and unknown display, deduped notifications/account changes, task totals, bounds/drag-click separation, and route targets.
-- [ ] Implement 120–140px half-body sprite pet, eight states and elastic local click/drag motion. Toolbar buttons open usage/character picker/quick navigation; offer existing ledger and models routes without bypassing router guards. Include minimize/restore, local per-user position/preferences, keyboard and reduced motion support.
-- [ ] Implement today/month/all/custom dates, scene/model filters, paginated tasks and per-request detail using server totals. Handle pending/unknown/partial states honestly and format decimal credits without float summation. No mock fallback in ordinary logged-in app.
-- [ ] Mount only on real desktop viewport plus desktop presentation; remove DOM on narrow viewport even forced desktop. Suspend notifications/polling while hidden or modal conflicts; no history storm on return.
-- [ ] Run npm tests/build and browser desktop/narrow-screen checks. Update docs and commit checkpoint, leaving asset additions for root checkpoint.
+- [x] Write and run failing tests for manufacturer aliases (including `cn:deepseek-v4.1-flash`), manual lock/fallback, credit formatting and unknown display, deduped notifications/account changes, task totals, bounds/drag-click separation, and route targets.
+- [x] Implement 120–140px half-body sprite pet, eight states and elastic local click/drag motion. Toolbar buttons open usage/character picker/quick navigation; offer existing ledger and models routes without bypassing router guards. Include minimize/restore, local per-user position/preferences, keyboard and reduced motion support.
+- [x] Implement today/month/all/custom dates, scene/model filters, paginated tasks and per-request detail using server totals. Handle pending/unknown/partial states honestly and format decimal credits without float summation. No mock fallback in ordinary logged-in app.
+- [x] Mount only on real desktop viewport plus desktop presentation; remove DOM on narrow viewport even forced desktop. Suspend notifications/polling while hidden or modal conflicts; no history storm on return.
+- [x] Run npm tests/build and browser desktop/narrow-screen checks. Update docs and commit checkpoint, leaving asset additions for root checkpoint.
 
 ## Task 4: Eight original transparent atlases (root)
 
-- [ ] Use imagegen built-in with inspected local references and final style sample. Generate DeepSeek first to establish style, then remaining seven using their own identity references and same style.
-- [ ] Inspect every atlas for correct 4×2 layout, transparency, eight readable expressions, consistent head anchor and role identity. Regenerate specific failures; do not substitute existing full-body originals or code placeholders.
-- [ ] Save all assets, manifest and prompt set inside F/public/pets; verify file paths/catalog alignment and include in a checkpoint with UI documentation.
+- [x] Use imagegen built-in with inspected local references and final style sample. Generate DeepSeek first to establish style, then remaining seven using their own identity references and same style.
+- [x] Inspect every atlas for correct 4×2 layout, transparency, eight readable expressions, consistent head anchor and role identity. Regenerate specific failures; do not substitute existing full-body originals or code placeholders.
+- [x] Save all assets, manifest and prompt set inside F/public/pets; verify file paths/catalog alignment and include in a checkpoint with UI documentation.
 
 ## Task 5: Real integration, review and morning handoff (root)
 
-- [ ] Reconcile three owner changes, run matching contract tests, apply V21 only to the backed-up debug database, restart AI/backend against current feature branch, preserve frontend URL 5173.
-- [ ] Use the user-authorized local test model in an isolated acceptance account to verify unary/streamed use, grouped task totals and bubbles. Keep key in transient process memory/environment, never committed or printed.
-- [ ] Browser evidence: 1440px desktop pet, all characters/expressions, drag/click, usage totals/details, route jumps and unsaved guard; mobile 390px and forced-desktop narrow mode have no pet. Credit mode uses explicit fixtures and is reported as fixture verification unless a real credit API exists.
-- [ ] Run relevant full test suites and build after integration; investigate any new failures. Request final independent review and fix valid findings before final checkpoint.
-- [ ] Commit final coherent work in all three repos, leave status clean, record SHAs/test evidence/known limits and rollback instructions in checkpoint manifest. Do not push/deploy without a request.
-- [ ] Keep services available at existing local addresses. Explain which test account/debug database is active and how to restore baseline. No production or other-machine migration claims.
+- [x] Reconcile three owner changes, run matching contract tests, apply V21 only to the backed-up debug database, restart AI/backend against current feature branch, preserve frontend URL 5173.
+- [x] Use the user-authorized local test model in an isolated acceptance account to verify unary/streamed use, grouped task totals and bubbles. Keep key in transient process memory/environment, never committed or printed.
+- [x] Browser evidence: 1440px desktop pet, all characters/expressions, drag/click, usage totals/details, route jumps and unsaved guard; mobile 390px and forced-desktop narrow mode have no pet. Credit mode uses explicit fixtures and is reported as fixture verification unless a real credit API exists.
+- [x] Run relevant full test suites and build after integration; investigate any new failures. Request final independent review and fix valid findings before final checkpoint.
+- [x] Commit final coherent work in all three repos, leave status clean, record SHAs/test evidence/known limits and rollback instructions in checkpoint manifest. Do not push/deploy without a request.
+- [x] Keep services available at existing local addresses. Explain which test account/debug database is active and how to restore baseline. No production or other-machine migration claims.
