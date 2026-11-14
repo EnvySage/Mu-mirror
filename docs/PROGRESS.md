@@ -7,7 +7,7 @@
 
 ---
 
-## AI 用量后端（2026-11-14，实现检查点）
+## AI 用量与桌宠（2026-11-14，本机联调中）
 
 V21 新增 `ai_usage_tasks` / `ai_usage_invocations` / `ai_usage_attempts`，同步新库 schema。三个 gRPC 客户端的全部非 Embedding 入口绑定可信 owner、场景、模型/渠道快照；legacy 聊天规划与回答共用 run UUID，graph_v2 和 shadow 分开归集，后台和模型连接测试也统计。回执独立事务、幂等保存，缺失 trailer 不伪造物理请求；过期 pending 显式转统计不完整。当前用户汇总、游标分页任务和安全明细 API 已实现，积分按渠道/单位用 NUMERIC 精确累加，周期按上海日期。
 
