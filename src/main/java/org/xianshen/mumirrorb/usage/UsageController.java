@@ -23,8 +23,9 @@ public class UsageController {
     @GetMapping("/tasks")
     public R<Map<String,Object>> tasks(@RequestParam(defaultValue="30") int limit,@RequestParam(required=false) String before,
             @RequestParam(required=false) String scene,@RequestParam(required=false) String provider,
-            @RequestParam(required=false) String model,@RequestParam(required=false) String from,@RequestParam(required=false) String to) {
-        store.expirePending();return R.ok(queries.tasks(user(),limit,before,scene,provider,model,from,to));
+            @RequestParam(required=false) String model,@RequestParam(required=false) String from,@RequestParam(required=false) String to,
+            @RequestParam(defaultValue="all") String period) {
+        store.expirePending();return R.ok(queries.tasks(user(),limit,before,scene,provider,model,from,to,period));
     }
     @GetMapping("/tasks/{id}")
     public R<Map<String,Object>> detail(@PathVariable UUID id) {

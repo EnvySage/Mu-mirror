@@ -86,7 +86,10 @@ public class UsageQueries {
             """;
     }
     public Map<String,Object> tasks(UUID user,int limit,String before,String scene,String provider,String model,String from,String to) {
-        Selection s=select(user,"all",from,to,scene,provider,model,null);
+        return tasks(user,limit,before,scene,provider,model,from,to,"all");
+    }
+    public Map<String,Object> tasks(UUID user,int limit,String before,String scene,String provider,String model,String from,String to,String period) {
+        Selection s=select(user,period,from,to,scene,provider,model,null);
         List<Object> args=new ArrayList<>(s.args());String suffix="";
         if(before!=null&&!before.isBlank()) {
             try {

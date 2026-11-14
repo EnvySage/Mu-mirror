@@ -7,7 +7,7 @@
 | 接口 | 参数与返回 |
 |---|---|
 | `GET /ai-usage/summary` | `period=today/month/all`（缺省 today），可用成对 `from/to=YYYY-MM-DD` 覆盖周期；可选 `scene/provider/model` 精确筛选。返回 `inputTokens/outputTokens/totalTokens/requestCount/taskCount/unknownCount/incompleteCount/activeCount/credits/since/timezone` |
-| `GET /ai-usage/tasks` | `limit` 缺省 30、上限 100；`before` 是不透明游标；支持 `scene/provider/model/from/to`。返回 `{items,nextCursor}`，按 updatedAt/id 倒序稳定分页 |
+| `GET /ai-usage/tasks` | `limit` 缺省 30、上限 100；`before` 是不透明游标；`period=today/month/all` 缺省 all，保留最近任务轮询；成对 `from/to` 覆盖 period，上海日/月边界及非法参数校验与 summary 一致；支持 `scene/provider/model`。返回 `{items,nextCursor}`，按 updatedAt/id 倒序稳定分页 |
 | `GET /ai-usage/tasks/{id}` | 任务聚合与安全 `attempts`、`invocations` 明细；非本人或不存在返回 code 404，无归属信息 |
 
 任务字段：`id,scene,label,provider,model,status,startedAt,completedAt,updatedAt,inputTokens,outputTokens,totalTokens,requestCount,unknownCount,incompleteCount,activeCount,credits`。status 为 running/complete/partial/error/cancelled。已确认 attempt 用量不足时计入 unknownCount；未完整报告的 invocation 计入 incompleteCount；pending 计入 activeCount，三者不伪装成物理请求数。实际请求数只来自 attempt。所有 Token 累计是已知下界；只有接口明确提供的零才是已知零。
@@ -19,6 +19,8 @@ credits 为 `{channelKey,channelName,unit,amount}` 数组，amount 始终是十�
 `UsageReportTest` 覆盖类型、版本、截断、未知与精确小数；`UsageDatabaseTest` 使用真实 PostgreSQL 和本地 gRPC 覆盖业务回滚、幂等、用户隔离、上海日界、游标、聊天归集及三客户端/后台入口。数据库需 `MIRROR_TEST_DB_URL/USERNAME/PASSWORD`，库名必须以 `codex_assistant_growth_test_` 开头；每次使用随机 usage_fixture schema，结束只清理该 schema。未设置数据库变量会跳过数据库测试，不能当作通过。
 
 完整测试同时需要在该安全库预装 `schema.sql`，并令 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 指向同库，给应用上下文提供测试 `JWT_SECRET`。用量定向命令为 `mvnw.cmd "-Dtest=UsageReportTest,UsageDatabaseTest,UsageGrpcDatabaseTest" test`；`UsageGrpcDatabaseTest` 通过真实本地 gRPC 校验 metadata、模型档案弱身份绑定、流结束落库及 Embedding 排除。现有发布前提测试在 Windows 优先查找 D 盘或 Program Files 下的 Git Bash，避免 System32 的 WSL 启动器改变命令语义。
+
+`UsagePeriodsDatabaseTest` 用真实回执库和 MockMvc 同时验证 tasks/summary 的 today、month、all、自定义范围覆盖、范围内游标分页和非法周期拒绝；最近轮询未传 period 的行为保持 all。全量账本计划测试还需 `MIRROR_LEDGER_PLANNING_TEST_DB_URL/USERNAME/PASSWORD`，其中 URL 必须指向独立的 `mirror_ledger_planning_test`；不要将它指向业务库。
 
 
 

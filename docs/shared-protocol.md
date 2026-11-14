@@ -58,3 +58,5 @@ Python 在成功、异常和流结束时回传二进制 trailer `mirror-usage-bi
 Java 校验版本、对应 invocation、规范 UUID、重复 attempt、字段类型和范围。解码后上限 48 KiB、100 attempts；非法后缀或数量超限保留已验证前缀并标记 incomplete，超字节上限拒绝整份。provider/model/unit 长度分别不超过 128/256/32 字符，计数及延迟为 0..10^12 整数，HTTP 状态为 100..599 或 null；积分最多 26 位整数和 12 位小数，超出保持统计不完整而不舍入。Java 两条 gRPC channel 的 metadata 接收上限为 96 KiB，以容纳二进制 trailer 的线缆编码和其他 headers。
 
 完整空 attempts 表示没有实际上游请求；缺失、损坏或旧 AI 无 trailer 则是未完整回传的 invocation，不伪造一次 attempt 或零消费。Java 独立事务预录待完成 envelope，结束后幂等保存 `(invocation_id,attempt_id)`，业务回滚不撤销用量。聊天 legacy 规划/回答共用 run UUID，graph_v2/shadow 各用自己的 run UUID；后台入口显式绑定 owner，不依赖 HTTP 登录线程。超过 20 分钟的 pending invocation 自动标记 incomplete。只保存脱敏模型/渠道快照、数值与状态，不保存密钥、原文、图片或原始报告。
+
+配套 REST `/ai-usage/tasks` 接受与 summary 相同的显式 `period=today/month/all`，使用 Asia/Shanghai 自然日/月筛选；成对 from/to 覆盖 period。列表未传 period 时缺省 all，供最近任务轮询；summary 继续缺省 today。游标后续页须携带原筛选参数，返回字段形状不变。

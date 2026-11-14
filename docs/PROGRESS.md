@@ -13,7 +13,7 @@ V21 新增 `ai_usage_tasks` / `ai_usage_invocations` / `ai_usage_attempts`，同
 
 隔离验证库为 `codex_assistant_growth_test_usage_20261114`，V21 连续执行两次通过；`codex_assistant_growth_test_usage_fresh_20261114` 从完整 schema 新建通过。原 `mu_mirror` 和在线 debug 库未迁移、服务未重启；三端联调与真实上游模型用量验收仍由根任务继续，不能把隔离测试描述成上线完成。
 
-后端全量 `mvnw.cmd -q test` 最终退出 0：664 项，661 通过、0 失败/错误、3 跳过（`LedgerPlanningDatabaseTest` 需要另一个固定名字的账本测试库，本次未配置；不能当作通过）。用量专项 11 项全部通过，包含真实 PostgreSQL、本地 gRPC、全部非 Embedding 客户端入口和相同配置不同档案的并发归属。Windows 发布前提测试改为优先使用已安装的 Git Bash，避免误调系统 WSL 启动器。证据在 `.verify/ai-usage/usage-full-suite-verified.log`；测试用数据库与应用上下文均显式指向上述安全库。
+后端全量 `mvnw.cmd -q test` 最新退出 0：667 项全部通过，0 失败/错误/跳过；根任务准备独立 `mirror_ledger_planning_test` 后，此前跳过的 3 项账本用例也已执行通过。用量专项 14 项全部通过，包含真实 PostgreSQL、本地 gRPC、全部非 Embedding 客户端入口、相同配置不同档案的并发归属，以及 `/tasks` 与 summary 相同的上海周期/日期筛选、范围内分页、非法参数和归属隔离。任务列表未传 period 仍缺省 all，供最近任务轮询。Windows 发布前提测试优先使用已安装的 Git Bash，避免误调系统 WSL 启动器。最新证据在 `.verify/ai-usage/usage-periods-full-suite.log`；测试用数据库与应用上下文均显式指向上述安全库。
 
 ## 1. 项目定位与系统边界
 
