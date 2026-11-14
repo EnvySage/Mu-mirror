@@ -42,3 +42,19 @@
 ## LedgerVision
 
 AI `proto/ledger.proto` 与 B `src/main/proto/ledger.proto` 同步。Recognize 接收 image/mime_type/llm_config/today，返回 status、draft_json、message，状态为 BILL/NOT_BILL/NEEDS_REVIEW。只产生候选，历史日期保留，入账必须由 Java 再次校验。
+
+## AI 用量回执 v1（2026-11-14）
+
+不改变业务 protobuf。Java 对每个非 Embedding RPC 附加 ASCII metadata：`mirror-usage-invocation-id`（UUID）、`mirror-usage-task-id`（UUID）、`mirror-usage-scene`（小写 ASCII 场景）。owner 不传给 Python，由 Java 可信调用参数绑定。旧调用缺少这些 metadata 时 Python 不采集。`Embed` / `GetModelInfo` 不采集。
+
+Python 在成功、异常和流结束时回传二进制 trailer `mirror-usage-bin`，内容为 UTF-8 JSON：
+
+```json
+{"version":1,"invocation_id":"0b59b70e-9bc2-4d21-97b2-ef062d8c5e8d","complete":true,"attempts":[{"id":"9d2f278c-66ad-4771-b769-8b65469e0df3","status":"success","provider":"deepseek","model":"deepseek-v4.1-flash","input_tokens":34,"output_tokens":16,"total_tokens":50,"credits":null,"credit_unit":null,"usage_state":"complete","latency_ms":120,"http_status":200}]}
+```
+
+`status` 为 success/error/cancelled，`usage_state` 为 complete/partial/unknown；缺失数值为 null。积分仅传已确认的本次消耗，十进制字符串；缺省单位为“积分”。余额、额度比例不参与消耗。可选数值白名单包括 `cache_read_tokens` / `cache_creation_tokens` / `reasoning_tokens`，只作明细，不再次加进总 Token。
+
+Java 校验版本、对应 invocation、规范 UUID、重复 attempt、字段类型和范围。解码后上限 48 KiB、100 attempts；非法后缀或数量超限保留已验证前缀并标记 incomplete，超字节上限拒绝整份。provider/model/unit 长度分别不超过 128/256/32 字符，计数及延迟为 0..10^12 整数，HTTP 状态为 100..599 或 null；积分最多 26 位整数和 12 位小数，超出保持统计不完整而不舍入。Java 两条 gRPC channel 的 metadata 接收上限为 96 KiB，以容纳二进制 trailer 的线缆编码和其他 headers。
+
+完整空 attempts 表示没有实际上游请求；缺失、损坏或旧 AI 无 trailer 则是未完整回传的 invocation，不伪造一次 attempt 或零消费。Java 独立事务预录待完成 envelope，结束后幂等保存 `(invocation_id,attempt_id)`，业务回滚不撤销用量。聊天 legacy 规划/回答共用 run UUID，graph_v2/shadow 各用自己的 run UUID；后台入口显式绑定 owner，不依赖 HTTP 登录线程。超过 20 分钟的 pending invocation 自动标记 incomplete。只保存脱敏模型/渠道快照、数值与状态，不保存密钥、原文、图片或原始报告。

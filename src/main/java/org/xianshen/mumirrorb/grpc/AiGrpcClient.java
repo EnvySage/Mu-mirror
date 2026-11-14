@@ -84,12 +84,23 @@ public class AiGrpcClient {
     private MirrorProfileGrpc.MirrorProfileBlockingStub profileStub;
     private MirrorChatGrpc.MirrorChatBlockingStub chatStub;
 
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private org.xianshen.mumirrorb.usage.UsageClientInterceptor usageInterceptor;
+
+    /** Explicit owner travels with the RPC even on scheduler/async threads. */
+    public <S extends io.grpc.stub.AbstractStub<S>> S bindUsage(S stub,UUID user,String scene) {
+        if(usageInterceptor==null)return stub; // Manually constructed legacy unit fixtures.
+        return stub.withInterceptors(usageInterceptor)
+                .withOption(org.xianshen.mumirrorb.usage.UsageClientInterceptor.OWNER,user)
+                .withOption(org.xianshen.mumirrorb.usage.UsageClientInterceptor.SCENE,scene);
+    }
+
     public LedgerProto.LedgerImageResponse recognizeLedgerReceipt(UUID owner, byte[] image, String mime,
                                                                   java.time.LocalDate today) {
         var request = LedgerProto.LedgerImageRequest.newBuilder()
                 .setImage(com.google.protobuf.ByteString.copyFrom(image))
                 .setMimeType(mime).setToday(today.toString()).setLlmConfig(buildLlmConfig(owner)).build();
-        return LedgerVisionGrpc.newBlockingStub(channel).withDeadlineAfter(35, TimeUnit.SECONDS).recognize(request);
+        return bindUsage(LedgerVisionGrpc.newBlockingStub(channel),owner,"receipt").withDeadlineAfter(35, TimeUnit.SECONDS).recognize(request);
     }
 
     /** Summarizes only the supplied user's messages; validation of source ids happens again in Java. */
@@ -98,7 +109,7 @@ public class AiGrpcClient {
         MirrorChatProto.SummarizeDayRequest request = MirrorChatProto.SummarizeDayRequest.newBuilder()
                 .addAllMessages(messages).setSourceHash(sourceHash).setSourceDate(sourceDate.toString())
                 .setTimezone(timezone).setLlmConfig(buildLlmConfig(userId)).build();
-        return chatStub.withDeadlineAfter(90, TimeUnit.SECONDS).summarizeDay(request);
+        return bindUsage(chatStub,userId,"chat_memory").withDeadlineAfter(90, TimeUnit.SECONDS).summarizeDay(request);
     }
 
     @PostConstruct
@@ -179,7 +190,7 @@ public class AiGrpcClient {
 
             RecordProcessorProto.ClassifyRequest request = requestBuilder.build();
 
-            RecordProcessorProto.ClassifyResponse response = recordStub
+            RecordProcessorProto.ClassifyResponse response = bindUsage(recordStub,userId,"record_analysis")
                     .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .classify(request);
 
@@ -265,7 +276,7 @@ public class AiGrpcClient {
 
             RecordProcessorProto.ClassifyRequest request = requestBuilder.build();
 
-            RecordProcessorProto.ClassifyResponse response = recordStub
+            RecordProcessorProto.ClassifyResponse response = bindUsage(recordStub,userId,"record_analysis")
                     .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .classify(request);
 
@@ -294,7 +305,7 @@ public class AiGrpcClient {
                 .setSingle(true)
                 .build();
         try {
-            return recordStub.withDeadlineAfter(180, TimeUnit.SECONDS).classify(request);
+            return bindUsage(recordStub,userId,"model_test").withDeadlineAfter(180, TimeUnit.SECONDS).classify(request);
         } catch (StatusRuntimeException e) {
             log.error("gRPC LLM 连接测试失败，用户: {}, status={}", userId, e.getStatus().getCode());
             throw e;
@@ -428,7 +439,7 @@ public class AiGrpcClient {
             MirrorProfileProto.GenerateProfileRequest enriched = request.toBuilder()
                     .setLlmConfig(buildLlmConfig(userId))
                     .build();
-            MirrorProfileProto.GenerateProfileResponse response = profileStub
+            MirrorProfileProto.GenerateProfileResponse response = bindUsage(profileStub,userId,"profile")
                     .withDeadlineAfter(120, TimeUnit.SECONDS)
                     .generateProfile(enriched);
             log.info("GenerateProfile 返回: tags={}, summary 长度={}",
@@ -452,7 +463,7 @@ public class AiGrpcClient {
      */
     public String chatBlocking(UUID userId, MirrorChatProto.ChatRequest request) {
         StringBuilder sb = new StringBuilder();
-        Iterator<MirrorChatProto.ChatChunk> stream = chatStream(userId, request);
+        Iterator<MirrorChatProto.ChatChunk> stream = chatStream(userId, request, "summary");
         while (stream.hasNext()) {
             MirrorChatProto.ChatChunk chunk = stream.next();
             if (!chunk.getContent().isEmpty()) {
@@ -473,6 +484,10 @@ public class AiGrpcClient {
      * @return ChatChunk 流迭代器（消费完 hasNext() 返回 false；done=true 的块含 sources）
      */
     public Iterator<MirrorChatProto.ChatChunk> chatStream(UUID userId, MirrorChatProto.ChatRequest request) {
+        return chatStream(userId,request,"chat");
+    }
+
+    private Iterator<MirrorChatProto.ChatChunk> chatStream(UUID userId, MirrorChatProto.ChatRequest request,String scene) {
         log.info("gRPC 调用 Chat(stream)，用户: {}", userId);
         try {
             MirrorChatProto.ChatRequest enriched = request.toBuilder()
@@ -480,7 +495,7 @@ public class AiGrpcClient {
                     .build();
             // 60s → 180s（2026-09-21 联调）：回答阶段思考预算 2048，mimo 约 36 token/s 光思考就 ~57s，
             // 加正文必然擦着 60s；这是整条回答流的总时长，不是块间间隔（块间由 Python 侧 60s 控制）
-            return chatStub
+            return bindUsage(chatStub,userId,scene)
                     .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .chat(enriched);
         } catch (StatusRuntimeException e) {
@@ -519,7 +534,7 @@ public class AiGrpcClient {
                 requestBuilder.addAllGlossary(groundingTerms(userId));
             }
             // 35s → 60s（2026-09-21 联调后整体放宽；Python 侧非流式总超时同步放到 60s）
-            MirrorChatProto.ExtractIntentResponse response = chatStub
+            MirrorChatProto.ExtractIntentResponse response = bindUsage(chatStub,userId,"intent")
                     .withDeadlineAfter(60, TimeUnit.SECONDS)
                     .extractIntent(requestBuilder.build());
             log.info("ExtractIntent 返回: queryType={}, rewrittenQuery={}",
@@ -669,7 +684,7 @@ public class AiGrpcClient {
             MirrorChatProto.PlanToolsRequest enriched = request.toBuilder()
                     .setLlmConfig(buildLlmConfig(userId))
                     .build();
-            MirrorChatProto.PlanToolsReply response = chatStub
+            MirrorChatProto.PlanToolsReply response = bindUsage(chatStub,userId,"planning")
                     .withDeadlineAfter(Math.max(timeoutMs, 100), TimeUnit.MILLISECONDS)
                     .planTools(enriched);
             log.info("PlanTools 返回: {} 步计划", response.getCallsCount());
@@ -710,7 +725,7 @@ public class AiGrpcClient {
             MirrorChatProto.PlanNextStepRequest enriched = request.toBuilder()
                     .setLlmConfig(buildLlmConfig(userId))
                     .build();
-            return chatStub
+            return bindUsage(chatStub,userId,"planning")
                     .withDeadlineAfter(Math.max(timeoutMs, 100), TimeUnit.MILLISECONDS)
                     .planNextStep(enriched);
         } catch (StatusRuntimeException e) {
@@ -739,7 +754,7 @@ public class AiGrpcClient {
             RecordProcessorProto.ExtractTermsRequest enriched = request.toBuilder()
                     .setLlmConfig(buildLlmConfig(userId))
                     .build();
-            RecordProcessorProto.ExtractTermsReply response = recordStub
+            RecordProcessorProto.ExtractTermsReply response = bindUsage(recordStub,userId,"glossary")
                     .withDeadlineAfter(180, TimeUnit.SECONDS)
                     .extractTerms(enriched);
             log.info("ExtractTerms 返回: {} 条候选", response.getCandidatesCount());
@@ -814,7 +829,9 @@ public class AiGrpcClient {
         log.info("[AI调用] userId={} llm model={} baseUrl={} protocol={}",
                 userId, builder.getModel(), builder.getBaseUrl(), builder.getProtocol());
 
-        return builder.build();
+        CommonProto.LlmConfig config=builder.build();
+        if(usageInterceptor!=null)usageInterceptor.remember(userId,config,settings==null?null:settings.getActiveModelProfileId());
+        return config;
     }
 
     /**

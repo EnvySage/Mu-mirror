@@ -119,9 +119,20 @@ public class ChatServiceImpl implements ChatService {
     private final DailyChatSessionResolver dailySessionResolver;
     @Autowired
     private org.xianshen.mumirrorb.service.ActionProposalService actionProposalService;
+    @Autowired(required=false)
+    private org.xianshen.mumirrorb.usage.UsageStore usageStore;
     @Override
     public org.xianshen.mumirrorb.agent.ChatFinalResult runLegacy(
             org.xianshen.mumirrorb.agent.ChatInvocation invocation, SseEmitter emitter) {
+        try(var scope=org.xianshen.mumirrorb.usage.UsageTaskScope.open(invocation.userId(),invocation.runId(),"chat")) {
+            return runLegacyWithinTask(invocation,emitter);
+        } finally {
+            if(usageStore!=null)usageStore.finishTask(invocation.userId(),invocation.runId());
+        }
+    }
+
+    private org.xianshen.mumirrorb.agent.ChatFinalResult runLegacyWithinTask(
+            org.xianshen.mumirrorb.agent.ChatInvocation invocation,SseEmitter emitter) {
         UUID userId = invocation.userId();
         UUID sessionId = invocation.sessionId();
         String question = invocation.question().trim();

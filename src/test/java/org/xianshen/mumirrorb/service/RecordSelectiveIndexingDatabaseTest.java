@@ -191,7 +191,8 @@ class RecordSelectiveIndexingDatabaseTest {
                 .replace("public.", f.schema + ".").replace("'public'", "'" + f.schema + "'").replace("mirror_ai", f.ai);
         String result = f.rows(query).get(0);
         String refusal = script.lines().filter(line -> line.contains("[[ \"$BASELINE_READY\" == \"t\" ]]")).findFirst().orElseThrow();
-        String bash = Files.exists(Path.of("D:/Git/bin/bash.exe")) ? "D:/Git/bin/bash.exe" : "bash";
+        String bash = java.util.stream.Stream.of("D:/Git/bin/bash.exe", "C:/Program Files/Git/bin/bash.exe")
+                .filter(path -> Files.exists(Path.of(path))).findFirst().orElse("bash");
         Process process = new ProcessBuilder(bash, "-c", "die() { exit 42; }; BASELINE_READY='" + result + "'; " + refusal)
                 .redirectErrorStream(true).start();
         assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));

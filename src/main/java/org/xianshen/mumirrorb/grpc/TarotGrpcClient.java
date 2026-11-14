@@ -12,6 +12,6 @@ public class TarotGrpcClient {
     public TarotGrpcClient(ManagedChannel channel,AiGrpcClient configs){this.stub=TarotReadingGrpc.newBlockingStub(channel);this.configs=configs;}
     public void checkConfigured(UUID user){configs.buildLlmConfigFor(user);}
     public TarotProto.TarotAnalyzeResponse analyze(UUID user,TarotProto.TarotAnalyzeRequest request){
-        return stub.withDeadlineAfter(60,TimeUnit.SECONDS).analyze(request.toBuilder().setLlmConfig(configs.buildLlmConfigFor(user)).build());
+        return configs.bindUsage(stub,user,"tarot").withDeadlineAfter(60,TimeUnit.SECONDS).analyze(request.toBuilder().setLlmConfig(configs.buildLlmConfigFor(user)).build());
     }
 }

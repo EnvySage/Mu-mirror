@@ -1,11 +1,19 @@
 # Mu-mirror-B 当前现状（唯一维护文档）
 
-> **最后核对：2026-11-13**
+> **最后核对：2026-11-14**
 > 核对方式：逐项对照 `src/main/java`、`src/main/resources`、`src/test/java` 与当前工作树，**不沿用旧进度文档的结论**。
 > 维护约定：项目只维护这一份"当前真相"。其他文档要么是专题说明，要么是历史决策记录；与代码冲突时，以代码为准，并回来更新本文件。
 > 旧进度文档与 `docs/archive/HANDOVER-2026-09-06.md`不再作为进度依据。
 
 ---
+
+## AI 用量后端（2026-11-14，实现检查点）
+
+V21 新增 `ai_usage_tasks` / `ai_usage_invocations` / `ai_usage_attempts`，同步新库 schema。三个 gRPC 客户端的全部非 Embedding 入口绑定可信 owner、场景、模型/渠道快照；legacy 聊天规划与回答共用 run UUID，graph_v2 和 shadow 分开归集，后台和模型连接测试也统计。回执独立事务、幂等保存，缺失 trailer 不伪造物理请求；过期 pending 显式转统计不完整。当前用户汇总、游标分页任务和安全明细 API 已实现，积分按渠道/单位用 NUMERIC 精确累加，周期按上海日期。
+
+隔离验证库为 `codex_assistant_growth_test_usage_20261114`，V21 连续执行两次通过；`codex_assistant_growth_test_usage_fresh_20261114` 从完整 schema 新建通过。原 `mu_mirror` 和在线 debug 库未迁移、服务未重启；三端联调与真实上游模型用量验收仍由根任务继续，不能把隔离测试描述成上线完成。
+
+后端全量 `mvnw.cmd -q test` 最终退出 0：664 项，661 通过、0 失败/错误、3 跳过（`LedgerPlanningDatabaseTest` 需要另一个固定名字的账本测试库，本次未配置；不能当作通过）。用量专项 11 项全部通过，包含真实 PostgreSQL、本地 gRPC、全部非 Embedding 客户端入口和相同配置不同档案的并发归属。Windows 发布前提测试改为优先使用已安装的 Git Bash，避免误调系统 WSL 启动器。证据在 `.verify/ai-usage/usage-full-suite-verified.log`；测试用数据库与应用上下文均显式指向上述安全库。
 
 ## 1. 项目定位与系统边界
 
@@ -48,8 +56,8 @@ Vue 3 前端（Mu-mirror-F）
   `mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=dev`
 - dev 数据源：`jdbc:postgresql://localhost:5432/mu_mirror`，时区 `Asia/Shanghai`。
 - 旧 AI 服务默认 `127.0.0.1:10003`；Agent v2 默认 `localhost:10004`。
-- 新库执行 `src/main/resources/db/schema.sql`（已包含 V18 最终结构）。
-- 已有库按 `migration-v2.sql` → `v3` → … → `v18` 顺序升级；`schema.sql` 不能替代存量迁移。
+- 新库执行 `src/main/resources/db/schema.sql`（已包含 V21 最终结构）。
+- 已有库按 `migration-v2.sql` → `v3` → … → `v21` 顺序升级；`schema.sql` 不能替代存量迁移。
 
 **测试**
 
@@ -232,11 +240,12 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 
 ## 5. 数据模型
 
-`schema.sql` 当前有 **40 张表 + 8 个只读视图**。按用途分组：
+`schema.sql` 当前有 **52 张表 + 9 个只读视图**。按用途分组：
 
 | 组 | 表 |
 |---|---|
 | 账号与配置 | `users`、`user_settings`、`user_model_profiles` |
+| AI 用量 | `ai_usage_tasks`、`ai_usage_invocations`、`ai_usage_attempts` |
 | 记录与片段 | `records`、`chunks`、`chunk_embedding_jobs` |
 | 画像 | `profile_snapshots`、`snapshot_inputs` |
 | 对话与 Agent | `chat_sessions`、`conversation_history`、`agent_runs`、`agent_command_receipts`、`tool_calls` |
@@ -252,7 +261,7 @@ graph_v2 只暴露 `PREPARE_WRITE` 工具给 Python（`ToolRegistry.prepareWrite
 
 **迁移顺序**（已有库）：`v2` → `v3`（记录 AI 授权）→ `v4`（镜像归档/lineage）→ `v5`（异步片段向量化）→ `v6`（assistant actions）→ `v7`（待办直接操作）→ `v8`（记录记忆状态）→ `v9`（成长）→ `v10`（每日记忆）→ `v11`（Agent v2 视图/run/receipt）→ `v12`（塔罗）→ `v13`（plan→todo）→ `v14`（塔罗 v2）→ `v15`（模型连接档案）→ `v16`（成就基础）→ `v17`（成就行为与镀层）→ `v18`（选择性索引与只读 Agent 视图）。
 
-新库直接跑 `schema.sql`；它已包含 V18，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
+V18 之后继续执行 V19 账本、V20 周期/愿望和 V21 AI 用量。新库直接跑 `schema.sql`；它已包含 V21，不要再逐份重放。`chunks.sql` 是早期建表脚本，已被 `schema.sql` 覆盖。
 
 ---
 

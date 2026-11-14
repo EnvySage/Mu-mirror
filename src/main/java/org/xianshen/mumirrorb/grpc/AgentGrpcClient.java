@@ -44,6 +44,7 @@ public class AgentGrpcClient {
     public void init() {
         channel = ManagedChannelBuilder.forTarget(properties.getGrpcAddress())
                 .usePlaintext()
+                .maxInboundMetadataSize(96 * 1024)
                 .keepAliveTime(60, TimeUnit.SECONDS)
                 .build();
         log.info("Agent gRPC channel configured: {}", properties.getGrpcAddress());
@@ -85,8 +86,10 @@ public class AgentGrpcClient {
         if (token != null && !token.isBlank()) {
             headers.put(Metadata.Key.of("x-internal-token", Metadata.ASCII_STRING_MARSHALLER), token);
         }
-        AgentRunnerGrpc.AgentRunnerStub stub = AgentRunnerGrpc.newStub(
+        AgentRunnerGrpc.AgentRunnerStub stub = aiGrpcClient.bindUsage(AgentRunnerGrpc.newStub(
                 ClientInterceptors.intercept(channel, MetadataUtils.newAttachHeadersInterceptor(headers)))
+                ,java.util.UUID.fromString(request.getUserId()),request.getShadow()?"shadow":"chat")
+                .withOption(org.xianshen.mumirrorb.usage.UsageClientInterceptor.TASK,java.util.UUID.fromString(request.getRunId()))
                 .withDeadlineAfter(properties.getTotalBudgetMs() + 10_000, TimeUnit.MILLISECONDS);
 
         AtomicReference<ClientCallStreamObserver<AgentProto.AgentRunRequest>> callRef = new AtomicReference<>();

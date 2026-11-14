@@ -32,6 +32,7 @@ public class GrpcClientConfig {
         log.info("正在连接 Python AI 服务: {}", aiServiceAddress);
         channel = ManagedChannelBuilder.forTarget(aiServiceAddress)
                 .usePlaintext()  // 开发环境不加密，生产环境改 TLS
+                .maxInboundMetadataSize(96 * 1024)
                 .keepAliveTime(60, TimeUnit.SECONDS)
                 .build();
         return channel;
